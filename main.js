@@ -5,9 +5,15 @@ const API_URL = 'https://app-6aa0d22a.base44.app/api/apps/6969e6b3cbb5e6b66aa0d2
 
 const VALUE_STREAM_API_URL = 'https://app-6aa0d22a.base44.app/api/apps/6969e6b3cbb5e6b66aa0d22a/functions/getCompanyValueStreams';
 
+const STORAGE_KEY = 'company_analyses';
+
 const el = {
   companyName: document.getElementById('companyName'),
   btnQuery: document.getElementById('btnQuery'),
+  btnSave: document.getElementById('btnSave'),
+  btnHome: document.getElementById('btnHome'),
+  btnList: document.getElementById('btnList'),
+  navDetailLabel: document.getElementById('navDetailLabel'),
   btnValueStreamList: document.getElementById('btnValueStreamList'),
   loading: document.getElementById('loading'),
   error: document.getElementById('error'),
@@ -18,9 +24,17 @@ const el = {
   valueStreamSection: document.getElementById('valueStreamSection'),
   valueStreamContent: document.getElementById('valueStreamContent'),
   metadataList: document.getElementById('metadataList'),
+  homeView: document.getElementById('homeView'),
+  listView: document.getElementById('listView'),
+  detailView: document.getElementById('detailView'),
+  savedListContent: document.getElementById('savedListContent'),
+  detailResult: document.getElementById('detailResult'),
+  detailTitle: document.getElementById('detailTitle'),
+  searchSuggestions: document.getElementById('searchSuggestions'),
 };
 
 let lastQueriedCompanyName = '';
+let lastQueryResult = null;
 
 /**
  * 调试：检查「查询价值流列表」按钮及其父元素的状态
@@ -151,29 +165,31 @@ function renderBMC(data) {
 
 /**
  * 从价值流 JSON 解析出阶段(stages)和环节(steps)结构，用于图形渲染
+ * 兼容多种字段名与嵌套结构
  */
 function parseValueStreamGraph(data) {
   if (!data || typeof data !== 'object') return { stages: [] };
-  let rawStages = data.stages ?? data.phases ?? data.nodes ?? [];
+  let rawStages = data.stages ?? data.phases ?? data.nodes ?? data.value_stream?.stages ?? data.data?.stages ?? [];
   if (!Array.isArray(rawStages) || rawStages.length === 0) {
-    rawStages = data.value_stream?.stages ?? data.data?.stages ?? [];
+    rawStages = [];
   }
-  const list = Array.isArray(rawStages) ? rawStages : [];
+  const list = rawStages;
   return {
     stages: list.map((s, i) => {
       if (!s) return { name: `阶段${i + 1}`, steps: [] };
       if (typeof s === 'string') return { name: s, steps: [] };
-      const rawSteps = s.steps ?? s.phases ?? s.items ?? s.nodes ?? [];
+      const rawSteps = s.steps ?? s.phases ?? s.items ?? s.nodes ?? s.children ?? [];
       const steps = Array.isArray(rawSteps) ? rawSteps : [];
+      const stageName = formatValue(s.name ?? s.title ?? s.stage_name ?? s.phase_name ?? s.label ?? s.node_name ?? s.node_label ?? `阶段${i + 1}`);
       return {
-        name: formatValue(s.name ?? s.title ?? s.stage_name ?? s.phase_name ?? `阶段${i + 1}`),
+        name: stageName,
         steps: steps.map((st, j) => {
-        if (typeof st === 'string') return { name: st, desc: '' };
-        return {
-          name: formatValue(st.name ?? st.title ?? st.step_name ?? st.phase_name ?? `环节${j + 1}`),
-          desc: formatValue(st.description ?? st.desc ?? st.content),
-        };
-      }),
+          if (typeof st === 'string') return { name: st, desc: '' };
+          return {
+            name: formatValue(st.name ?? st.title ?? st.step_name ?? st.phase_name ?? st.label ?? st.node_name ?? `环节${j + 1}`),
+            desc: formatValue(st.description ?? st.desc ?? st.content),
+          };
+        }),
       };
     }),
   };
@@ -226,11 +242,15 @@ function getValueStreamList(data) {
   return [];
 }
 
+/** 当前价值流列表，用于展开时按索引渲染对应项的 view */
+let currentValueStreamList = [];
+
 /**
- * 渲染价值流列表：可展开卡片，展开后含 json / view 两个子 tab
+ * 渲染价值流列表：可展开卡片，展开时按索引惰性渲染 view，确保每项使用正确数据
  */
 function renderValueStreamList(list) {
   const container = el.valueStreamContent;
+  currentValueStreamList = list || [];
   if (!list || list.length === 0) {
     container.innerHTML = '<p class="vs-empty">暂无价值流数据</p>';
     return;
@@ -246,14 +266,14 @@ function renderValueStreamList(list) {
         </button>
         <div class="vs-card-body" id="vs-body-${i}" hidden>
           <div class="vs-tabs">
-            <button type="button" class="vs-tab vs-tab-active" data-tab="json">json</button>
-            <button type="button" class="vs-tab" data-tab="view">view</button>
+            <button type="button" class="vs-tab vs-tab-active" data-tab="view">view</button>
+            <button type="button" class="vs-tab" data-tab="json">json</button>
           </div>
-          <div class="vs-tab-panel vs-tab-panel-json" data-panel="json">
+          <div class="vs-tab-panel vs-tab-panel-view" data-panel="view" data-rendered="false">
+            <p class="vs-view-placeholder">展开后加载…</p>
+          </div>
+          <div class="vs-tab-panel vs-tab-panel-json" data-panel="json" hidden>
             <pre class="vs-json">${escapeHtml(jsonStr)}</pre>
-          </div>
-          <div class="vs-tab-panel vs-tab-panel-view" data-panel="view" hidden>
-            ${renderValueStreamViewHTML(item)}
           </div>
         </div>
       </div>
@@ -268,6 +288,18 @@ function renderValueStreamList(list) {
       body.hidden = !expanded;
       btn.setAttribute('aria-expanded', String(!expanded));
       card.classList.toggle('vs-card-expanded', !expanded);
+
+      if (expanded) {
+        const viewPanel = card.querySelector('.vs-tab-panel-view');
+        if (viewPanel && viewPanel.dataset.rendered !== 'true') {
+          const idx = parseInt(card.dataset.index, 10);
+          const item = currentValueStreamList[idx];
+          if (item) {
+            viewPanel.innerHTML = renderValueStreamViewHTML(item);
+            viewPanel.dataset.rendered = 'true';
+          }
+        }
+      }
     });
   });
 
@@ -279,6 +311,18 @@ function renderValueStreamList(list) {
       card.querySelectorAll('.vs-tab').forEach((t) => t.classList.remove('vs-tab-active'));
       card.querySelectorAll('.vs-tab-panel').forEach((p) => { p.hidden = p.dataset.panel !== targetTab; });
       tab.classList.add('vs-tab-active');
+
+      if (targetTab === 'view') {
+        const viewPanel = card.querySelector('.vs-tab-panel-view');
+        if (viewPanel && viewPanel.dataset.rendered !== 'true') {
+          const idx = parseInt(card.dataset.index, 10);
+          const item = currentValueStreamList[idx];
+          if (item) {
+            viewPanel.innerHTML = renderValueStreamViewHTML(item);
+            viewPanel.dataset.rendered = 'true';
+          }
+        }
+      }
     });
   });
 }
@@ -362,6 +406,7 @@ async function query() {
 
     const { basic_info, business_model_canvas, metadata } = json.data;
     lastQueriedCompanyName = (basic_info && basic_info.company_name) || companyName;
+    lastQueryResult = { basic_info, business_model_canvas, metadata };
     renderBasicInfo(basic_info);
     renderBMC(business_model_canvas);
     renderMetadata(metadata);
@@ -393,7 +438,272 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+function updateSearchSuggestions() {
+  const input = (el.companyName?.value || '').trim();
+  const container = el.searchSuggestions;
+  if (!container) return;
+  if (!input) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+  const list = getSavedAnalyses();
+  const lower = input.toLowerCase();
+  const matches = list.filter((r) => {
+    const name = (r.companyName || '').trim();
+    return name && name.toLowerCase().includes(lower);
+  });
+  if (matches.length === 0) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = matches
+    .map(
+      (r) =>
+        `<div class="search-suggestion-item" role="button" tabindex="0">${escapeHtml(r.companyName || '未命名')}</div>`
+    )
+    .join('');
+  container.hidden = false;
+  container.querySelectorAll('.search-suggestion-item').forEach((node, i) => {
+    node.addEventListener('click', () => selectSuggestion(matches[i]));
+    node.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectSuggestion(matches[i]);
+      }
+    });
+  });
+}
+
+function selectSuggestion(record) {
+  if (!record) return;
+  el.searchSuggestions.hidden = true;
+  el.searchSuggestions.innerHTML = '';
+  el.companyName.value = record.companyName || '';
+  openDetail(record);
+}
+
+function getSavedAnalyses() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAnalysis(record) {
+  const list = getSavedAnalyses();
+  const idx = list.findIndex((r) => (r.companyName || '').trim() === (record.companyName || '').trim());
+  if (idx >= 0) list[idx] = record;
+  else list.push(record);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
+function saveCurrent() {
+  if (!lastQueryResult) {
+    showError('请先查询企业信息');
+    return;
+  }
+  const companyName = (lastQueryResult.basic_info?.company_name || lastQueriedCompanyName || '').trim();
+  if (!companyName) {
+    showError('无法获取企业名称');
+    return;
+  }
+  const record = {
+    companyName,
+    basicInfo: lastQueryResult.basic_info,
+    bmc: lastQueryResult.business_model_canvas,
+    metadata: lastQueryResult.metadata,
+    valueStreams: [...(currentValueStreamList || [])],
+    storedAt: new Date().toISOString(),
+  };
+  saveAnalysis(record);
+  showError('');
+  alert('已存储成功');
+}
+
+function switchView(view) {
+  el.homeView.hidden = view !== 'home';
+  el.listView.hidden = view !== 'list';
+  el.detailView.hidden = view !== 'detail';
+  if (el.navDetailLabel) el.navDetailLabel.hidden = view !== 'detail';
+}
+
+function renderSavedList() {
+  const list = getSavedAnalyses();
+  if (!list.length) {
+    el.savedListContent.innerHTML = '<p class="vs-empty">暂无已存储数据</p>';
+    return;
+  }
+  el.savedListContent.innerHTML = list
+    .map(
+      (r, i) =>
+        `<div class="saved-item" data-index="${i}" role="button" tabindex="0">${escapeHtml(r.companyName || '未命名')}</div>`
+    )
+    .join('');
+  el.savedListContent.querySelectorAll('.saved-item').forEach((node, i) => {
+    node.addEventListener('click', () => openDetail(list[i]));
+    node.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openDetail(list[i]);
+      }
+    });
+  });
+}
+
+function openDetail(record) {
+  if (!record) return;
+  el.detailTitle.textContent = record.companyName || '客户详情';
+  el.detailResult.innerHTML = buildDetailHTML(record);
+  switchView('detail');
+  currentValueStreamList = record.valueStreams || [];
+  el.detailResult.querySelectorAll('.vs-card-header').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.vs-card');
+      const body = card.querySelector('.vs-card-body');
+      const expanded = body.hidden;
+      body.hidden = !expanded;
+      btn.setAttribute('aria-expanded', String(!expanded));
+      card.classList.toggle('vs-card-expanded', !expanded);
+      if (expanded) {
+        const viewPanel = card.querySelector('.vs-tab-panel-view');
+        if (viewPanel && viewPanel.dataset.rendered !== 'true') {
+          const idx = parseInt(card.dataset.index, 10);
+          const item = currentValueStreamList[idx];
+          if (item) {
+            viewPanel.innerHTML = renderValueStreamViewHTML(item);
+            viewPanel.dataset.rendered = 'true';
+          }
+        }
+      }
+    });
+  });
+  el.detailResult.querySelectorAll('.vs-tab').forEach((tab) => {
+    tab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = tab.closest('.vs-card');
+      const targetTab = tab.dataset.tab;
+      card.querySelectorAll('.vs-tab').forEach((t) => t.classList.remove('vs-tab-active'));
+      card.querySelectorAll('.vs-tab-panel').forEach((p) => { p.hidden = p.dataset.panel !== targetTab; });
+      tab.classList.add('vs-tab-active');
+      if (targetTab === 'view') {
+        const viewPanel = card.querySelector('.vs-tab-panel-view');
+        if (viewPanel && viewPanel.dataset.rendered !== 'true') {
+          const idx = parseInt(card.dataset.index, 10);
+          const item = currentValueStreamList[idx];
+          if (item) {
+            viewPanel.innerHTML = renderValueStreamViewHTML(item);
+            viewPanel.dataset.rendered = 'true';
+          }
+        }
+      }
+    });
+  });
+}
+
+function buildDetailHTML(record) {
+  const basicInfo = record.basicInfo || {};
+  const bmc = record.bmc || {};
+  const metadata = record.metadata || {};
+  const valueStreams = record.valueStreams || [];
+
+  const basicHtml = BASIC_INFO_FIELDS.map(({ key, label }) => {
+    const raw = basicInfo[key];
+    const value = formatValue(raw);
+    if (key === 'official_website' && raw) {
+      return `<dt>${label}</dt><dd><a href="${encodeURI(raw)}" target="_blank" rel="noopener">${escapeHtml(value)}</a></dd>`;
+    }
+    return `<dt>${label}</dt><dd>${escapeHtml(value) || '—'}</dd>`;
+  }).join('');
+
+  const bmcHtml = BMC_FIELDS.map(({ key, label }) => {
+    const content = formatValue(bmc[key]);
+    return `<div class="bmc-block"><h4>${escapeHtml(label)}</h4><div class="content">${escapeHtml(content)}</div></div>`;
+  }).join('');
+  const review = formatValue(bmc.comprehensive_review);
+
+  const metaHtml = [
+    { key: 'analysis_id', label: '档案 ID' },
+    { key: 'created_date', label: '创建时间' },
+    { key: 'updated_date', label: '更新时间' },
+  ]
+    .map(({ key, label }) => {
+      const value = formatValue(metadata[key]);
+      return `<dt>${label}</dt><dd>${escapeHtml(value) || '—'}</dd>`;
+    })
+    .join('');
+
+  let valueStreamHtml = '<p class="vs-empty">暂无价值流数据</p>';
+  if (valueStreams.length > 0) {
+    valueStreamHtml = valueStreams
+      .map((item, i) => {
+        const name = formatValue(item.name ?? item.title ?? item.value_stream_name ?? `价值流 ${i + 1}`);
+        const jsonStr = JSON.stringify(item, null, 2);
+        return `
+          <div class="vs-card" data-index="${i}">
+            <button type="button" class="vs-card-header" aria-expanded="false">
+              <span class="vs-card-name">${escapeHtml(name)}</span>
+              <span class="vs-card-chevron" aria-hidden="true">▼</span>
+            </button>
+            <div class="vs-card-body" hidden>
+              <div class="vs-tabs">
+                <button type="button" class="vs-tab vs-tab-active" data-tab="view">view</button>
+                <button type="button" class="vs-tab" data-tab="json">json</button>
+              </div>
+              <div class="vs-tab-panel vs-tab-panel-view" data-panel="view" data-rendered="false">
+                <p class="vs-view-placeholder">展开后加载…</p>
+              </div>
+              <div class="vs-tab-panel vs-tab-panel-json" data-panel="json" hidden>
+                <pre class="vs-json">${escapeHtml(jsonStr)}</pre>
+              </div>
+            </div>
+          </div>`;
+      })
+      .join('');
+  }
+
+  return `
+    <section class="basic-info section-card">
+      <h2>基本信息</h2>
+      <dl class="info-grid">${basicHtml}</dl>
+    </section>
+    <section class="bmc-section section-card">
+      <h2>商业画布 (BMC)</h2>
+      <div class="bmc-grid">${bmcHtml}</div>
+      <div class="bmc-review"><h4>综合评述</h4><div class="content">${escapeHtml(review)}</div></div>
+    </section>
+    <section class="value-stream-section section-card">
+      <h2>价值流列表</h2>
+      <div class="value-stream-content">${valueStreamHtml}</div>
+    </section>
+    <section class="metadata section-card muted">
+      <h3>档案元数据</h3>
+      <dl class="info-grid compact">${metaHtml}</dl>
+    </section>
+  `;
+}
+
 el.btnQuery.addEventListener('click', query);
 el.companyName.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') query();
+});
+el.companyName.addEventListener('input', updateSearchSuggestions);
+el.companyName.addEventListener('focus', updateSearchSuggestions);
+el.companyName.addEventListener('blur', () => {
+  setTimeout(() => {
+    if (el.searchSuggestions) el.searchSuggestions.hidden = true;
+  }, 150);
+});
+if (el.btnSave) el.btnSave.addEventListener('click', saveCurrent);
+if (el.btnHome) el.btnHome.addEventListener('click', () => {
+  switchView('home');
+  if (el.companyName) el.companyName.value = '';
+  if (el.searchSuggestions) { el.searchSuggestions.hidden = true; el.searchSuggestions.innerHTML = ''; }
+});
+if (el.btnList) el.btnList.addEventListener('click', () => {
+  renderSavedList();
+  switchView('list');
 });

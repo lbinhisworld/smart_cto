@@ -11,33 +11,44 @@
 </head>
 <body>
   <div class="app">
-    <header class="header">
-      <h1>企业信息与商业画布查询</h1>
-      <p class="subtitle">输入公司名称，查询企业基本信息及 BMC 商业画布</p>
-    </header>
+    <nav class="top-nav">
+      <button type="button" id="btnHome" class="btn-nav">首页</button>
+      <button type="button" id="btnList" class="btn-nav">列表</button>
+      <span id="navDetailLabel" class="btn-nav btn-nav-active" hidden>企业详情</span>
+    </nav>
 
-    <section class="search-section">
-      <div class="search-box">
-        <input
-          type="text"
-          id="companyName"
-          class="search-input"
-          placeholder="请输入企业全称或简称"
-          autocomplete="off"
-        />
-        <button type="button" id="btnQuery" class="btn-query">查询</button>
-      </div>
-      <p class="api-hint">已对接 Base44 企业分析 API，可直接查询</p>
-    </section>
+    <div id="homeView" class="view">
+      <header class="header">
+        <h1>企业信息与商业画布查询</h1>
+        <p class="subtitle">输入公司名称，查询企业基本信息及 BMC 商业画布</p>
+      </header>
 
-    <div id="loading" class="loading" hidden>
+      <section class="search-section">
+        <div class="search-box-wrap">
+          <div class="search-box">
+            <input
+              type="text"
+              id="companyName"
+              class="search-input"
+              placeholder="请输入企业全称或简称"
+              autocomplete="off"
+            />
+            <button type="button" id="btnQuery" class="btn-query">查询</button>
+            <button type="button" id="btnSave" class="btn-save">存储</button>
+          </div>
+          <div id="searchSuggestions" class="search-suggestions" hidden></div>
+        </div>
+        <p class="api-hint">已对接 Base44 企业分析 API，可直接查询；输入时匹配已存储客户，选择后直达详情</p>
+      </section>
+
+      <div id="loading" class="loading" hidden>
       <div class="spinner"></div>
       <span>正在查询…</span>
-    </div>
+      </div>
 
-    <div id="error" class="error" hidden></div>
+      <div id="error" class="error" hidden></div>
 
-    <main id="result" class="result" hidden>
+      <main id="result" class="result" hidden>
       <section class="basic-info section-card">
         <h2>基本信息</h2>
         <dl class="info-grid" id="basicInfoList"></dl>
@@ -62,7 +73,23 @@
         <h3>档案元数据</h3>
         <dl class="info-grid compact" id="metadataList"></dl>
       </section>
-    </main>
+      </main>
+    </div>
+
+    <div id="listView" class="view" hidden>
+      <header class="header">
+        <h1>已存储客户列表</h1>
+        <p class="subtitle">点击客户名称进入详情</p>
+      </header>
+      <div id="savedListContent" class="saved-list"></div>
+    </div>
+
+    <div id="detailView" class="view detail-view" hidden>
+      <header class="header">
+        <h1 id="detailTitle">客户详情</h1>
+      </header>
+      <main id="detailResult" class="result"></main>
+    </div>
   </div>
 
   <script src="main.js"></script>
