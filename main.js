@@ -61,6 +61,9 @@ let lastQueryResult = null;
 /** 聊天历史，用于 DeepSeek API 的 messages 上下文 */
 let chatHistory = [];
 
+/** 当前未闭环的修改任务：{ parsed, block }，确认或放弃后清空 */
+let currentModificationTask = null;
+
 /**
  * 调试：检查「查询价值流列表」按钮及其父元素的状态
  */
@@ -241,6 +244,15 @@ function parseModificationResponse(text) {
     };
   }
   return null;
+}
+
+/** 判断两个修改位置是否相同（同一修改目标） */
+function isSameModificationPosition(pos1, pos2) {
+  if (!pos1 || !pos2) return false;
+  const p1 = getPathForPosition(pos1);
+  const p2 = getPathForPosition(pos2);
+  if (!p1 || !p2) return String(pos1).trim() === String(pos2).trim();
+  return p1.section === p2.section && p1.key === p2.key;
 }
 
 /** 根据 position 获取 record 中对应的路径 { section, key } */
@@ -836,8 +848,10 @@ function setupDetailValueStreamEvents() {
 
 function openDetail(record) {
   if (!record) return;
+  saveChatToRecord();
   toggleChatPanel(false);
   toggleHistoryPanel(false);
+  currentModificationTask = null;
   currentDetailCompanyName = record.companyName || '';
   currentDetailRecord = record;
   chatHistory = record.chatHistory ? [...record.chatHistory] : [];
@@ -972,11 +986,13 @@ el.companyName.addEventListener('blur', () => {
 });
 if (el.btnSave) el.btnSave.addEventListener('click', saveCurrent);
 if (el.btnHome) el.btnHome.addEventListener('click', () => {
+  saveChatToRecord();
   switchView('home');
   if (el.companyName) el.companyName.value = '';
   if (el.searchSuggestions) { el.searchSuggestions.hidden = true; el.searchSuggestions.innerHTML = ''; }
 });
 if (el.btnList) el.btnList.addEventListener('click', () => {
+  saveChatToRecord();
   renderSavedList();
   switchView('list');
 });
@@ -1035,6 +1051,7 @@ function appendModificationBlock(container, parsed, timeStr, onConfirm, onCancel
   container.scrollTop = container.scrollHeight;
   block.querySelector('.btn-confirm-mod')?.addEventListener('click', () => {
     block.querySelector('.chat-modification-actions').innerHTML = '<span class="mod-status">已确认</span>';
+    currentModificationTask = null;
     onConfirm?.();
   });
   block.querySelector('.btn-retry-mod')?.addEventListener('click', () => {
@@ -1042,9 +1059,24 @@ function appendModificationBlock(container, parsed, timeStr, onConfirm, onCancel
     onRetry?.(block);
   });
   block.querySelector('.btn-cancel-mod')?.addEventListener('click', () => {
+    currentModificationTask = null;
     onCancel?.(block);
   });
+  currentModificationTask = { parsed, block };
   return block;
+}
+
+/** 就地更新修改块内容（用于同一任务内的修订） */
+function updateModificationBlockContent(block, parsed) {
+  if (!block || !parsed) return;
+  const body = block.querySelector('.chat-modification-body');
+  if (!body) return;
+  const rows = body.querySelectorAll('.chat-modification-row');
+  if (rows.length >= 3) {
+    rows[0].querySelector('.chat-modification-value').textContent = parsed.position || '—';
+    rows[1].querySelector('.chat-modification-value').textContent = parsed.modification || '—';
+    rows[2].querySelector('.chat-modification-value').textContent = parsed.reason || '—';
+  }
 }
 
 function appendModificationBlockReadOnly(container, parsed, timeStr) {
@@ -1123,19 +1155,20 @@ function renderModificationOrPlain(container, assistantContent) {
     const lastTs = chatHistory[chatHistory.length - 1]?.timestamp;
     return appendModificationBlock(container, parsed, formatChatTime(lastTs), () => {
       clearModificationHighlight();
-      const beforeValue = getCurrentValueForPosition(currentDetailRecord, parsed);
-      if (applyModification(currentDetailRecord, parsed)) {
-        const afterValue = parsed.newValue != null ? String(parsed.newValue) : parsed.modification;
-        const modificationSummary = parsed.modification && parsed.modification !== afterValue
-          ? parsed.modification
+      const appliedParsed = currentModificationTask?.parsed || parsed;
+      const beforeValue = getCurrentValueForPosition(currentDetailRecord, appliedParsed);
+      if (applyModification(currentDetailRecord, appliedParsed)) {
+        const afterValue = appliedParsed.newValue != null ? String(appliedParsed.newValue) : appliedParsed.modification;
+        const modificationSummary = appliedParsed.modification && appliedParsed.modification !== afterValue
+          ? appliedParsed.modification
           : (beforeValue || afterValue ? `将「${beforeValue || '空'}」修改为「${afterValue}」` : '内容已更新');
         const history = currentDetailRecord.modificationHistory || [];
         history.unshift({
-          position: parsed.position,
+          position: appliedParsed.position,
           beforeValue,
           modification: modificationSummary,
           afterValue,
-          reason: parsed.reason,
+          reason: appliedParsed.reason,
           timestamp: new Date().toISOString(),
         });
         currentDetailRecord.modificationHistory = history;
@@ -1152,6 +1185,7 @@ function renderModificationOrPlain(container, assistantContent) {
 }
 
 function cancelModification(container, modBlock) {
+  currentModificationTask = null;
   const userBlock = modBlock.previousElementSibling;
   if (userBlock && userBlock.classList.contains('chat-message-user')) {
     userBlock.remove();
@@ -1221,7 +1255,24 @@ async function sendChatMessage() {
   chatHistory.push(assistantMsg);
   loadingBlock.remove();
 
-  renderModificationOrPlain(messages, assistantContent);
-  saveChatToRecord();
+  if (currentModificationTask) {
+    const newParsed = parseModificationResponse(assistantContent);
+    const currentPosition = currentModificationTask.parsed.position;
+    if (newParsed && isSameModificationPosition(newParsed.position, currentPosition)) {
+      currentModificationTask.parsed = newParsed;
+      updateModificationBlockContent(currentModificationTask.block, newParsed);
+      scrollToTargetAndHighlight(newParsed.position);
+      saveChatToRecord();
+    } else {
+      chatHistory.pop();
+      const prompt = `请先确认或放弃当前修改（${currentPosition}）后再开启新的修改任务。`;
+      chatHistory.push({ role: 'assistant', content: prompt, timestamp: assistantMsg.timestamp });
+      appendChatBlock(messages, 'assistant', prompt, formatChatTime(assistantMsg.timestamp));
+      saveChatToRecord();
+    }
+  } else {
+    renderModificationOrPlain(messages, assistantContent);
+    saveChatToRecord();
+  }
   messages.scrollTop = messages.scrollHeight;
 }

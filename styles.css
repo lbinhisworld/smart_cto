@@ -426,7 +426,7 @@ body {
   flex-shrink: 0;
   position: relative;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
 }
 
 .chat-input {
@@ -490,6 +490,13 @@ body {
 
 .chat-message:last-child {
   margin-bottom: 0;
+}
+
+/* 每次修改的两块（用户+助手）与上一次修改之间用分割线隔开 */
+.chat-message-assistant + .chat-message-user {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(45, 58, 77, 0.6);
 }
 
 .chat-message-user {
