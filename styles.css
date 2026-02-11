@@ -331,9 +331,16 @@ body {
   margin: 0 0 0.5rem;
 }
 
-/* 企业详情：互动修改按钮 */
-.btn-chat {
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+/* 企业详情：互动修改、修改历史按钮 */
+.btn-chat,
+.btn-history {
+  margin-top: 0;
   padding: 0.5rem 1rem;
   font-size: 0.9rem;
   font-family: inherit;
@@ -343,10 +350,14 @@ body {
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s, color 0.2s;
+}
+
+.btn-chat {
   animation: btn-chat-blink 2s ease-in-out infinite;
 }
 
-.btn-chat:hover {
+.btn-chat:hover,
+.btn-history:hover {
   background: var(--accent-dim);
   color: var(--text);
 }
@@ -367,7 +378,8 @@ body {
   overflow: hidden;
 }
 
-.detail-body.chat-panel-open {
+.detail-body.chat-panel-open,
+.detail-body.history-panel-open {
   gap: 1rem;
 }
 
@@ -637,6 +649,147 @@ body {
   font-style: italic;
 }
 
+/* 修改历史面板（从右侧滑出） */
+.history-panel {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: none;
+  margin: 0;
+  padding: 0;
+  transition: width 0.3s ease, min-width 0.3s ease;
+}
+
+.history-panel:not(.history-panel-open) .history-panel-header,
+.history-panel:not(.history-panel-open) .history-panel-body {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.history-panel.history-panel-open {
+  width: 360px;
+  min-width: 360px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.history-panel.history-panel-open .history-panel-header,
+.history-panel.history-panel-open .history-panel-body {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.history-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.history-close {
+  padding: 0.25rem 0.5rem;
+  font-size: 1.25rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.history-close:hover {
+  color: var(--text);
+}
+
+.history-panel-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0.75rem 1rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.history-empty {
+  margin: 0 0 0.5rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.history-subtitle {
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.history-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.history-item {
+  display: flex;
+  gap: 0.75rem;
+  position: relative;
+}
+
+.history-item-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin-top: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.history-item-content {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.history-item-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.history-item-row {
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.history-item-row:last-child {
+  margin-bottom: 0;
+}
+
+.history-label {
+  display: inline-block;
+  min-width: 4.5em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .detail-content {
   flex: 1;
   min-width: 0;
@@ -695,6 +848,13 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 0.75rem 1.5rem;
   margin: 0;
+}
+
+.info-grid-cell {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 0.5rem;
+  align-items: baseline;
 }
 
 .info-grid.compact {
@@ -792,6 +952,26 @@ body {
   content: '暂无综合评述';
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* 待修改内容块高亮（红色闪动圆角矩形） */
+.modify-target-highlight {
+  position: relative;
+  border-radius: 8px;
+  animation: modify-highlight-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes modify-highlight-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--error);
+    outline: 2px solid var(--error);
+    outline-offset: 2px;
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(248, 81, 73, 0.5);
+    outline: 4px solid rgba(248, 81, 73, 0.8);
+    outline-offset: 2px;
+  }
 }
 
 /* 查询价值流列表按钮（独立区块，位于商业画布与价值流列表之间） */

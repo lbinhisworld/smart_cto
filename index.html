@@ -100,10 +100,20 @@
         <div class="detail-content">
           <header class="header">
             <h1 id="detailTitle">客户详情</h1>
-            <button type="button" id="btnChat" class="btn-chat">互动修改</button>
+            <div class="header-actions">
+              <button type="button" id="btnChat" class="btn-chat">互动修改</button>
+              <button type="button" id="btnHistory" class="btn-history">修改历史</button>
+            </div>
           </header>
           <main id="detailResult" class="result"></main>
         </div>
+        <aside id="historyPanel" class="history-panel">
+          <div class="history-panel-header">
+            <span class="history-panel-title">修改历史</span>
+            <button type="button" id="btnCloseHistory" class="history-close" aria-label="关闭">×</button>
+          </div>
+          <div id="historyContent" class="history-panel-body"></div>
+        </aside>
       </div>
     </div>
   </div>

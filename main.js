@@ -28,6 +28,10 @@ const el = {
   chatPanel: document.getElementById('chatPanel'),
   btnChat: document.getElementById('btnChat'),
   btnCloseChat: document.getElementById('btnCloseChat'),
+  historyPanel: document.getElementById('historyPanel'),
+  btnHistory: document.getElementById('btnHistory'),
+  btnCloseHistory: document.getElementById('btnCloseHistory'),
+  historyContent: document.getElementById('historyContent'),
   chatInput: document.getElementById('chatInput'),
   chatSend: document.getElementById('chatSend'),
   chatMessages: document.getElementById('chatMessages'),
@@ -46,6 +50,7 @@ const el = {
   detailView: document.getElementById('detailView'),
   savedListContent: document.getElementById('savedListContent'),
   detailResult: document.getElementById('detailResult'),
+  detailContent: document.querySelector('.detail-content'),
   detailTitle: document.getElementById('detailTitle'),
   searchSuggestions: document.getElementById('searchSuggestions'),
 };
@@ -238,11 +243,32 @@ function parseModificationResponse(text) {
   return null;
 }
 
+/** 根据 position 获取 record 中对应的路径 { section, key } */
+function getPathForPosition(pos) {
+  const p = String(pos).trim();
+  const path = LABEL_TO_PATH.get(p);
+  if (path) return path;
+  for (const [label, path] of LABEL_TO_PATH) {
+    if (p.includes(label) || label.includes(p)) return path;
+  }
+  return null;
+}
+
+/** 获取修改前的当前值 */
+function getCurrentValueForPosition(record, parsed) {
+  if (!record || !parsed) return '';
+  const path = getPathForPosition(parsed.positionKey || parsed.position);
+  if (!path) return '';
+  const section = record[path.section];
+  if (!section || !(path.key in section)) return '';
+  return formatValue(section[path.key]) || '';
+}
+
 /** 根据 position 匹配并应用修改到 record */
 function applyModification(record, parsed) {
   if (!record || !parsed) return false;
   const pos = String(parsed.positionKey || parsed.position).trim();
-  const path = LABEL_TO_PATH.get(pos);
+  const path = getPathForPosition(pos);
   const newVal = parsed.newValue != null ? String(parsed.newValue) : parsed.modification;
   if (path) {
     const section = record[path.section];
@@ -251,16 +277,36 @@ function applyModification(record, parsed) {
       return true;
     }
   }
-  for (const [label, p] of LABEL_TO_PATH) {
-    if (pos.includes(label) || label.includes(pos)) {
-      const section = record[p.section];
-      if (section && p.key in section) {
-        section[p.key] = newVal;
-        return true;
-      }
+  return false;
+}
+
+/** 根据修改位置找到详情页中对应的 DOM 元素 */
+function findModificationTarget(position) {
+  if (!el.detailResult || !position) return null;
+  const pos = String(position).trim();
+  const direct = el.detailResult.querySelector(`[data-modify-target="${pos}"]`);
+  if (direct) return direct;
+  for (const [label] of LABEL_TO_PATH) {
+    if (pos.includes(label) || pos === label) {
+      const elx = el.detailResult.querySelector(`[data-modify-target="${label}"]`);
+      if (elx) return elx;
     }
   }
-  return false;
+  return null;
+}
+
+/** 清除当前高亮 */
+function clearModificationHighlight() {
+  el.detailResult?.querySelectorAll('.modify-target-highlight').forEach((el) => el.classList.remove('modify-target-highlight'));
+}
+
+/** 滚动到目标元素并居中，添加红色闪动高亮 */
+function scrollToTargetAndHighlight(position) {
+  clearModificationHighlight();
+  const target = findModificationTarget(position);
+  if (!target || !el.detailContent) return;
+  target.classList.add('modify-target-highlight');
+  target.scrollIntoView({ block: 'center', behavior: 'smooth', inline: 'nearest' });
 }
 
 function renderBMC(data) {
@@ -681,6 +727,66 @@ function toggleChatPanel(open) {
   if (body) body.classList.toggle('chat-panel-open', isOpen);
 }
 
+function toggleHistoryPanel(open) {
+  const panel = el.historyPanel;
+  const body = document.querySelector('.detail-body');
+  if (!panel) return;
+  const isOpen = open ?? !panel.classList.contains('history-panel-open');
+  panel.classList.toggle('history-panel-open', isOpen);
+  if (body) body.classList.toggle('history-panel-open', isOpen);
+  if (isOpen) renderModificationHistory();
+}
+
+function renderModificationHistory() {
+  if (!el.historyContent) return;
+  const record = currentDetailRecord;
+  const history = record?.modificationHistory || [];
+  const companyName = record?.companyName || '当前企业';
+  const titleEl = el.historyPanel?.querySelector('.history-panel-title');
+  if (titleEl) titleEl.textContent = `${companyName} - 修改历史`;
+  el.historyContent.innerHTML = history.length === 0
+    ? `<p class="history-empty">暂无修改历史</p><p class="history-subtitle">${escapeHtml(companyName)}</p>`
+    : `<p class="history-subtitle">${escapeHtml(companyName)}</p>
+       <div class="history-timeline">
+         ${history
+           .map(
+             (item) => `
+           <div class="history-item">
+             <div class="history-item-dot"></div>
+             <div class="history-item-content">
+               <div class="history-item-meta">${escapeHtml(formatHistoryTime(item.timestamp))}</div>
+               <div class="history-item-row"><span class="history-label">修改位置</span>${escapeHtml(item.position || '—')}</div>
+               <div class="history-item-row"><span class="history-label">修改前</span>${escapeHtml(item.beforeValue ?? '—')}</div>
+               <div class="history-item-row"><span class="history-label">修改意见</span>${escapeHtml(item.modification || '—')}</div>
+               <div class="history-item-row"><span class="history-label">修改后</span>${escapeHtml(item.afterValue ?? item.modification ?? '—')}</div>
+               <div class="history-item-row"><span class="history-label">修改原因</span>${escapeHtml(item.reason || '—')}</div>
+             </div>
+           </div>`
+           )
+           .join('')}
+       </div>`;
+}
+
+function formatHistoryTime(ts) {
+  if (!ts) return '—';
+  try {
+    const d = new Date(ts);
+    return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return String(ts);
+  }
+}
+
+function formatChatTime(ts) {
+  if (!ts) return getTimeStr();
+  try {
+    const d = new Date(ts);
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch {
+    return getTimeStr();
+  }
+}
+
 function setupDetailValueStreamEvents() {
   if (!el.detailResult) return;
   currentValueStreamList = currentDetailRecord?.valueStreams || [];
@@ -731,13 +837,42 @@ function setupDetailValueStreamEvents() {
 function openDetail(record) {
   if (!record) return;
   toggleChatPanel(false);
+  toggleHistoryPanel(false);
   currentDetailCompanyName = record.companyName || '';
   currentDetailRecord = record;
-  chatHistory = [];
+  chatHistory = record.chatHistory ? [...record.chatHistory] : [];
+  record.chatHistory = chatHistory;
   el.detailTitle.textContent = record.companyName || '客户详情';
   el.detailResult.innerHTML = buildDetailHTML(record);
   switchView('detail');
   setupDetailValueStreamEvents();
+  renderChatMessagesFromHistory();
+}
+
+function renderChatMessagesFromHistory() {
+  if (!el.chatMessages) return;
+  el.chatMessages.innerHTML = '';
+  chatHistory.forEach((msg) => {
+    const timeStr = formatChatTime(msg.timestamp);
+    if (msg.role === 'user') {
+      appendChatBlock(el.chatMessages, 'user', msg.content, timeStr);
+    } else {
+      const parsed = parseModificationResponse(msg.content);
+      if (parsed) {
+        appendModificationBlockReadOnly(el.chatMessages, parsed, timeStr);
+      } else {
+        appendChatBlock(el.chatMessages, 'assistant', msg.content, timeStr);
+      }
+    }
+  });
+  el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+}
+
+function saveChatToRecord() {
+  if (currentDetailRecord) {
+    currentDetailRecord.chatHistory = [...chatHistory];
+    saveAnalysis(currentDetailRecord);
+  }
 }
 
 function buildDetailHTML(record) {
@@ -749,17 +884,19 @@ function buildDetailHTML(record) {
   const basicHtml = BASIC_INFO_FIELDS.map(({ key, label }) => {
     const raw = basicInfo[key];
     const value = formatValue(raw);
-    if (key === 'official_website' && raw) {
-      return `<dt>${label}</dt><dd><a href="${encodeURI(raw)}" target="_blank" rel="noopener">${escapeHtml(value)}</a></dd>`;
-    }
-    return `<dt>${label}</dt><dd>${escapeHtml(value) || '—'}</dd>`;
+    const ddContent = key === 'official_website' && raw
+      ? `<a href="${encodeURI(raw)}" target="_blank" rel="noopener">${escapeHtml(value)}</a>`
+      : escapeHtml(value) || '—';
+    return `<div class="info-grid-cell" data-modify-target="${escapeHtml(label)}"><dt>${label}</dt><dd>${ddContent}</dd></div>`;
   }).join('');
 
   const bmcHtml = BMC_FIELDS.map(({ key, label }) => {
     const content = formatValue(bmc[key]);
-    return `<div class="bmc-block"><h4>${escapeHtml(label)}</h4><div class="content">${escapeHtml(content)}</div></div>`;
+    return `<div class="bmc-block" data-modify-target="${escapeHtml(label)}"><h4>${escapeHtml(label)}</h4><div class="content">${escapeHtml(content)}</div></div>`;
   }).join('');
   const review = formatValue(bmc.comprehensive_review);
+
+  const bmcReviewHtml = `<div class="bmc-review" data-modify-target="综合评述"><h4>综合评述</h4><div class="content">${escapeHtml(review)}</div></div>`;
 
   const metaHtml = [
     { key: 'analysis_id', label: '档案 ID' },
@@ -804,12 +941,12 @@ function buildDetailHTML(record) {
   return `
     <section class="basic-info section-card">
       <h2>基本信息</h2>
-      <dl class="info-grid">${basicHtml}</dl>
+      <div class="info-grid">${basicHtml}</div>
     </section>
     <section class="bmc-section section-card">
       <h2>商业画布 (BMC)</h2>
       <div class="bmc-grid">${bmcHtml}</div>
-      <div class="bmc-review"><h4>综合评述</h4><div class="content">${escapeHtml(review)}</div></div>
+      ${bmcReviewHtml}
     </section>
     <section class="value-stream-section section-card">
       <h2>价值流列表</h2>
@@ -845,6 +982,8 @@ if (el.btnList) el.btnList.addEventListener('click', () => {
 });
 if (el.btnChat) el.btnChat.addEventListener('click', () => toggleChatPanel(true));
 if (el.btnCloseChat) el.btnCloseChat.addEventListener('click', () => toggleChatPanel(false));
+if (el.btnHistory) el.btnHistory.addEventListener('click', () => toggleHistoryPanel(true));
+if (el.btnCloseHistory) el.btnCloseHistory.addEventListener('click', () => toggleHistoryPanel(false));
 if (el.chatSend) el.chatSend.addEventListener('click', sendChatMessage);
 if (el.chatInput) el.chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -908,21 +1047,47 @@ function appendModificationBlock(container, parsed, timeStr, onConfirm, onCancel
   return block;
 }
 
+function appendModificationBlockReadOnly(container, parsed, timeStr) {
+  const block = document.createElement('div');
+  block.className = 'chat-message chat-message-assistant chat-message-modification chat-message-readonly';
+  block.innerHTML = `
+    <div class="chat-modification-body">
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">修改位置</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.position)}</span>
+      </div>
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">修改意见</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.modification)}</span>
+      </div>
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">修改原因</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.reason)}</span>
+      </div>
+      <div class="chat-modification-actions readonly"><span class="mod-status">历史记录</span></div>
+    </div>
+    <div class="chat-message-time">${timeStr}</div>
+  `;
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+  return block;
+}
+
 async function fetchModificationFromLLM() {
   const pageStructure = buildPageStructureForLLM(currentDetailRecord);
   const systemContent = `你是企业信息与商业画布修改助手。当前用户正在查看「${currentDetailCompanyName || '某企业'}」的详情页。
 
 【任务】当用户提出修改需求时，你需要：
 1. 分析下方「当前页面详情结构」，判断用户要修改的是哪个位置的内容；
-2. 提炼出：修改位置、修改意见、修改原因；
+2. 提炼出：修改位置、修改意见（具体的修改点的总结）、修改原因、修改后的完整内容；
 3. 用以下 JSON 格式回复（不要包含其他说明文字）：
 
 \`\`\`json
 {
   "position": "精确的字段标签，如：客户细分、价值主张、企业名称 等（必须与页面结构中的标签一致）",
-  "modification": "修改后的完整内容或修改意见描述",
+  "modification": "具体的修改点的总结，如：将客户细分从宽泛描述调整为更精准的目标客户群体定位",
   "reason": "修改原因说明",
-  "newValue": "修改后的新值（若与 modification 相同可省略）"
+  "newValue": "修改后的完整新内容（必填，即将要写入该字段的全文）"
 }
 \`\`\`
 
@@ -954,15 +1119,36 @@ ${pageStructure || '(无详情数据)'}`;
 function renderModificationOrPlain(container, assistantContent) {
   const parsed = parseModificationResponse(assistantContent);
   if (parsed && currentDetailRecord) {
-    return appendModificationBlock(container, parsed, getTimeStr(), () => {
+    scrollToTargetAndHighlight(parsed.position);
+    const lastTs = chatHistory[chatHistory.length - 1]?.timestamp;
+    return appendModificationBlock(container, parsed, formatChatTime(lastTs), () => {
+      clearModificationHighlight();
+      const beforeValue = getCurrentValueForPosition(currentDetailRecord, parsed);
       if (applyModification(currentDetailRecord, parsed)) {
+        const afterValue = parsed.newValue != null ? String(parsed.newValue) : parsed.modification;
+        const modificationSummary = parsed.modification && parsed.modification !== afterValue
+          ? parsed.modification
+          : (beforeValue || afterValue ? `将「${beforeValue || '空'}」修改为「${afterValue}」` : '内容已更新');
+        const history = currentDetailRecord.modificationHistory || [];
+        history.unshift({
+          position: parsed.position,
+          beforeValue,
+          modification: modificationSummary,
+          afterValue,
+          reason: parsed.reason,
+          timestamp: new Date().toISOString(),
+        });
+        currentDetailRecord.modificationHistory = history;
         el.detailResult.innerHTML = buildDetailHTML(currentDetailRecord);
         saveAnalysis(currentDetailRecord);
         setupDetailValueStreamEvents();
       }
-    }, (modBlock) => cancelModification(container, modBlock), (oldBlock) => retryModification(container, oldBlock));
+    }, (modBlock) => {
+      clearModificationHighlight();
+      cancelModification(container, modBlock);
+    }, (oldBlock) => retryModification(container, oldBlock));
   }
-  return appendChatBlock(container, 'assistant', assistantContent, getTimeStr());
+  return appendChatBlock(container, 'assistant', assistantContent, formatChatTime(chatHistory[chatHistory.length - 1]?.timestamp));
 }
 
 function cancelModification(container, modBlock) {
@@ -975,6 +1161,7 @@ function cancelModification(container, modBlock) {
   if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') {
     chatHistory.pop();
   }
+  saveChatToRecord();
   container.scrollTop = container.scrollHeight;
 }
 
@@ -990,9 +1177,11 @@ async function retryModification(container, oldBlock) {
   } catch (err) {
     assistantContent = '网络或请求错误：' + (err.message || String(err));
   }
-  chatHistory.push({ role: 'assistant', content: assistantContent });
+  const assistantMsg = { role: 'assistant', content: assistantContent, timestamp: new Date().toISOString() };
+  chatHistory.push(assistantMsg);
   oldBlock.remove();
   renderModificationOrPlain(container, assistantContent);
+  saveChatToRecord();
   container.scrollTop = container.scrollHeight;
 }
 
@@ -1004,8 +1193,10 @@ async function sendChatMessage() {
   if (!text) return;
 
   input.value = '';
-  chatHistory.push({ role: 'user', content: text });
-  appendChatBlock(messages, 'user', text, getTimeStr());
+  const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
+  chatHistory.push(userMsg);
+  appendChatBlock(messages, 'user', text, formatChatTime(userMsg.timestamp));
+  saveChatToRecord();
 
   const loadingBlock = document.createElement('div');
   loadingBlock.className = 'chat-message chat-message-assistant chat-message-loading';
@@ -1026,9 +1217,11 @@ async function sendChatMessage() {
     assistantContent = '网络或请求错误：' + (err.message || String(err));
   }
 
-  chatHistory.push({ role: 'assistant', content: assistantContent });
+  const assistantMsg = { role: 'assistant', content: assistantContent, timestamp: new Date().toISOString() };
+  chatHistory.push(assistantMsg);
   loadingBlock.remove();
 
   renderModificationOrPlain(messages, assistantContent);
+  saveChatToRecord();
   messages.scrollTop = messages.scrollHeight;
 }
