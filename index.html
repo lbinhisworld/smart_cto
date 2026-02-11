@@ -85,10 +85,26 @@
     </div>
 
     <div id="detailView" class="view detail-view" hidden>
-      <header class="header">
-        <h1 id="detailTitle">客户详情</h1>
-      </header>
-      <main id="detailResult" class="result"></main>
+      <div class="detail-body">
+        <aside id="chatPanel" class="chat-panel">
+          <div class="chat-panel-header">
+            <span>互动修改</span>
+            <button type="button" id="btnCloseChat" class="chat-close" aria-label="关闭">×</button>
+          </div>
+          <div class="chat-panel-input-wrap">
+            <textarea id="chatInput" class="chat-input" placeholder="你想修改什么？" rows="3"></textarea>
+            <button type="button" id="chatSend" class="chat-send" aria-label="发送">↑</button>
+          </div>
+          <div id="chatMessages" class="chat-panel-body"></div>
+        </aside>
+        <div class="detail-content">
+          <header class="header">
+            <h1 id="detailTitle">客户详情</h1>
+            <button type="button" id="btnChat" class="btn-chat">互动修改</button>
+          </header>
+          <main id="detailResult" class="result"></main>
+        </div>
+      </div>
     </div>
   </div>
 

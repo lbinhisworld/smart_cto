@@ -7,6 +7,17 @@ const VALUE_STREAM_API_URL = 'https://app-6aa0d22a.base44.app/api/apps/6969e6b3c
 
 const STORAGE_KEY = 'company_analyses';
 
+/** DeepSeek 大模型配置：请在 main.js 中设置你的 API Key，或通过环境变量/配置注入 */
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+const DEEPSEEK_API_KEY = 'sk-051df7f3ec0a406cb1ceb0fa83317d76'; // 请填入你的 DeepSeek API Key
+const DEEPSEEK_MODEL = 'deepseek-chat';
+
+/** 当前详情页的公司名称，用于对话上下文 */
+let currentDetailCompanyName = '';
+
+/** 当前详情页完整记录，用于大模型分析页面结构及应用修改 */
+let currentDetailRecord = null;
+
 const el = {
   companyName: document.getElementById('companyName'),
   btnQuery: document.getElementById('btnQuery'),
@@ -14,6 +25,12 @@ const el = {
   btnHome: document.getElementById('btnHome'),
   btnList: document.getElementById('btnList'),
   navDetailLabel: document.getElementById('navDetailLabel'),
+  chatPanel: document.getElementById('chatPanel'),
+  btnChat: document.getElementById('btnChat'),
+  btnCloseChat: document.getElementById('btnCloseChat'),
+  chatInput: document.getElementById('chatInput'),
+  chatSend: document.getElementById('chatSend'),
+  chatMessages: document.getElementById('chatMessages'),
   btnValueStreamList: document.getElementById('btnValueStreamList'),
   loading: document.getElementById('loading'),
   error: document.getElementById('error'),
@@ -35,6 +52,9 @@ const el = {
 
 let lastQueriedCompanyName = '';
 let lastQueryResult = null;
+
+/** 聊天历史，用于 DeepSeek API 的 messages 上下文 */
+let chatHistory = [];
 
 /**
  * 调试：检查「查询价值流列表」按钮及其父元素的状态
@@ -99,6 +119,47 @@ const BMC_FIELDS = [
   { key: 'cost_structure', label: '成本结构' },
 ];
 
+/** 字段标签到数据路径的映射，用于大模型返回的 position 匹配并应用修改 */
+const LABEL_TO_PATH = (() => {
+  const m = new Map();
+  BASIC_INFO_FIELDS.forEach((f) => m.set(f.label, { section: 'basicInfo', key: f.key }));
+  BMC_FIELDS.forEach((f) => m.set(f.label, { section: 'bmc', key: f.key }));
+  m.set('综合评述', { section: 'bmc', key: 'comprehensive_review' });
+  return m;
+})();
+
+function buildPageStructureForLLM(record) {
+  if (!record) return '';
+  const basicInfo = record.basicInfo || {};
+  const bmc = record.bmc || {};
+  const metadata = record.metadata || {};
+  const valueStreams = record.valueStreams || [];
+  const lines = [
+    '=== 当前页面详情结构 ===',
+    '',
+    '【基本信息】',
+    ...BASIC_INFO_FIELDS.map((f) => `  - ${f.label}: ${formatValue(basicInfo[f.key]) || '—'}`),
+    '',
+    '【商业画布 BMC】',
+    ...BMC_FIELDS.map((f) => `  - ${f.label}: ${formatValue(bmc[f.key]) || '—'}`),
+    `  - 综合评述: ${formatValue(bmc.comprehensive_review) || '—'}`,
+    '',
+    '【档案元数据】',
+    `  - 档案 ID: ${formatValue(metadata.analysis_id) || '—'}`,
+    `  - 创建时间: ${formatValue(metadata.created_date) || '—'}`,
+    `  - 更新时间: ${formatValue(metadata.updated_date) || '—'}`,
+    '',
+    '【价值流列表】',
+    ...(valueStreams.length
+      ? valueStreams.map((vs, i) => {
+          const name = formatValue(vs.name ?? vs.title ?? vs.value_stream_name) || `价值流 ${i + 1}`;
+          return `  - [${i}] ${name}`;
+        })
+      : ['  (暂无)']),
+  ];
+  return lines.join('\n');
+}
+
 function showLoading(show) {
   el.loading.hidden = !show;
   el.btnQuery.disabled = show;
@@ -143,6 +204,63 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+/** 从大模型回复中解析结构化修改建议，返回 { position, modification, reason, positionKey, newValue } 或 null */
+function parseModificationResponse(text) {
+  if (!text || typeof text !== 'string') return null;
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*\}/);
+  const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]).trim() : text;
+  try {
+    const obj = JSON.parse(jsonStr);
+    if (obj && (obj.position || obj.modification || obj.reason)) {
+      return {
+        position: obj.position || '—',
+        modification: obj.modification || obj.newValue || '—',
+        reason: obj.reason || '—',
+        positionKey: obj.positionKey || obj.position,
+        newValue: obj.newValue,
+      };
+    }
+  } catch (_) {}
+  const posMatch = text.match(/修改位置[：:]\s*([^\n]+)/);
+  const modMatch = text.match(/修改意见[：:]\s*([^\n]+)/);
+  const reasonMatch = text.match(/修改原因[：:]\s*([^\n]+)/);
+  if (posMatch || modMatch || reasonMatch) {
+    return {
+      position: (posMatch && posMatch[1].trim()) || '—',
+      modification: (modMatch && modMatch[1].trim()) || '—',
+      reason: (reasonMatch && reasonMatch[1].trim()) || '—',
+      positionKey: (posMatch && posMatch[1].trim()) || null,
+      newValue: null,
+    };
+  }
+  return null;
+}
+
+/** 根据 position 匹配并应用修改到 record */
+function applyModification(record, parsed) {
+  if (!record || !parsed) return false;
+  const pos = String(parsed.positionKey || parsed.position).trim();
+  const path = LABEL_TO_PATH.get(pos);
+  const newVal = parsed.newValue != null ? String(parsed.newValue) : parsed.modification;
+  if (path) {
+    const section = record[path.section];
+    if (section && path.key in section) {
+      section[path.key] = newVal;
+      return true;
+    }
+  }
+  for (const [label, p] of LABEL_TO_PATH) {
+    if (pos.includes(label) || label.includes(pos)) {
+      const section = record[p.section];
+      if (section && p.key in section) {
+        section[p.key] = newVal;
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function renderBMC(data) {
@@ -554,12 +672,18 @@ function renderSavedList() {
   });
 }
 
-function openDetail(record) {
-  if (!record) return;
-  el.detailTitle.textContent = record.companyName || '客户详情';
-  el.detailResult.innerHTML = buildDetailHTML(record);
-  switchView('detail');
-  currentValueStreamList = record.valueStreams || [];
+function toggleChatPanel(open) {
+  const panel = el.chatPanel;
+  const body = document.querySelector('.detail-body');
+  if (!panel) return;
+  const isOpen = open ?? !panel.classList.contains('chat-panel-open');
+  panel.classList.toggle('chat-panel-open', isOpen);
+  if (body) body.classList.toggle('chat-panel-open', isOpen);
+}
+
+function setupDetailValueStreamEvents() {
+  if (!el.detailResult) return;
+  currentValueStreamList = currentDetailRecord?.valueStreams || [];
   el.detailResult.querySelectorAll('.vs-card-header').forEach((btn) => {
     btn.addEventListener('click', () => {
       const card = btn.closest('.vs-card');
@@ -602,6 +726,18 @@ function openDetail(record) {
       }
     });
   });
+}
+
+function openDetail(record) {
+  if (!record) return;
+  toggleChatPanel(false);
+  currentDetailCompanyName = record.companyName || '';
+  currentDetailRecord = record;
+  chatHistory = [];
+  el.detailTitle.textContent = record.companyName || '客户详情';
+  el.detailResult.innerHTML = buildDetailHTML(record);
+  switchView('detail');
+  setupDetailValueStreamEvents();
 }
 
 function buildDetailHTML(record) {
@@ -707,3 +843,192 @@ if (el.btnList) el.btnList.addEventListener('click', () => {
   renderSavedList();
   switchView('list');
 });
+if (el.btnChat) el.btnChat.addEventListener('click', () => toggleChatPanel(true));
+if (el.btnCloseChat) el.btnCloseChat.addEventListener('click', () => toggleChatPanel(false));
+if (el.chatSend) el.chatSend.addEventListener('click', sendChatMessage);
+if (el.chatInput) el.chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
+
+function getTimeStr() {
+  const now = new Date();
+  return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+}
+
+function appendChatBlock(container, role, content, timeStr) {
+  const block = document.createElement('div');
+  block.className = `chat-message chat-message-${role}`;
+  block.innerHTML = `<div class="chat-message-content">${escapeHtml(content)}</div><div class="chat-message-time">${timeStr}</div>`;
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+  return block;
+}
+
+function appendModificationBlock(container, parsed, timeStr, onConfirm, onCancel, onRetry) {
+  const block = document.createElement('div');
+  block.className = 'chat-message chat-message-assistant chat-message-modification';
+  block.innerHTML = `
+    <div class="chat-modification-body">
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">修改位置</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.position)}</span>
+      </div>
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">修改意见</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.modification)}</span>
+      </div>
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">修改原因</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.reason)}</span>
+      </div>
+      <div class="chat-modification-actions">
+        <button type="button" class="btn-confirm-mod">确认</button>
+        <button type="button" class="btn-retry-mod">重来</button>
+        <button type="button" class="btn-cancel-mod">放弃</button>
+      </div>
+    </div>
+    <div class="chat-message-time">${timeStr}</div>
+  `;
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+  block.querySelector('.btn-confirm-mod')?.addEventListener('click', () => {
+    block.querySelector('.chat-modification-actions').innerHTML = '<span class="mod-status">已确认</span>';
+    onConfirm?.();
+  });
+  block.querySelector('.btn-retry-mod')?.addEventListener('click', () => {
+    block.querySelector('.chat-modification-actions').innerHTML = '<span class="mod-status">正在重新分析...</span>';
+    onRetry?.(block);
+  });
+  block.querySelector('.btn-cancel-mod')?.addEventListener('click', () => {
+    onCancel?.(block);
+  });
+  return block;
+}
+
+async function fetchModificationFromLLM() {
+  const pageStructure = buildPageStructureForLLM(currentDetailRecord);
+  const systemContent = `你是企业信息与商业画布修改助手。当前用户正在查看「${currentDetailCompanyName || '某企业'}」的详情页。
+
+【任务】当用户提出修改需求时，你需要：
+1. 分析下方「当前页面详情结构」，判断用户要修改的是哪个位置的内容；
+2. 提炼出：修改位置、修改意见、修改原因；
+3. 用以下 JSON 格式回复（不要包含其他说明文字）：
+
+\`\`\`json
+{
+  "position": "精确的字段标签，如：客户细分、价值主张、企业名称 等（必须与页面结构中的标签一致）",
+  "modification": "修改后的完整内容或修改意见描述",
+  "reason": "修改原因说明",
+  "newValue": "修改后的新值（若与 modification 相同可省略）"
+}
+\`\`\`
+
+【当前页面详情结构】
+${pageStructure || '(无详情数据)'}`;
+
+  const apiMessages = [
+    { role: 'system', content: systemContent },
+    ...chatHistory.map((m) => ({ role: m.role, content: m.content })),
+  ];
+  const res = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: apiMessages,
+    }),
+  });
+  const data = await res.json();
+  if (data.error) {
+    return '请求失败：' + (data.error.message || JSON.stringify(data.error));
+  }
+  return data.choices?.[0]?.message?.content ?? '未收到有效回复。';
+}
+
+function renderModificationOrPlain(container, assistantContent) {
+  const parsed = parseModificationResponse(assistantContent);
+  if (parsed && currentDetailRecord) {
+    return appendModificationBlock(container, parsed, getTimeStr(), () => {
+      if (applyModification(currentDetailRecord, parsed)) {
+        el.detailResult.innerHTML = buildDetailHTML(currentDetailRecord);
+        saveAnalysis(currentDetailRecord);
+        setupDetailValueStreamEvents();
+      }
+    }, (modBlock) => cancelModification(container, modBlock), (oldBlock) => retryModification(container, oldBlock));
+  }
+  return appendChatBlock(container, 'assistant', assistantContent, getTimeStr());
+}
+
+function cancelModification(container, modBlock) {
+  const userBlock = modBlock.previousElementSibling;
+  if (userBlock && userBlock.classList.contains('chat-message-user')) {
+    userBlock.remove();
+  }
+  modBlock.remove();
+  chatHistory.pop();
+  if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') {
+    chatHistory.pop();
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+async function retryModification(container, oldBlock) {
+  chatHistory.pop();
+  oldBlock.classList.remove('chat-message-modification');
+  oldBlock.classList.add('chat-message-loading');
+  oldBlock.innerHTML = '<div class="chat-message-content">正在重新分析...</div><div class="chat-message-time">' + getTimeStr() + '</div>';
+  container.scrollTop = container.scrollHeight;
+  let assistantContent = '';
+  try {
+    assistantContent = await fetchModificationFromLLM();
+  } catch (err) {
+    assistantContent = '网络或请求错误：' + (err.message || String(err));
+  }
+  chatHistory.push({ role: 'assistant', content: assistantContent });
+  oldBlock.remove();
+  renderModificationOrPlain(container, assistantContent);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendChatMessage() {
+  const input = el.chatInput;
+  const messages = el.chatMessages;
+  if (!input || !messages) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+
+  input.value = '';
+  chatHistory.push({ role: 'user', content: text });
+  appendChatBlock(messages, 'user', text, getTimeStr());
+
+  const loadingBlock = document.createElement('div');
+  loadingBlock.className = 'chat-message chat-message-assistant chat-message-loading';
+  loadingBlock.innerHTML = '<div class="chat-message-content">正在分析页面结构并提炼修改建议...</div><div class="chat-message-time">' + getTimeStr() + '</div>';
+  messages.appendChild(loadingBlock);
+  messages.scrollTop = messages.scrollHeight;
+
+  if (!DEEPSEEK_API_KEY) {
+    loadingBlock.querySelector('.chat-message-content').textContent = '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用大模型对话。';
+    loadingBlock.classList.remove('chat-message-loading');
+    return;
+  }
+
+  let assistantContent = '';
+  try {
+    assistantContent = await fetchModificationFromLLM();
+  } catch (err) {
+    assistantContent = '网络或请求错误：' + (err.message || String(err));
+  }
+
+  chatHistory.push({ role: 'assistant', content: assistantContent });
+  loadingBlock.remove();
+
+  renderModificationOrPlain(messages, assistantContent);
+  messages.scrollTop = messages.scrollHeight;
+}
