@@ -150,6 +150,70 @@ function renderBMC(data) {
 }
 
 /**
+ * 从价值流 JSON 解析出阶段(stages)和环节(steps)结构，用于图形渲染
+ */
+function parseValueStreamGraph(data) {
+  if (!data || typeof data !== 'object') return { stages: [] };
+  let rawStages = data.stages ?? data.phases ?? data.nodes ?? [];
+  if (!Array.isArray(rawStages) || rawStages.length === 0) {
+    rawStages = data.value_stream?.stages ?? data.data?.stages ?? [];
+  }
+  const list = Array.isArray(rawStages) ? rawStages : [];
+  return {
+    stages: list.map((s, i) => {
+      if (!s) return { name: `阶段${i + 1}`, steps: [] };
+      if (typeof s === 'string') return { name: s, steps: [] };
+      const rawSteps = s.steps ?? s.phases ?? s.items ?? s.nodes ?? [];
+      const steps = Array.isArray(rawSteps) ? rawSteps : [];
+      return {
+        name: formatValue(s.name ?? s.title ?? s.stage_name ?? s.phase_name ?? `阶段${i + 1}`),
+        steps: steps.map((st, j) => {
+        if (typeof st === 'string') return { name: st, desc: '' };
+        return {
+          name: formatValue(st.name ?? st.title ?? st.step_name ?? st.phase_name ?? `环节${j + 1}`),
+          desc: formatValue(st.description ?? st.desc ?? st.content),
+        };
+      }),
+      };
+    }),
+  };
+}
+
+/**
+ * 渲染价值流图形视图 HTML：阶段→阶段（箭头），阶段内 环节→环节（箭头）
+ */
+function renderValueStreamViewHTML(item) {
+  const { stages } = parseValueStreamGraph(item);
+  if (stages.length === 0) {
+    return '<p class="vs-view-placeholder">暂无阶段数据，无法渲染图形</p>';
+  }
+
+  const stagesHtml = stages.map((stage, si) => {
+    const stepsHtml = stage.steps.length === 0
+      ? '<div class="vs-step-node vs-step-empty">—</div>'
+      : stage.steps.map((step, ji) => `
+          <div class="vs-step-node">
+            <span class="vs-step-name">${escapeHtml(step.name)}</span>
+            ${step.desc ? `<span class="vs-step-desc">${escapeHtml(step.desc)}</span>` : ''}
+          </div>
+          ${ji < stage.steps.length - 1 ? '<div class="vs-arrow-inner" aria-hidden="true">↓</div>' : ''}
+        `).join('');
+
+    return `
+      <div class="vs-graph-stage" data-stage="${si}">
+        <div class="vs-stage-node">
+          <div class="vs-stage-name">${escapeHtml(stage.name)}</div>
+          <div class="vs-steps-chain">${stepsHtml}</div>
+        </div>
+      </div>
+      ${si < stages.length - 1 ? '<div class="vs-arrow-outer" aria-hidden="true">→</div>' : ''}
+    `;
+  }).join('');
+
+  return `<div class="vs-graph">${stagesHtml}</div>`;
+}
+
+/**
  * 将 API 返回解析为价值流列表（数组，每项含 name 及完整 JSON）
  */
 function getValueStreamList(data) {
@@ -163,7 +227,7 @@ function getValueStreamList(data) {
 }
 
 /**
- * 渲染价值流列表：可展开卡片，点击名称展开/收起显示 JSON
+ * 渲染价值流列表：可展开卡片，展开后含 json / view 两个子 tab
  */
 function renderValueStreamList(list) {
   const container = el.valueStreamContent;
@@ -181,7 +245,16 @@ function renderValueStreamList(list) {
           <span class="vs-card-chevron" aria-hidden="true">▼</span>
         </button>
         <div class="vs-card-body" id="vs-body-${i}" hidden>
-          <pre class="vs-json">${escapeHtml(jsonStr)}</pre>
+          <div class="vs-tabs">
+            <button type="button" class="vs-tab vs-tab-active" data-tab="json">json</button>
+            <button type="button" class="vs-tab" data-tab="view">view</button>
+          </div>
+          <div class="vs-tab-panel vs-tab-panel-json" data-panel="json">
+            <pre class="vs-json">${escapeHtml(jsonStr)}</pre>
+          </div>
+          <div class="vs-tab-panel vs-tab-panel-view" data-panel="view" hidden>
+            ${renderValueStreamViewHTML(item)}
+          </div>
         </div>
       </div>
     `;
@@ -195,6 +268,17 @@ function renderValueStreamList(list) {
       body.hidden = !expanded;
       btn.setAttribute('aria-expanded', String(!expanded));
       card.classList.toggle('vs-card-expanded', !expanded);
+    });
+  });
+
+  container.querySelectorAll('.vs-tab').forEach((tab) => {
+    tab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = tab.closest('.vs-card');
+      const targetTab = tab.dataset.tab;
+      card.querySelectorAll('.vs-tab').forEach((t) => t.classList.remove('vs-tab-active'));
+      card.querySelectorAll('.vs-tab-panel').forEach((p) => { p.hidden = p.dataset.panel !== targetTab; });
+      tab.classList.add('vs-tab-active');
     });
   });
 }
