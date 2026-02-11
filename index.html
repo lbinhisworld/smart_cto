@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>企业信息与商业画布查询</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>企业信息与商业画布查询</h1>
+      <p class="subtitle">输入公司名称，查询企业基本信息及 BMC 商业画布</p>
+    </header>
+
+    <section class="search-section">
+      <div class="search-box">
+        <input
+          type="text"
+          id="companyName"
+          class="search-input"
+          placeholder="请输入企业全称或简称"
+          autocomplete="off"
+        />
+        <button type="button" id="btnQuery" class="btn-query">查询</button>
+      </div>
+      <p class="api-hint">已对接 Base44 企业分析 API，可直接查询</p>
+    </section>
+
+    <div id="loading" class="loading" hidden>
+      <div class="spinner"></div>
+      <span>正在查询…</span>
+    </div>
+
+    <div id="error" class="error" hidden></div>
+
+    <main id="result" class="result" hidden>
+      <section class="basic-info section-card">
+        <h2>基本信息</h2>
+        <dl class="info-grid" id="basicInfoList"></dl>
+      </section>
+
+      <section class="bmc-section section-card">
+        <h2>商业画布 (BMC)</h2>
+        <div class="bmc-grid" id="bmcGrid"></div>
+        <div class="bmc-review" id="bmcReview"></div>
+      </section>
+
+      <section class="value-stream-actions section-card">
+        <button type="button" id="btnValueStreamList" class="btn-value-stream-list">查询价值流列表</button>
+      </section>
+
+      <section class="value-stream-section section-card" id="valueStreamSection" hidden>
+        <h2>价值流列表</h2>
+        <div id="valueStreamContent"></div>
+      </section>
+
+      <section class="metadata section-card muted">
+        <h3>档案元数据</h3>
+        <dl class="info-grid compact" id="metadataList"></dl>
+      </section>
+    </main>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>

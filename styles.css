@@ -1,0 +1,423 @@
+:root {
+  --bg: #0f1419;
+  --surface: #1a2332;
+  --surface-elevated: #243044;
+  --border: #2d3a4d;
+  --text: #e6edf3;
+  --text-muted: #8b9cb3;
+  --accent: #58a6ff;
+  --accent-dim: #388bfd66;
+  --success: #3fb950;
+  --error: #f85149;
+  --radius: 12px;
+  --font: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+/* Search */
+.search-section {
+  margin-bottom: 2rem;
+}
+
+.search-box {
+  display: flex;
+  gap: 0.75rem;
+  max-width: 480px;
+  margin: 0 auto 0.75rem;
+}
+
+.search-input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.btn-query {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.btn-query:hover {
+  background: #79b8ff;
+}
+
+.btn-query:active {
+  transform: scale(0.98);
+}
+
+.btn-query:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.api-hint {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.api-hint code {
+  padding: 0.15em 0.4em;
+  background: var(--surface-elevated);
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+/* Loading */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  color: var(--text-muted);
+}
+
+.loading[hidden] {
+  display: none !important;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error */
+.error {
+  padding: 1rem 1.25rem;
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  border-radius: var(--radius);
+  color: var(--error);
+  margin-bottom: 2rem;
+  white-space: pre-line;
+}
+
+.error[hidden] {
+  display: none !important;
+}
+
+/* Result sections */
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.result[hidden] {
+  display: none !important;
+}
+
+.section-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+
+.section-card h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-card h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+  color: var(--text-muted);
+}
+
+.section-card.muted {
+  background: var(--surface-elevated);
+}
+
+/* Info grid (basic info / metadata) */
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin: 0;
+}
+
+.info-grid.compact {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem 1rem;
+}
+
+.info-grid dt {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.info-grid dd {
+  margin: 0.1em 0 0;
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
+.info-grid dd a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.info-grid dd a:hover {
+  text-decoration: underline;
+}
+
+/* BMC grid (9 blocks) */
+.bmc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: auto auto auto;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 640px) {
+  .bmc-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bmc-block {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  min-height: 80px;
+}
+
+.bmc-block h4 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bmc-block .content {
+  font-size: 0.9rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bmc-block .content:empty::before {
+  content: '—';
+  color: var(--text-muted);
+}
+
+/* BMC comprehensive review */
+.bmc-review {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.bmc-review h4 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+}
+
+.bmc-review .content {
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bmc-review .content:empty::before {
+  content: '暂无综合评述';
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* 查询价值流列表按钮（独立区块，位于商业画布与价值流列表之间） */
+.value-stream-actions {
+  padding: 1rem 1.5rem;
+}
+
+.btn-value-stream-list {
+  display: block;
+  width: 100%;
+  padding: 0.85rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.btn-value-stream-list:hover {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.btn-value-stream-list:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 价值流列表区域 */
+.value-stream-section[hidden] {
+  display: none !important;
+}
+
+.value-stream-content .vs-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* 价值流：可展开卡片 */
+.vs-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}
+
+.vs-card:last-child {
+  margin-bottom: 0;
+}
+
+.vs-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.9rem 1rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface-elevated);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.2s;
+}
+
+.vs-card-header:hover {
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.vs-card-name {
+  font-weight: 500;
+}
+
+.vs-card-chevron {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+
+.vs-card-expanded .vs-card-chevron {
+  transform: rotate(180deg);
+}
+
+.vs-card-body {
+  padding: 1rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.vs-card-body[hidden] {
+  display: none !important;
+}
+
+.vs-json {
+  margin: 0;
+  padding: 1rem;
+  font-size: 0.85rem;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace;
+  color: var(--text);
+  background: var(--surface-elevated);
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
