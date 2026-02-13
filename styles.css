@@ -1216,7 +1216,45 @@ body {
   font-size: 1rem;
 }
 
-.vs-tab-panel .vs-json {
+.vs-json-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  align-items: center;
+}
+.vs-json-edit-btn,
+.vs-json-undo-btn,
+.vs-json-save-btn,
+.vs-json-cancel-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  color: var(--text);
+  cursor: pointer;
+}
+.vs-json-edit-btn:hover,
+.vs-json-undo-btn:hover,
+.vs-json-save-btn:hover,
+.vs-json-cancel-btn:hover {
+  background: var(--border);
+}
+.vs-json-save-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.vs-json-save-btn:hover {
+  background: var(--accent-dim);
+}
+.vs-json-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.vs-tab-panel .vs-json,
+.vs-tab-panel .vs-json-edit {
   margin: 0;
   padding: 1rem;
   font-size: 0.85rem;
@@ -1227,4 +1265,16 @@ body {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.vs-tab-panel .vs-json-edit {
+  display: block;
+  width: 100%;
+  min-height: 200px;
+  resize: vertical;
+  border: 1px solid var(--border);
+}
+.vs-json-error {
+  margin: 0.5rem 0 0;
+  color: var(--error);
+  font-size: 0.85rem;
 }

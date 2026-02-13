@@ -142,6 +142,22 @@ function buildPageStructureForLLM(record) {
   const bmc = record.bmc || {};
   const metadata = record.metadata || {};
   const valueStreams = record.valueStreams || [];
+  const vsLines = [];
+  if (valueStreams.length > 0) {
+    valueStreams.forEach((vs, i) => {
+      const vsName = formatValue(vs.name ?? vs.title ?? vs.value_stream_name) || `价值流 ${i + 1}`;
+      vsLines.push(`  - [${i}] 价值流名称: ${vsName}`);
+      const { stages } = parseValueStreamGraph(vs);
+      stages.forEach((stage, si) => {
+        vsLines.push(`      阶段: ${stage.name}`);
+        (stage.steps || []).forEach((step, ji) => {
+          vsLines.push(`        节点: ${step.name}`);
+        });
+      });
+    });
+  } else {
+    vsLines.push('  (暂无)');
+  }
   const lines = [
     '=== 当前页面详情结构 ===',
     '',
@@ -157,13 +173,8 @@ function buildPageStructureForLLM(record) {
     `  - 创建时间: ${formatValue(metadata.created_date) || '—'}`,
     `  - 更新时间: ${formatValue(metadata.updated_date) || '—'}`,
     '',
-    '【价值流列表】',
-    ...(valueStreams.length
-      ? valueStreams.map((vs, i) => {
-          const name = formatValue(vs.name ?? vs.title ?? vs.value_stream_name) || `价值流 ${i + 1}`;
-          return `  - [${i}] ${name}`;
-        })
-      : ['  (暂无)']),
+    '【价值流列表】(含阶段与节点名称)',
+    ...vsLines,
   ];
   return lines.join('\n');
 }
@@ -222,13 +233,22 @@ function parseModificationResponse(text) {
   try {
     const obj = JSON.parse(jsonStr);
     if (obj && (obj.position || obj.modification || obj.reason)) {
-      return {
+      const parsed = {
         position: obj.position || '—',
         modification: obj.modification || obj.newValue || '—',
         reason: obj.reason || '—',
         positionKey: obj.positionKey || obj.position,
         newValue: obj.newValue,
       };
+      if (obj.isValueStream) {
+        parsed.isValueStream = true;
+        parsed.operation = (obj.operation || 'update').toLowerCase();
+        parsed.valueStreamName = obj.valueStreamName || obj.value_stream_name || '';
+        parsed.nodeName = obj.nodeName || obj.node_name || '';
+        parsed.insertAfterStepName = obj.insertAfterStepName || obj.insert_after_step_name || '';
+        parsed.valueStreamIndex = obj.valueStreamIndex != null ? obj.valueStreamIndex : obj.value_stream_index;
+      }
+      return parsed;
     }
   } catch (_) {}
   const posMatch = text.match(/修改位置[：:]\s*([^\n]+)/);
@@ -249,10 +269,21 @@ function parseModificationResponse(text) {
 /** 判断两个修改位置是否相同（同一修改目标） */
 function isSameModificationPosition(pos1, pos2) {
   if (!pos1 || !pos2) return false;
-  const p1 = getPathForPosition(pos1);
-  const p2 = getPathForPosition(pos2);
-  if (!p1 || !p2) return String(pos1).trim() === String(pos2).trim();
-  return p1.section === p2.section && p1.key === p2.key;
+  const p1 = typeof pos1 === 'object' ? pos1 : null;
+  const p2 = typeof pos2 === 'object' ? pos2 : null;
+  if (p1?.isValueStream && p2?.isValueStream) {
+    const n1 = (p1.valueStreamName || '').trim();
+    const n2 = (p2.valueStreamName || '').trim();
+    const node1 = (p1.nodeName || '').trim();
+    const node2 = (p2.nodeName || '').trim();
+    return n1 === n2 && node1 === node2;
+  }
+  const s1 = typeof pos1 === 'object' ? (pos1.positionKey || pos1.position) : pos1;
+  const s2 = typeof pos2 === 'object' ? (pos2.positionKey || pos2.position) : pos2;
+  const path1 = getPathForPosition(s1);
+  const path2 = getPathForPosition(s2);
+  if (!path1 || !path2) return String(s1).trim() === String(s2).trim();
+  return path1.section === path2.section && path1.key === path2.key;
 }
 
 /** 根据 position 获取 record 中对应的路径 { section, key } */
@@ -269,6 +300,24 @@ function getPathForPosition(pos) {
 /** 获取修改前的当前值 */
 function getCurrentValueForPosition(record, parsed) {
   if (!record || !parsed) return '';
+  if (parsed.isValueStream) {
+    const vsList = record.valueStreams || [];
+    const vsName = (parsed.valueStreamName || '').trim();
+    const nodeName = (parsed.nodeName || '').trim();
+    for (const vs of vsList) {
+      const name = formatValue(vs.name ?? vs.title ?? vs.value_stream_name) || '';
+      if (!vsName || name === vsName) {
+        const { stages } = parseValueStreamGraph(vs);
+        for (const stage of stages) {
+          if (stage.name === nodeName) return stage.name;
+          for (const step of stage.steps || []) {
+            if (step.name === nodeName) return step.desc || step.name || '';
+          }
+        }
+      }
+    }
+    return '';
+  }
   const path = getPathForPosition(parsed.positionKey || parsed.position);
   if (!path) return '';
   const section = record[path.section];
@@ -279,9 +328,114 @@ function getCurrentValueForPosition(record, parsed) {
 /** 根据 position 匹配并应用修改到 record */
 function applyModification(record, parsed) {
   if (!record || !parsed) return false;
+  const newVal = parsed.newValue != null ? String(parsed.newValue) : parsed.modification;
+
+  if (parsed.isValueStream) {
+    const vsList = record.valueStreams || [];
+    const vsName = (parsed.valueStreamName || '').trim();
+    const nodeName = (parsed.nodeName || '').trim();
+    const vsIndex = parsed.valueStreamIndex;
+    const op = (parsed.operation || 'update').toLowerCase();
+
+    for (let vi = 0; vi < vsList.length; vi++) {
+      const vs = vsList[vi];
+      const name = formatValue(vs.name ?? vs.title ?? vs.value_stream_name) || '';
+      const nameMatch = !vsName || name === vsName || name.includes(vsName) || vsName.includes(name);
+      if (!nameMatch || (vsIndex != null && vi !== vsIndex)) continue;
+
+      let rawStages = vs.stages ?? vs.phases ?? vs.nodes ?? vs.value_stream?.stages ?? vs.data?.stages;
+      if (!Array.isArray(rawStages)) rawStages = vs.stages = [];
+      if (!vs.stages && (vs.phases || vs.nodes)) rawStages = vs.phases ?? vs.nodes;
+
+      const getStageNameForMatch = (s) => {
+        const raw = s.name ?? s.title ?? s.stage_name ?? s.phase_name ?? s.label ?? s.node_name ?? '';
+        return extractPureStageName(raw) || formatValue(raw);
+      };
+
+      if (op === 'addstage') {
+        const newStage = { name: newVal, steps: [] };
+        if (nodeName) {
+          const insertIdx = rawStages.findIndex((s) => s && getStageNameForMatch(s) === nodeName);
+          if (insertIdx >= 0) rawStages.splice(insertIdx + 1, 0, newStage);
+          else rawStages.push(newStage);
+        } else {
+          rawStages.push(newStage);
+        }
+        return true;
+      }
+
+      if (op === 'addstep') {
+        const insertAfterStep = (parsed.insertAfterStepName || parsed.insert_after_step_name || '').trim();
+        const STEP_KEYS = ['steps', 'phases', 'items', 'nodes', 'children'];
+        const getStepsArray = (stage) => {
+          for (const k of STEP_KEYS) {
+            const arr = stage[k];
+            if (Array.isArray(arr)) return { arr, key: k };
+          }
+          stage.steps = Array.isArray(stage.steps) ? stage.steps : [];
+          return { arr: stage.steps, key: 'steps' };
+        };
+        const getStepNameForMatch = (st) => {
+          const raw = formatValue(st.name ?? st.title ?? st.step_name ?? st.phase_name ?? st.label ?? st.node_name ?? '');
+          const m = raw.match(/^(.+?)\s*\([^)]*\)$/);
+          return m ? m[1].trim() : raw;
+        };
+        for (const s of rawStages) {
+          if (!s) continue;
+          const stageName = getStageNameForMatch(s);
+          if (stageName !== nodeName && !stageName.includes(nodeName) && !nodeName.includes(stageName)) continue;
+          const { arr: rawSteps } = getStepsArray(s);
+          const parts = newVal.split(/\n/);
+          const stepName = parts[0]?.trim() || newVal;
+          const stepDesc = parts.slice(1).join('\n').trim() || '';
+          const newStep = {
+            name: stepName,
+            step_name: stepName,
+            title: stepName,
+            description: stepDesc,
+            desc: stepDesc,
+            content: stepDesc,
+          };
+          if (insertAfterStep) {
+            const idx = rawSteps.findIndex((st) => st && getStepNameForMatch(st) === insertAfterStep);
+            if (idx >= 0) rawSteps.splice(idx + 1, 0, newStep);
+            else rawSteps.push(newStep);
+          } else {
+            rawSteps.push(newStep);
+          }
+          return true;
+        }
+        return false;
+      }
+
+      for (const s of rawStages) {
+        if (!s) continue;
+        const stageName = getStageNameForMatch(s);
+        if (stageName === nodeName) {
+          s.name = s.title = s.stage_name = s.phase_name = s.label = s.node_name = newVal;
+          return true;
+        }
+        const rawSteps = s.steps ?? s.phases ?? s.items ?? s.nodes ?? s.children ?? [];
+        if (!Array.isArray(rawSteps)) continue;
+        for (const st of rawSteps) {
+          if (!st) continue;
+          const stepName = formatValue(st.name ?? st.title ?? st.step_name ?? st.phase_name ?? st.label ?? st.node_name ?? '');
+          if (stepName === nodeName) {
+            if (st.description != null || st.desc != null || st.content != null) {
+              st.description = st.desc = st.content = newVal;
+            } else {
+              st.name = st.title = st.step_name = st.phase_name = st.label = st.node_name = newVal;
+            }
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   const pos = String(parsed.positionKey || parsed.position).trim();
   const path = getPathForPosition(pos);
-  const newVal = parsed.newValue != null ? String(parsed.newValue) : parsed.modification;
   if (path) {
     const section = record[path.section];
     if (section && path.key in section) {
@@ -292,14 +446,48 @@ function applyModification(record, parsed) {
   return false;
 }
 
-/** 根据修改位置找到详情页中对应的 DOM 元素 */
-function findModificationTarget(position) {
-  if (!el.detailResult || !position) return null;
-  const pos = String(position).trim();
-  const direct = el.detailResult.querySelector(`[data-modify-target="${pos}"]`);
+/** 根据修改位置或 parsed 找到详情页中对应的 DOM 元素 */
+function findModificationTarget(positionOrParsed) {
+  if (!el.detailResult) return null;
+  const parsed = positionOrParsed && typeof positionOrParsed === 'object' ? positionOrParsed : null;
+  const position = parsed ? (parsed.positionKey || parsed.position) : String(positionOrParsed || '').trim();
+
+  if (parsed?.isValueStream) {
+    const vsName = (parsed.valueStreamName || '').trim();
+    const nodeName = (parsed.nodeName || '').trim();
+    const vsIndex = parsed.valueStreamIndex;
+    const cards = el.detailResult.querySelectorAll('.vs-card');
+    let card = null;
+    for (const c of cards) {
+      const cName = (c.dataset.vsName || '').trim();
+      const cIdx = parseInt(c.dataset.vsIndex ?? c.dataset.index, 10);
+      if ((vsName && cName === vsName) || (vsIndex != null && cIdx === vsIndex)) {
+        card = c;
+        break;
+      }
+    }
+    if (!card) return null;
+    if (!nodeName) return card;
+    const body = card.querySelector('.vs-card-body');
+    const viewPanel = body?.querySelector('.vs-tab-panel-view');
+    if (!viewPanel || viewPanel.dataset.rendered !== 'true') return card;
+    const stageEl = viewPanel.querySelector(`[data-vs-stage-name="${nodeName}"]`);
+    if (stageEl) return stageEl;
+    const stepEl = viewPanel.querySelector(`[data-vs-step-name="${nodeName}"]`);
+    if (stepEl) return stepEl;
+    const allNames = viewPanel.querySelectorAll('[data-vs-stage-name], [data-vs-step-name]');
+    for (const n of allNames) {
+      const name = n.dataset.vsStageName || n.dataset.vsStepName || '';
+      if (name === nodeName || name.includes(nodeName) || nodeName.includes(name)) return n;
+    }
+    return card;
+  }
+
+  if (!position) return null;
+  const direct = el.detailResult.querySelector(`[data-modify-target="${position}"]`);
   if (direct) return direct;
   for (const [label] of LABEL_TO_PATH) {
-    if (pos.includes(label) || pos === label) {
+    if (position.includes(label) || position === label) {
       const elx = el.detailResult.querySelector(`[data-modify-target="${label}"]`);
       if (elx) return elx;
     }
@@ -312,13 +500,40 @@ function clearModificationHighlight() {
   el.detailResult?.querySelectorAll('.modify-target-highlight').forEach((el) => el.classList.remove('modify-target-highlight'));
 }
 
-/** 滚动到目标元素并居中，添加红色闪动高亮 */
-function scrollToTargetAndHighlight(position) {
+/** 滚动到目标元素并居中，添加红色闪动高亮。价值流修改时会先展开卡片并渲染 view */
+function scrollToTargetAndHighlight(positionOrParsed) {
   clearModificationHighlight();
-  const target = findModificationTarget(position);
+  const parsed = positionOrParsed && typeof positionOrParsed === 'object' ? positionOrParsed : { position: positionOrParsed };
+  let target = findModificationTarget(positionOrParsed);
   if (!target || !el.detailContent) return;
-  target.classList.add('modify-target-highlight');
-  target.scrollIntoView({ block: 'center', behavior: 'smooth', inline: 'nearest' });
+
+  if (parsed.isValueStream) {
+    const card = target.closest('.vs-card') || (target.classList.contains('vs-card') ? target : null);
+    if (card) {
+      const header = card.querySelector('.vs-card-header');
+      const body = card.querySelector('.vs-card-body');
+      if (header && body && body.hidden) {
+        header.click();
+        header.setAttribute('aria-expanded', 'true');
+        body.hidden = false;
+        const viewPanel = body.querySelector('.vs-tab-panel-view');
+        if (viewPanel && viewPanel.dataset.rendered !== 'true') {
+          const idx = parseInt(card.dataset.index ?? card.dataset.vsIndex, 10);
+          const item = (currentDetailRecord?.valueStreams || [])[idx];
+          if (item) {
+            viewPanel.innerHTML = renderValueStreamViewHTML(item);
+            viewPanel.dataset.rendered = 'true';
+            target = findModificationTarget(positionOrParsed);
+          }
+        }
+      }
+    }
+  }
+
+  if (target) {
+    target.classList.add('modify-target-highlight');
+    target.scrollIntoView({ block: 'center', behavior: 'smooth', inline: 'nearest' });
+  }
 }
 
 function renderBMC(data) {
@@ -339,9 +554,38 @@ function renderBMC(data) {
   `;
 }
 
+/** 从可能包含「阶段:xxx 节点:xxx」的字符串中提取纯阶段名称 */
+function extractPureStageName(raw) {
+  const s = formatValue(raw);
+  if (!s) return s;
+  if (s.includes('阶段:') && s.includes('节点:')) {
+    const m = s.match(/阶段:\s*([^节点]+?)(?:\s*节点:|$)/);
+    if (m) return m[1].trim();
+  }
+  if (s.startsWith('阶段:')) {
+    const m = s.match(/阶段:\s*(.+?)(?:\s*节点:|$)/);
+    if (m) return m[1].trim();
+  }
+  return s;
+}
+
+/** 从可能包含「名称 (描述)」的字符串中分离名称与描述 */
+function extractStepNameAndDesc(stepObj) {
+  const nameRaw = stepObj.name ?? stepObj.title ?? stepObj.step_name ?? stepObj.phase_name ?? stepObj.label ?? stepObj.node_name ?? '';
+  const descRaw = stepObj.description ?? stepObj.desc ?? stepObj.content;
+  const name = formatValue(nameRaw);
+  const desc = formatValue(descRaw);
+  if (desc) return { name, desc };
+  if (name && /\([^)]+\)$/.test(name)) {
+    const m = name.match(/^(.+?)\s*\(([^)]+)\)$/);
+    if (m) return { name: m[1].trim(), desc: m[2].trim() };
+  }
+  return { name, desc: '' };
+}
+
 /**
  * 从价值流 JSON 解析出阶段(stages)和环节(steps)结构，用于图形渲染
- * 兼容多种字段名与嵌套结构
+ * 兼容多种字段名与嵌套结构。阶段标题仅显示阶段名，环节内容显示在环节块中。
  */
 function parseValueStreamGraph(data) {
   if (!data || typeof data !== 'object') return { stages: [] };
@@ -353,17 +597,19 @@ function parseValueStreamGraph(data) {
   return {
     stages: list.map((s, i) => {
       if (!s) return { name: `阶段${i + 1}`, steps: [] };
-      if (typeof s === 'string') return { name: s, steps: [] };
+      if (typeof s === 'string') return { name: extractPureStageName(s), steps: [] };
       const rawSteps = s.steps ?? s.phases ?? s.items ?? s.nodes ?? s.children ?? [];
       const steps = Array.isArray(rawSteps) ? rawSteps : [];
-      const stageName = formatValue(s.name ?? s.title ?? s.stage_name ?? s.phase_name ?? s.label ?? s.node_name ?? s.node_label ?? `阶段${i + 1}`);
+      const rawStageName = s.name ?? s.title ?? s.stage_name ?? s.phase_name ?? s.label ?? s.node_name ?? s.node_label ?? `阶段${i + 1}`;
+      const stageName = extractPureStageName(rawStageName);
       return {
         name: stageName,
         steps: steps.map((st, j) => {
           if (typeof st === 'string') return { name: st, desc: '' };
+          const { name: stepName, desc: stepDesc } = extractStepNameAndDesc(st);
           return {
-            name: formatValue(st.name ?? st.title ?? st.step_name ?? st.phase_name ?? st.label ?? st.node_name ?? `环节${j + 1}`),
-            desc: formatValue(st.description ?? st.desc ?? st.content),
+            name: stepName || `环节${j + 1}`,
+            desc: stepDesc,
           };
         }),
       };
@@ -384,7 +630,7 @@ function renderValueStreamViewHTML(item) {
     const stepsHtml = stage.steps.length === 0
       ? '<div class="vs-step-node vs-step-empty">—</div>'
       : stage.steps.map((step, ji) => `
-          <div class="vs-step-node">
+          <div class="vs-step-node" data-vs-step-name="${escapeHtml(step.name)}">
             <span class="vs-step-name">${escapeHtml(step.name)}</span>
             ${step.desc ? `<span class="vs-step-desc">${escapeHtml(step.desc)}</span>` : ''}
           </div>
@@ -392,7 +638,7 @@ function renderValueStreamViewHTML(item) {
         `).join('');
 
     return `
-      <div class="vs-graph-stage" data-stage="${si}">
+      <div class="vs-graph-stage" data-stage="${si}" data-vs-stage-name="${escapeHtml(stage.name)}">
         <div class="vs-stage-node">
           <div class="vs-stage-name">${escapeHtml(stage.name)}</div>
           <div class="vs-steps-chain">${stepsHtml}</div>
@@ -799,6 +1045,47 @@ function formatChatTime(ts) {
   }
 }
 
+/** 从 parsed 获取价值流索引 */
+function getValueStreamIndexFromParsed(parsed) {
+  if (!parsed?.isValueStream) return null;
+  if (parsed.valueStreamIndex != null && parsed.valueStreamIndex >= 0) return parsed.valueStreamIndex;
+  const vsName = (parsed.valueStreamName || '').trim();
+  if (!vsName || !currentDetailRecord) return null;
+  const list = currentDetailRecord.valueStreams || [];
+  for (let i = 0; i < list.length; i++) {
+    const name = formatValue(list[i].name ?? list[i].title ?? list[i].value_stream_name) || '';
+    if (name === vsName || name.includes(vsName) || vsName.includes(name)) return i;
+  }
+  return null;
+}
+
+/**
+ * 展开并刷新指定价值流卡片的 view 和 json
+ */
+function expandAndRefreshValueStreamCard(vsIndex) {
+  if (!el.detailResult || !currentDetailRecord) return;
+  const valueStreams = currentDetailRecord.valueStreams || [];
+  const item = valueStreams[vsIndex];
+  if (!item) return;
+  const card = el.detailResult.querySelector(`.vs-card[data-index="${vsIndex}"]`);
+  if (!card) return;
+  const header = card.querySelector('.vs-card-header');
+  const body = card.querySelector('.vs-card-body');
+  const viewPanel = card.querySelector('.vs-tab-panel-view');
+  const jsonPanel = card.querySelector('.vs-tab-panel-json');
+  body.hidden = false;
+  header.setAttribute('aria-expanded', 'true');
+  card.classList.add('vs-card-expanded');
+  if (viewPanel) {
+    viewPanel.innerHTML = renderValueStreamViewHTML(item);
+    viewPanel.dataset.rendered = 'true';
+  }
+  if (jsonPanel) {
+    const pre = jsonPanel.querySelector('.vs-json');
+    if (pre) pre.textContent = JSON.stringify(item, null, 2);
+  }
+}
+
 function setupDetailValueStreamEvents() {
   if (!el.detailResult) return;
   currentValueStreamList = currentDetailRecord?.valueStreams || [];
@@ -844,6 +1131,146 @@ function setupDetailValueStreamEvents() {
       }
     });
   });
+
+  setupVsJsonEditEvents();
+}
+
+function setupVsJsonEditEvents() {
+  if (!el.detailResult) return;
+  el.detailResult.querySelectorAll('.vs-json-edit-btn').forEach((btn) => {
+    btn.addEventListener('click', () => enterVsJsonEditMode(btn.closest('.vs-card')));
+  });
+  el.detailResult.querySelectorAll('.vs-json-undo-btn').forEach((btn) => {
+    btn.addEventListener('click', () => undoVsJsonEdit(btn.closest('.vs-card')));
+  });
+  el.detailResult.querySelectorAll('.vs-json-save-btn').forEach((btn) => {
+    btn.addEventListener('click', () => saveVsJsonEdit(btn.closest('.vs-card')));
+  });
+  el.detailResult.querySelectorAll('.vs-json-cancel-btn').forEach((btn) => {
+    btn.addEventListener('click', () => exitVsJsonEditMode(btn.closest('.vs-card')));
+  });
+}
+
+const vsJsonEditState = new WeakMap();
+
+function enterVsJsonEditMode(card) {
+  if (!card || !currentDetailRecord) return;
+  const idx = parseInt(card.dataset.index, 10);
+  const item = currentDetailRecord.valueStreams?.[idx];
+  if (!item) return;
+  const jsonPanel = card.querySelector('.vs-tab-panel-json');
+  const pre = jsonPanel?.querySelector('.vs-json');
+  const textarea = jsonPanel?.querySelector('.vs-json-edit');
+  const editBtn = jsonPanel?.querySelector('.vs-json-edit-btn');
+  const editActions = jsonPanel?.querySelector('.vs-json-edit-actions');
+  const errorEl = jsonPanel?.querySelector('.vs-json-error');
+  if (!pre || !textarea || !editBtn || !editActions) return;
+  const content = JSON.stringify(item, null, 2);
+  textarea.value = content;
+  vsJsonEditState.set(card, { undoStack: [], lastPushed: content });
+  if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+  pre.hidden = true;
+  textarea.hidden = false;
+  editBtn.hidden = true;
+  editActions.hidden = false;
+  editActions.querySelector('.vs-json-undo-btn').hidden = true;
+  textarea.focus();
+  let debounceTimer;
+  const onInput = () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const state = vsJsonEditState.get(card);
+      if (state && state.lastPushed !== textarea.value) {
+        state.undoStack.push(state.lastPushed);
+        state.lastPushed = textarea.value;
+        editActions.querySelector('.vs-json-undo-btn').hidden = state.undoStack.length === 0;
+      }
+    }, 300);
+  };
+  textarea.addEventListener('input', onInput);
+  textarea._vsJsonCleanup?.();
+  textarea._vsJsonCleanup = () => {
+    textarea.removeEventListener('input', onInput);
+    clearTimeout(debounceTimer);
+    delete textarea._vsJsonCleanup;
+  };
+}
+
+function undoVsJsonEdit(card) {
+  const state = vsJsonEditState.get(card);
+  const jsonPanel = card?.querySelector('.vs-tab-panel-json');
+  const textarea = jsonPanel?.querySelector('.vs-json-edit');
+  const errorEl = jsonPanel?.querySelector('.vs-json-error');
+  const undoBtn = jsonPanel?.querySelector('.vs-json-undo-btn');
+  if (!textarea || !state || state.undoStack.length === 0) return;
+  const prev = state.undoStack.pop();
+  textarea.value = prev;
+  state.lastPushed = prev;
+  if (undoBtn) undoBtn.hidden = state.undoStack.length === 0;
+  if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+}
+
+function saveVsJsonEdit(card) {
+  if (!card || !currentDetailRecord) return;
+  const idx = parseInt(card.dataset.index, 10);
+  const jsonPanel = card.querySelector('.vs-tab-panel-json');
+  const textarea = jsonPanel?.querySelector('.vs-json-edit');
+  const errorEl = jsonPanel?.querySelector('.vs-json-error');
+  if (!textarea) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(textarea.value);
+  } catch (e) {
+    if (errorEl) {
+      errorEl.hidden = false;
+      errorEl.textContent = 'JSON 格式错误：' + (e.message || '无法解析');
+    }
+    return;
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    if (errorEl) {
+      errorEl.hidden = false;
+      errorEl.textContent = 'JSON 必须为对象';
+    }
+    return;
+  }
+  if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+  textarea._vsJsonCleanup?.();
+  vsJsonEditState.delete(card);
+  currentDetailRecord.valueStreams[idx] = parsed;
+  saveAnalysis(currentDetailRecord);
+  const viewPanel = card.querySelector('.vs-tab-panel-view');
+  if (viewPanel) {
+    viewPanel.innerHTML = renderValueStreamViewHTML(parsed);
+    viewPanel.dataset.rendered = 'true';
+  }
+  const pre = jsonPanel.querySelector('.vs-json');
+  pre.textContent = JSON.stringify(parsed, null, 2);
+  pre.hidden = false;
+  textarea.hidden = true;
+  jsonPanel.querySelector('.vs-json-edit-btn').hidden = false;
+  jsonPanel.querySelector('.vs-json-edit-actions').hidden = true;
+  delete textarea.dataset.undoContent;
+}
+
+function exitVsJsonEditMode(card) {
+  if (!card || !currentDetailRecord) return;
+  const idx = parseInt(card.dataset.index, 10);
+  const item = currentDetailRecord.valueStreams?.[idx];
+  if (!item) return;
+  const jsonPanel = card.querySelector('.vs-tab-panel-json');
+  const pre = jsonPanel?.querySelector('.vs-json');
+  const textarea = jsonPanel?.querySelector('.vs-json-edit');
+  const errorEl = jsonPanel?.querySelector('.vs-json-error');
+  if (!pre || !textarea) return;
+  textarea._vsJsonCleanup?.();
+  vsJsonEditState.delete(card);
+  pre.textContent = JSON.stringify(item, null, 2);
+  pre.hidden = false;
+  textarea.hidden = true;
+  if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+  jsonPanel.querySelector('.vs-json-edit-btn').hidden = false;
+  jsonPanel.querySelector('.vs-json-edit-actions').hidden = true;
 }
 
 function openDetail(record) {
@@ -930,7 +1357,7 @@ function buildDetailHTML(record) {
         const name = formatValue(item.name ?? item.title ?? item.value_stream_name ?? `价值流 ${i + 1}`);
         const jsonStr = JSON.stringify(item, null, 2);
         return `
-          <div class="vs-card" data-index="${i}">
+          <div class="vs-card" data-index="${i}" data-vs-index="${i}" data-vs-name="${escapeHtml(name)}">
             <button type="button" class="vs-card-header" aria-expanded="false">
               <span class="vs-card-name">${escapeHtml(name)}</span>
               <span class="vs-card-chevron" aria-hidden="true">▼</span>
@@ -944,7 +1371,17 @@ function buildDetailHTML(record) {
                 <p class="vs-view-placeholder">展开后加载…</p>
               </div>
               <div class="vs-tab-panel vs-tab-panel-json" data-panel="json" hidden>
+                <div class="vs-json-toolbar">
+                  <button type="button" class="vs-json-edit-btn">编辑</button>
+                  <div class="vs-json-edit-actions" hidden>
+                    <button type="button" class="vs-json-undo-btn">撤回</button>
+                    <button type="button" class="vs-json-save-btn">保存</button>
+                    <button type="button" class="vs-json-cancel-btn">取消</button>
+                  </div>
+                </div>
                 <pre class="vs-json">${escapeHtml(jsonStr)}</pre>
+                <textarea class="vs-json-edit" hidden spellcheck="false"></textarea>
+                <p class="vs-json-error" hidden></p>
               </div>
             </div>
           </div>`;
@@ -1022,11 +1459,32 @@ function appendChatBlock(container, role, content, timeStr) {
   return block;
 }
 
-function appendModificationBlock(container, parsed, timeStr, onConfirm, onCancel, onRetry) {
-  const block = document.createElement('div');
-  block.className = 'chat-message chat-message-assistant chat-message-modification';
-  block.innerHTML = `
-    <div class="chat-modification-body">
+function buildModificationBlockRows(parsed) {
+  if (parsed.isValueStream) {
+    const opLabel = parsed.operation === 'addstage' ? '新增阶段' : parsed.operation === 'addstep' ? '新增环节' : '修改节点';
+    return `
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">操作类型</span>
+        <span class="chat-modification-value">${escapeHtml(opLabel)}</span>
+      </div>
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">需要修改的价值流</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.valueStreamName || '—')}</span>
+      </div>
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">${parsed.operation === 'addstep' ? '所属阶段' : parsed.operation === 'addstage' ? '插入位置（前一阶段名）' : '需要修改的节点名称'}</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.nodeName || '—')}</span>
+      </div>
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">修改意见</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.modification)}</span>
+      </div>
+      <div class="chat-modification-row">
+        <span class="chat-modification-label">修改原因</span>
+        <span class="chat-modification-value">${escapeHtml(parsed.reason)}</span>
+      </div>`;
+  }
+  return `
       <div class="chat-modification-row">
         <span class="chat-modification-label">修改位置</span>
         <span class="chat-modification-value">${escapeHtml(parsed.position)}</span>
@@ -1038,7 +1496,15 @@ function appendModificationBlock(container, parsed, timeStr, onConfirm, onCancel
       <div class="chat-modification-row">
         <span class="chat-modification-label">修改原因</span>
         <span class="chat-modification-value">${escapeHtml(parsed.reason)}</span>
-      </div>
+      </div>`;
+}
+
+function appendModificationBlock(container, parsed, timeStr, onConfirm, onCancel, onRetry) {
+  const block = document.createElement('div');
+  block.className = 'chat-message chat-message-assistant chat-message-modification';
+  block.innerHTML = `
+    <div class="chat-modification-body">
+      ${buildModificationBlockRows(parsed)}
       <div class="chat-modification-actions">
         <button type="button" class="btn-confirm-mod">确认</button>
         <button type="button" class="btn-retry-mod">重来</button>
@@ -1066,13 +1532,52 @@ function appendModificationBlock(container, parsed, timeStr, onConfirm, onCancel
   return block;
 }
 
+/**
+ * 将新的价值流修改内容整合到当前任务中。若新内容与旧内容有冲突，则以新内容为准。
+ * 仅当当前任务为价值流修改时使用。
+ */
+function mergeValueStreamModification(currentParsed, newParsed) {
+  if (!currentParsed?.isValueStream) return newParsed || currentParsed;
+  if (!newParsed) return currentParsed;
+  return {
+    ...currentParsed,
+    ...newParsed,
+    isValueStream: true,
+    operation: (newParsed.operation || currentParsed.operation || 'update').toLowerCase(),
+    valueStreamName: (newParsed.valueStreamName || currentParsed.valueStreamName || '').trim() || currentParsed.valueStreamName,
+    nodeName: (newParsed.nodeName || currentParsed.nodeName || '').trim() || currentParsed.nodeName,
+    insertAfterStepName: (newParsed.insertAfterStepName ?? currentParsed.insertAfterStepName ?? '').trim() || currentParsed.insertAfterStepName,
+    valueStreamIndex: newParsed.valueStreamIndex ?? currentParsed.valueStreamIndex,
+    modification: newParsed.modification ?? currentParsed.modification,
+    reason: newParsed.reason ?? currentParsed.reason,
+    newValue: newParsed.newValue ?? currentParsed.newValue,
+    position: newParsed.position || currentParsed.position,
+    positionKey: newParsed.positionKey || currentParsed.positionKey || currentParsed.position,
+  };
+}
+
 /** 就地更新修改块内容（用于同一任务内的修订） */
 function updateModificationBlockContent(block, parsed) {
   if (!block || !parsed) return;
   const body = block.querySelector('.chat-modification-body');
   if (!body) return;
   const rows = body.querySelectorAll('.chat-modification-row');
-  if (rows.length >= 3) {
+  if (parsed.isValueStream && rows.length >= 5) {
+    const opLabel = parsed.operation === 'addstage' ? '新增阶段' : parsed.operation === 'addstep' ? '新增环节' : '修改节点';
+    const nodeLabel = parsed.operation === 'addstep' ? '所属阶段' : parsed.operation === 'addstage' ? '插入位置（前一阶段名）' : '需要修改的节点名称';
+    rows[0].querySelector('.chat-modification-label').textContent = '操作类型';
+    rows[0].querySelector('.chat-modification-value').textContent = opLabel;
+    rows[1].querySelector('.chat-modification-value').textContent = parsed.valueStreamName || '—';
+    rows[2].querySelector('.chat-modification-label').textContent = nodeLabel;
+    rows[2].querySelector('.chat-modification-value').textContent = parsed.nodeName || '—';
+    rows[3].querySelector('.chat-modification-value').textContent = parsed.modification || '—';
+    rows[4].querySelector('.chat-modification-value').textContent = parsed.reason || '—';
+  } else if (parsed.isValueStream && rows.length >= 4) {
+    rows[0].querySelector('.chat-modification-value').textContent = parsed.valueStreamName || '—';
+    rows[1].querySelector('.chat-modification-value').textContent = parsed.nodeName || '—';
+    rows[2].querySelector('.chat-modification-value').textContent = parsed.modification || '—';
+    rows[3].querySelector('.chat-modification-value').textContent = parsed.reason || '—';
+  } else if (rows.length >= 3) {
     rows[0].querySelector('.chat-modification-value').textContent = parsed.position || '—';
     rows[1].querySelector('.chat-modification-value').textContent = parsed.modification || '—';
     rows[2].querySelector('.chat-modification-value').textContent = parsed.reason || '—';
@@ -1084,18 +1589,7 @@ function appendModificationBlockReadOnly(container, parsed, timeStr) {
   block.className = 'chat-message chat-message-assistant chat-message-modification chat-message-readonly';
   block.innerHTML = `
     <div class="chat-modification-body">
-      <div class="chat-modification-row">
-        <span class="chat-modification-label">修改位置</span>
-        <span class="chat-modification-value">${escapeHtml(parsed.position)}</span>
-      </div>
-      <div class="chat-modification-row">
-        <span class="chat-modification-label">修改意见</span>
-        <span class="chat-modification-value">${escapeHtml(parsed.modification)}</span>
-      </div>
-      <div class="chat-modification-row">
-        <span class="chat-modification-label">修改原因</span>
-        <span class="chat-modification-value">${escapeHtml(parsed.reason)}</span>
-      </div>
+      ${buildModificationBlockRows(parsed)}
       <div class="chat-modification-actions readonly"><span class="mod-status">历史记录</span></div>
     </div>
     <div class="chat-message-time">${timeStr}</div>
@@ -1107,19 +1601,42 @@ function appendModificationBlockReadOnly(container, parsed, timeStr) {
 
 async function fetchModificationFromLLM() {
   const pageStructure = buildPageStructureForLLM(currentDetailRecord);
+  const pendingVs = currentModificationTask?.parsed?.isValueStream
+    ? `\n【重要】当前有一条未确认的价值流修改建议（${currentModificationTask.parsed.valueStreamName || ''} - ${currentModificationTask.parsed.nodeName || ''}）。用户发送的新内容应视为对该修改的补充，请将新内容整合到同一条修改建议中，若有冲突则以新内容为准，仍使用格式 B 回复。\n`
+    : '';
   const systemContent = `你是企业信息与商业画布修改助手。当前用户正在查看「${currentDetailCompanyName || '某企业'}」的详情页。
-
+${pendingVs}
 【任务】当用户提出修改需求时，你需要：
 1. 分析下方「当前页面详情结构」，判断用户要修改的是哪个位置的内容；
 2. 提炼出：修改位置、修改意见（具体的修改点的总结）、修改原因、修改后的完整内容；
 3. 用以下 JSON 格式回复（不要包含其他说明文字）：
 
+当修改涉及【基本信息】或【商业画布】时，使用格式 A：
 \`\`\`json
 {
-  "position": "精确的字段标签，如：客户细分、价值主张、企业名称 等（必须与页面结构中的标签一致）",
-  "modification": "具体的修改点的总结，如：将客户细分从宽泛描述调整为更精准的目标客户群体定位",
+  "position": "精确的字段标签，如：客户细分、价值主张、企业名称 等",
+  "modification": "具体的修改点的总结",
   "reason": "修改原因说明",
-  "newValue": "修改后的完整新内容（必填，即将要写入该字段的全文）"
+  "newValue": "修改后的完整新内容（必填）"
+}
+\`\`\`
+
+当修改涉及【价值流】时，使用格式 B。必须根据操作类型填写 operation：
+- update：修改现有节点/环节的内容，nodeName 为要修改的节点名称，newValue 为修改后的内容
+- addStage：新增阶段节点，nodeName 为插入位置之前的阶段名（为空则追加到末尾），newValue 为新阶段名称
+- addStep：在某个阶段内新增环节，nodeName 为所属阶段名称，newValue 为新环节名称（可含描述，用换行分隔）。若需在指定环节后插入，需填写 insertAfterStepName（前一环节名称））
+
+\`\`\`json
+{
+  "isValueStream": true,
+  "operation": "update|addStage|addStep",
+  "valueStreamName": "需要修改的价值流名称（与页面中价值流名称一致）",
+  "nodeName": "见上方各 operation 说明",
+  "insertAfterStepName": "（仅 addStep 且需指定插入位置时）前一环节名称，如：审核方案",
+  "position": "价值流-节点（如：xxx价值流-xxx阶段/环节）",
+  "modification": "具体的修改意见",
+  "reason": "修改原因说明",
+  "newValue": "修改后的完整新内容 或 新增节点/环节的名称（必填）"
 }
 \`\`\`
 
@@ -1151,7 +1668,7 @@ ${pageStructure || '(无详情数据)'}`;
 function renderModificationOrPlain(container, assistantContent) {
   const parsed = parseModificationResponse(assistantContent);
   if (parsed && currentDetailRecord) {
-    scrollToTargetAndHighlight(parsed.position);
+    scrollToTargetAndHighlight(parsed);
     const lastTs = chatHistory[chatHistory.length - 1]?.timestamp;
     return appendModificationBlock(container, parsed, formatChatTime(lastTs), () => {
       clearModificationHighlight();
@@ -1175,6 +1692,15 @@ function renderModificationOrPlain(container, assistantContent) {
         el.detailResult.innerHTML = buildDetailHTML(currentDetailRecord);
         saveAnalysis(currentDetailRecord);
         setupDetailValueStreamEvents();
+        if (appliedParsed.isValueStream) {
+          const vsIdx = getValueStreamIndexFromParsed(appliedParsed);
+          if (vsIdx != null) {
+            requestAnimationFrame(() => {
+              expandAndRefreshValueStreamCard(vsIdx);
+              el.detailResult?.querySelector(`.vs-card[data-index="${vsIdx}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            });
+          }
+        }
       }
     }, (modBlock) => {
       clearModificationHighlight();
@@ -1256,15 +1782,59 @@ async function sendChatMessage() {
   loadingBlock.remove();
 
   if (currentModificationTask) {
+    const currentParsed = currentModificationTask.parsed;
     const newParsed = parseModificationResponse(assistantContent);
-    const currentPosition = currentModificationTask.parsed.position;
-    if (newParsed && isSameModificationPosition(newParsed.position, currentPosition)) {
+
+    if (currentParsed.isValueStream) {
+      const merged = mergeValueStreamModification(currentParsed, newParsed);
+      const oldBlock = currentModificationTask.block;
+      oldBlock.remove();
+      const timeStr = formatChatTime(assistantMsg.timestamp);
+      appendModificationBlock(messages, merged, timeStr, () => {
+        clearModificationHighlight();
+        const appliedParsed = currentModificationTask?.parsed || merged;
+        const beforeValue = getCurrentValueForPosition(currentDetailRecord, appliedParsed);
+        if (applyModification(currentDetailRecord, appliedParsed)) {
+          const afterValue = appliedParsed.newValue != null ? String(appliedParsed.newValue) : appliedParsed.modification;
+          const modificationSummary = appliedParsed.modification && appliedParsed.modification !== afterValue
+            ? appliedParsed.modification
+            : (beforeValue || afterValue ? `将「${beforeValue || '空'}」修改为「${afterValue}」` : '内容已更新');
+          const history = currentDetailRecord.modificationHistory || [];
+          history.unshift({
+            position: appliedParsed.position,
+            beforeValue,
+            modification: modificationSummary,
+            afterValue,
+            reason: appliedParsed.reason,
+            timestamp: new Date().toISOString(),
+          });
+          currentDetailRecord.modificationHistory = history;
+          el.detailResult.innerHTML = buildDetailHTML(currentDetailRecord);
+          saveAnalysis(currentDetailRecord);
+          setupDetailValueStreamEvents();
+          const vsIdx = getValueStreamIndexFromParsed(appliedParsed);
+          if (vsIdx != null) {
+            requestAnimationFrame(() => {
+              expandAndRefreshValueStreamCard(vsIdx);
+              el.detailResult?.querySelector(`.vs-card[data-index="${vsIdx}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            });
+          }
+        }
+      }, (modBlock) => {
+        clearModificationHighlight();
+        cancelModification(messages, modBlock);
+      }, (retryBlock) => retryModification(messages, retryBlock));
+      scrollToTargetAndHighlight(merged);
+      messages.scrollTop = messages.scrollHeight;
+      saveChatToRecord();
+    } else if (newParsed && isSameModificationPosition(newParsed, currentParsed)) {
       currentModificationTask.parsed = newParsed;
       updateModificationBlockContent(currentModificationTask.block, newParsed);
-      scrollToTargetAndHighlight(newParsed.position);
+      scrollToTargetAndHighlight(newParsed);
       saveChatToRecord();
     } else {
       chatHistory.pop();
+      const currentPosition = currentParsed.position;
       const prompt = `请先确认或放弃当前修改（${currentPosition}）后再开启新的修改任务。`;
       chatHistory.push({ role: 'assistant', content: prompt, timestamp: assistantMsg.timestamp });
       appendChatBlock(messages, 'assistant', prompt, formatChatTime(assistantMsg.timestamp));
