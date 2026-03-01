@@ -569,17 +569,15 @@ function extractPureStageName(raw) {
   return s;
 }
 
-/** 从可能包含「名称 (描述)」的字符串中分离名称与描述 */
+/** 从可能包含「名称 (描述)」或「名称（描述）」的字符串中分离名称与描述，支持全角/半角括号 */
 function extractStepNameAndDesc(stepObj) {
   const nameRaw = stepObj.name ?? stepObj.title ?? stepObj.step_name ?? stepObj.phase_name ?? stepObj.label ?? stepObj.node_name ?? '';
   const descRaw = stepObj.description ?? stepObj.desc ?? stepObj.content;
   const name = formatValue(nameRaw);
   const desc = formatValue(descRaw);
   if (desc) return { name, desc };
-  if (name && /\([^)]+\)$/.test(name)) {
-    const m = name.match(/^(.+?)\s*\(([^)]+)\)$/);
-    if (m) return { name: m[1].trim(), desc: m[2].trim() };
-  }
+  const m = name && name.match(/^(.+?)\s*[（(]([^）)]+)[）)]\s*$/);
+  if (m) return { name: m[1].trim(), desc: m[2].trim() };
   return { name, desc: '' };
 }
 
@@ -605,7 +603,10 @@ function parseValueStreamGraph(data) {
       return {
         name: stageName,
         steps: steps.map((st, j) => {
-          if (typeof st === 'string') return { name: st, desc: '' };
+          if (typeof st === 'string') {
+            const { name: stepName, desc: stepDesc } = extractStepNameAndDesc({ name: st });
+            return { name: stepName || st, desc: stepDesc };
+          }
           const { name: stepName, desc: stepDesc } = extractStepNameAndDesc(st);
           return {
             name: stepName || `环节${j + 1}`,
@@ -736,7 +737,7 @@ function renderValueStreamList(list) {
 
       if (targetTab === 'view') {
         const viewPanel = card.querySelector('.vs-tab-panel-view');
-        if (viewPanel && viewPanel.dataset.rendered !== 'true') {
+        if (viewPanel) {
           const idx = parseInt(card.dataset.index, 10);
           const item = currentValueStreamList[idx];
           if (item) {
@@ -1120,7 +1121,7 @@ function setupDetailValueStreamEvents() {
       tab.classList.add('vs-tab-active');
       if (targetTab === 'view') {
         const viewPanel = card.querySelector('.vs-tab-panel-view');
-        if (viewPanel && viewPanel.dataset.rendered !== 'true') {
+        if (viewPanel) {
           const idx = parseInt(card.dataset.index, 10);
           const item = currentValueStreamList[idx];
           if (item) {
