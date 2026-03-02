@@ -620,6 +620,32 @@ body {
   color: var(--text-muted);
 }
 
+.problem-detail-chat-requirement-logic-card .problem-detail-basic-info-label {
+  min-width: 10em;
+}
+
+.problem-detail-chat-requirement-logic-card:not(.problem-detail-chat-card-expanded) .problem-detail-basic-info-card-body {
+  max-height: 8em;
+  overflow: hidden;
+}
+
+.problem-detail-chat-requirement-logic-card:not(.problem-detail-chat-card-expanded) .problem-detail-basic-info-card-body::after {
+  content: '点击展开';
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.problem-detail-chat-requirement-logic-card.problem-detail-chat-card-expanded .problem-detail-basic-info-card-body {
+  max-height: none;
+}
+
+.problem-detail-chat-requirement-logic-card.problem-detail-chat-card-expanded .problem-detail-basic-info-card-body::after {
+  display: none;
+}
+
 .problem-detail-basic-info-value {
   color: var(--text);
   word-break: break-word;
@@ -651,6 +677,32 @@ body {
   cursor: default;
 }
 
+/* 聊天记录删除按钮 */
+.problem-detail-chat-msg-with-delete {
+  position: relative;
+}
+
+.btn-delete-chat-msg {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  padding: 0.2rem;
+  font-size: 0.875rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.btn-delete-chat-msg:hover {
+  opacity: 1;
+  color: #e57373;
+}
+
 /* BMC 发起确认块 */
 .problem-detail-chat-bmc-start .problem-detail-chat-bmc-start-actions {
   margin-top: 0.5rem;
@@ -674,6 +726,33 @@ body {
 }
 
 .btn-confirm-start-bmc:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 需求逻辑构建发起确认块 */
+.problem-detail-chat-requirement-logic-start .problem-detail-chat-requirement-logic-start-actions {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+.btn-confirm-start-requirement-logic {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-confirm-start-requirement-logic:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-confirm-start-requirement-logic:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -756,6 +835,27 @@ body {
   display: none;
 }
 
+.btn-confirm-requirement-logic {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-confirm-requirement-logic:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-confirm-requirement-logic:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .problem-detail-bmc-card {
   padding: 0.75rem;
   background: var(--surface);
@@ -785,20 +885,27 @@ body {
 
 .problem-detail-bmc-row {
   display: flex;
+  align-items: flex-start;
   gap: 0.5rem;
   margin-bottom: 0.35rem;
   font-size: 0.8125rem;
 }
 
 .problem-detail-bmc-label {
-  flex-shrink: 0;
-  min-width: 5em;
+  width: 10em;
+  min-width: 10em;
+  max-width: 10em;
+  flex: 0 0 10em;
+  overflow-wrap: break-word;
+  word-break: break-word;
   color: var(--text-muted);
+  text-align: left;
 }
 
 .problem-detail-bmc-value {
   color: var(--text);
   word-break: break-word;
+  text-align: left;
 }
 
 .problem-detail-bmc-card-actions {
@@ -992,7 +1099,8 @@ body {
 
 /* 客户基本信息、商业模式画布 BMC - 标题栏绿色突出 */
 .problem-detail-card-basic-info .problem-detail-card-header,
-.problem-detail-card-bmc .problem-detail-card-header {
+.problem-detail-card-bmc .problem-detail-card-header,
+.problem-detail-card-requirement-logic .problem-detail-card-header {
   background: rgba(63, 185, 80, 0.18);
   border-bottom-color: rgba(63, 185, 80, 0.35);
 }
@@ -1060,7 +1168,8 @@ body {
 }
 
 .problem-detail-card-basic-info .problem-detail-card-header:hover,
-.problem-detail-card-bmc .problem-detail-card-header:hover {
+.problem-detail-card-bmc .problem-detail-card-header:hover,
+.problem-detail-card-requirement-logic .problem-detail-card-header:hover {
   background: rgba(63, 185, 80, 0.25);
 }
 
@@ -1076,6 +1185,30 @@ body {
 
 .problem-detail-card-header-collapsed .problem-detail-card-header-arrow {
   transform: rotate(-90deg);
+}
+
+.problem-detail-card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-delete-requirement-logic {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  font-weight: 500;
+  color: #fff;
+  background: #d32f2f;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.btn-delete-requirement-logic:hover {
+  background: #b71c1c;
+  opacity: 0.95;
 }
 
 .problem-detail-card-body {
@@ -1102,32 +1235,58 @@ body {
 
 .problem-detail-row {
   display: flex;
+  align-items: flex-start;
   gap: 0.5rem;
 }
 
+/* 工作区卡片子标题统一宽度，超长换行 */
 .problem-detail-label {
   font-weight: 500;
   color: var(--text-muted);
-  min-width: 8em;
-  flex-shrink: 0;
+  width: 10em;
+  min-width: 10em;
+  max-width: 10em;
+  flex: 0 0 10em;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  text-align: left;
 }
 
 .problem-detail-value {
   color: var(--text);
   flex: 1;
   min-width: 0;
+  text-align: left;
 }
 
+.problem-detail-card .problem-detail-row .problem-detail-label,
+.problem-detail-card .problem-detail-row .problem-detail-value {
+  align-self: flex-start;
+}
+
+/* 与 problem-detail-row 完全一致的 flex 布局，确保与客户细分等字段左对齐 */
 .problem-detail-card .problem-detail-bmc-section {
-  margin-bottom: 1rem;
-  padding: 0 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.35rem 1rem;
+  border-bottom: 1px solid rgba(45, 58, 77, 0.35);
 }
 
-.problem-detail-card .problem-detail-bmc-section h4 {
-  margin: 0 0 0.35rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--text-muted);
+.problem-detail-card .problem-detail-bmc-section:last-of-type {
+  border-bottom: none;
+}
+
+.problem-detail-card .problem-detail-bmc-section .problem-detail-label,
+.problem-detail-card .problem-detail-bmc-section .problem-detail-value {
+  align-self: flex-start;
+}
+
+.problem-detail-card .problem-detail-bmc-section .problem-detail-value,
+.problem-detail-card .problem-detail-bmc-section .problem-detail-bmc-content {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
 }
 
 .problem-detail-card .problem-detail-bmc-grid .problem-detail-row {

@@ -1513,6 +1513,38 @@ if (el.problemDetailChatInput) {
 }
 if (el.problemDetailChatMessages) {
   el.problemDetailChatMessages.addEventListener('click', (e) => {
+    const deleteBtn = e.target.closest('.btn-delete-chat-msg');
+    if (deleteBtn) {
+      const msgBlock = deleteBtn.closest('[data-msg-index]');
+      if (msgBlock) {
+        const idx = parseInt(msgBlock.dataset.msgIndex, 10);
+        if (!isNaN(idx) && idx >= 0 && idx < problemDetailChatMessages.length) {
+          problemDetailChatMessages.splice(idx, 1);
+          saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+          const container = el.problemDetailChatMessages;
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+          requestAnimationFrame(() => {
+            maybeShowBmcStartBlock();
+            maybeShowRequirementLogicStartBlock();
+          });
+        }
+      }
+      return;
+    }
+    const startReqLogicBtn = e.target.closest('.btn-confirm-start-requirement-logic');
+    if (startReqLogicBtn && !startReqLogicBtn.disabled) {
+      startReqLogicBtn.disabled = true;
+      startReqLogicBtn.textContent = '已确认';
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'requirementLogicStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+      }
+      runRequirementLogicConstruction();
+      return;
+    }
     const startBmcBtn = e.target.closest('.btn-confirm-start-bmc');
     if (startBmcBtn && !startBmcBtn.disabled) {
       startBmcBtn.disabled = true;
@@ -1551,6 +1583,7 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailContent();
         bmcBtn.textContent = '已确认';
         bmcBtn.disabled = true;
+        requestAnimationFrame(() => maybeShowRequirementLogicStartBlock());
       } catch (_) {}
       return;
     }
@@ -2053,6 +2086,60 @@ const BMC_GENERATION_PROMPT = `# Role
   "pain_points": "业务痛点预判：基于上述画布，推测该企业在排产/库存/销售/财务环节可能面临的数字化挑战（至少3条）。"
 }`;
 
+const REQUIREMENT_LOGIC_PROMPT = `# Role
+你是一位资深的【数字化转型顾问】与【行业分析专家】，擅长通过企业的商业架构（BMC）与业务现状推导底层需求逻辑。
+
+# Input Data
+请分析以下三个维度的数据：
+1. **企业基本信息**：当前需求理解页面中企业基本信息 json；
+2. **商业模式画布 (BMC)**：当前需求理解页面中商业模式画布 BMC 的 json 数据；
+3. **客户初步需求**：当前需求理解页面中客户初步需求json 数据；
+
+# Task
+请针对以上输入，深度产出【需求背后的逻辑链条分析】。你需要回答：在这个特定的行业背景和商业模式下，客户为什么会提出这些具体的需求？其底层的商业动机是什么？
+
+# Analysis Framework (思考框架)
+请按以下逻辑进行深度解构：
+
+## 1. 行业底层逻辑与竞争共性
+- 分析该企业所属赛道的典型特征（如：重资产、短周转、强季节性、高定制化等）。
+- 该行业目前普遍面临的外部压力（如：供应链波动、利润摊薄、存量竞争等）。
+
+## 2. 需求与商业模式的"因果关联"
+- **盈利驱动分析**：需求如何响应 BMC 中的"收入来源"或"成本结构"？（例如：是为了降低核心业务的哪部分成本？）
+- **客户价值保障**：需求如何支撑 BMC 中的"价值主张"？（例如：为了提高对核心大客户的交付准时率？）
+- **资源杠杆效应**：需求如何优化 BMC 中的"核心资源"利用率？（例如：利用AI优化昂贵的生产线排产。）
+
+## 3. 需求背后的深层动机（The "Why"）
+- **显性动机**：客户在需求描述中直接提到的目标。
+- **隐性风险驱动**：客户没说出口、但在该模式下必须解决的风险（如：资金周转风险、业务员离职导致的客户流失、由于数据孤岛导致的决策滞后）。
+
+## 4. 逻辑链条总结
+请用一句话概括逻辑链条：
+因为【行业特性/现状】+【企业的商业模式局限】，导致了【当前业务场景痛点】，所以客户迫切需要通过【提出的功能需求】来实现【最终的商业目标】。
+
+# Output Format
+请以结构化的 Markdown 文档输出，确保语言专业、逻辑严密，能为后续的需求规格说明书（SRS）提供支撑。
+
+# Output Requirements (输出必须包含)
+输出必须包含以下四个部分，每个部分必须有实质性内容（不少于 2 句话），格式如下，顺序不可调换：
+
+\`\`\`
+## 1. 行业底层逻辑与竞争共性
+（此处填写该企业所属赛道的典型特征、行业面临的外部压力等，不少于 2 句话）
+
+## 2. 初步需求与商业模式的"因果关联"
+（此处填写需求与 BMC 收入/成本/价值主张/核心资源的关联分析，不少于 2 句话）
+
+## 3. 需求背后的深层动机
+（此处填写显性动机与隐性风险驱动，不少于 2 句话）
+
+## 4. 逻辑链条总结
+（此处用一句话概括：因为【行业特性】+【商业模式局限】→【业务痛点】→【功能需求】→【商业目标】）
+\`\`\`
+
+注意：每个 ## 标题下方必须紧跟具体分析内容，不可留空。`;
+
 const BMC_LABEL_TO_KEY = {
   '客户细分': 'customer_segments',
   '价值主张': 'value_propositions',
@@ -2096,6 +2183,60 @@ function parseBmcFromMarkdown(text) {
   return result;
 }
 
+const REQUIREMENT_LOGIC_SECTIONS = [
+  { key: 'industry_competition', label: '行业底层逻辑与竞争共性' },
+  { key: 'causal_relation', label: '初步需求与商业模式的"因果关联"' },
+  { key: 'deep_motivation', label: '需求背后的深层动机' },
+  { key: 'logic_summary', label: '逻辑链条总结' },
+];
+
+function parseRequirementLogicFromMarkdown(text) {
+  const result = {};
+  REQUIREMENT_LOGIC_SECTIONS.forEach(({ key }) => { result[key] = ''; });
+  if (!text || typeof text !== 'string') return result;
+  text = text.replace(/^```[\w]*\n?|```\s*$/g, '').trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const obj = JSON.parse(jsonMatch[0]);
+      REQUIREMENT_LOGIC_SECTIONS.forEach(({ key, label }) => {
+        const val = obj[key] ?? obj[label] ?? obj[label.replace(/"/g, '')];
+        if (val != null) result[key] = String(val).trim();
+      });
+      if (REQUIREMENT_LOGIC_SECTIONS.some(({ key }) => result[key])) return result;
+    } catch (_) {}
+  }
+  const lines = text.split('\n');
+  let section = '';
+  const headerPatterns = [
+    [/^#{1,3}\s*1[\.、]\s*行业底层逻辑/i, 'industry_competition'],
+    [/^#{1,3}\s*2[\.、]\s*初步需求与商业模式/i, 'causal_relation'],
+    [/^#{1,3}\s*3[\.、]\s*需求背后的深层动机/i, 'deep_motivation'],
+    [/^#{1,3}\s*4[\.、]\s*逻辑链条总结/i, 'logic_summary'],
+  ];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let matched = false;
+    for (const [pat, key] of headerPatterns) {
+      if (pat.test(line)) {
+        section = key;
+        const afterColon = line.split(/[：:]/).slice(1).join(':').trim();
+        if (afterColon) result[section] = afterColon;
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    if (section && result.hasOwnProperty(section)) {
+      const trimmed = line.trim();
+      if (trimmed && !/^#{1,3}\s*\d[\.、]/.test(trimmed)) {
+        result[section] += (result[section] ? '\n' : '') + trimmed;
+      }
+    }
+  }
+  return result;
+}
+
 async function generateBmcFromBasicInfo(basicInfoJson) {
   const inputStr = typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJson, null, 2);
   const res = await fetch(DEEPSEEK_API_URL, {
@@ -2120,6 +2261,42 @@ async function generateBmcFromBasicInfo(basicInfoJson) {
     try { return JSON.parse(jsonMatch[0]); } catch (_) {}
   }
   return parseBmcFromMarkdown(content);
+}
+
+async function generateRequirementLogicFromInputs(preliminaryReqJson, basicInfoJson, bmcJson) {
+  const userContent = `请基于以下三个维度的数据进行分析：
+
+## 1. 客户初步需求 json
+\`\`\`json
+${typeof preliminaryReqJson === 'string' ? preliminaryReqJson : JSON.stringify(preliminaryReqJson, null, 2)}
+\`\`\`
+
+## 2. 企业基本信息 json
+\`\`\`json
+${typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJson, null, 2)}
+\`\`\`
+
+## 3. 商业模式画布 (BMC) json
+\`\`\`json
+${typeof bmcJson === 'string' ? bmcJson : JSON.stringify(bmcJson, null, 2)}
+\`\`\``;
+  const res = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: 'system', content: REQUIREMENT_LOGIC_PROMPT },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return (data.choices?.[0]?.message?.content ?? '').trim();
 }
 
 const PARSE_PREVIEW_FIELDS = [
@@ -2220,6 +2397,29 @@ function updateDigitalProblemBmc(createdAt, bmc) {
   localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
 }
 
+function updateDigitalProblemRequirementLogic(createdAt, requirementLogic) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const completed = item.completedStages || [];
+  if (!completed.includes(2)) completed.push(2);
+  completed.sort((a, b) => a - b);
+  list[idx] = { ...item, requirementLogic, completedStages: completed };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+function deleteDigitalProblemRequirementLogic(createdAt) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const { requirementLogic, ...rest } = item;
+  const completedStages = (item.completedStages || []).filter((x) => x !== 2).sort((a, b) => a - b);
+  list[idx] = { ...rest, completedStages };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
 function getProblemDetailChats() {
   try {
     const raw = localStorage.getItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY);
@@ -2301,6 +2501,7 @@ function initProblemDetailChat() {
   requestAnimationFrame(() => {
     container.scrollTop = container.scrollHeight;
     maybeShowBmcStartBlock();
+    maybeShowRequirementLogicStartBlock();
   });
 }
 
@@ -2394,15 +2595,121 @@ function maybeShowBmcStartBlock() {
   container.scrollTop = container.scrollHeight;
 }
 
+function maybeShowRequirementLogicStartBlock() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (item.requirementLogic) return;
+  const completedStages = item.completedStages || [];
+  const currentStage = [0, 1, 2].find((i) => !completedStages.includes(i)) ?? 3;
+  if (currentStage !== 2) return;
+  if (!item.bmc || !(item.basicInfo || problemDetailConfirmedBasicInfo)) return;
+  const hasStart = problemDetailChatMessages.some((m) => m.type === 'requirementLogicStartBlock');
+  if (hasStart) return;
+  const block = document.createElement('div');
+  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-requirement-logic-start';
+  block.innerHTML = `
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">我即将开始提取需求逻辑</div>
+      <div class="problem-detail-chat-requirement-logic-start-actions">
+        <button type="button" class="btn-confirm-start-requirement-logic">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  pushAndSaveProblemDetailChat({ type: 'requirementLogicStartBlock', timestamp: getTimeStr() });
+  container.scrollTop = container.scrollHeight;
+}
+
+async function runRequirementLogicConstruction() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || {};
+  const bmc = item.bmc || {};
+  const preliminaryReq = {
+    customerName: item.customerName,
+    customerNeedsOrChallenges: item.customerNeedsOrChallenges,
+    customerItStatus: item.customerItStatus,
+    projectTimeRequirement: item.projectTimeRequirement,
+  };
+  try {
+    const titleBlock = document.createElement('div');
+    titleBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    titleBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">提炼需求逻辑</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(titleBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '提炼需求逻辑', timestamp: getTimeStr() });
+    container.scrollTop = container.scrollHeight;
+    const loadingBlock = document.createElement('div');
+    loadingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在分析需求逻辑…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(loadingBlock);
+    container.scrollTop = container.scrollHeight;
+    const content = await generateRequirementLogicFromInputs(preliminaryReq, basicInfo, bmc);
+    loadingBlock.remove();
+    const parsed = parseRequirementLogicFromMarkdown(content);
+    const hasAnyContent = REQUIREMENT_LOGIC_SECTIONS.some(({ key }) => (parsed[key] || '').trim());
+    const rows = hasAnyContent
+      ? REQUIREMENT_LOGIC_SECTIONS.map(({ key, label }) => {
+          const val = (parsed[key] || '').trim() || '—';
+          return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(val).replace(/\n/g, '<br>')}</span></div>`;
+        }).join('')
+      : `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">原始输出</span><span class="problem-detail-basic-info-value">${escapeHtml(content).replace(/\n/g, '<br>')}</span></div>`;
+    pushAndSaveProblemDetailChat({ type: 'requirementLogicBlock', content, parsed, timestamp: getTimeStr(), confirmed: false });
+    const cardBlock = document.createElement('div');
+    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible problem-detail-chat-msg-with-delete problem-detail-chat-requirement-logic-card';
+    cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+    cardBlock.innerHTML = `
+      <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+      <div class="problem-detail-basic-info-card" role="button" tabindex="0">
+        <div class="problem-detail-basic-info-card-body">${rows}</div>
+        <div class="problem-detail-basic-info-card-actions">
+          <button type="button" class="btn-confirm-requirement-logic">确认</button>
+        </div>
+      </div>
+      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(cardBlock);
+    setupProblemDetailRequirementLogicCardToggle(cardBlock);
+    container.scrollTop = container.scrollHeight;
+    updateDigitalProblemRequirementLogic(item.createdAt, content);
+    currentProblemDetailItem = { ...item, requirementLogic: content, completedStages: [...(item.completedStages || []).filter((x) => x !== 2), 2].sort((a, b) => a - b) };
+    renderProblemDetailContent();
+  } catch (err) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">提炼失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '提炼失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+  }
+}
+
 function renderProblemDetailChatFromStorage(container, messages) {
   const item = currentProblemDetailItem;
-  messages.forEach((msg) => {
-    if (msg.type === 'bmcStartBlock') {
-      if (item?.bmc) return;
+  messages.forEach((msg, idx) => {
+    if (msg.type === 'requirementLogicStartBlock') {
+      if (item?.requirementLogic) return;
       const block = document.createElement('div');
-      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-start';
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-requirement-logic-start problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
       const confirmed = !!msg.confirmed;
       block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">我即将开始提取需求逻辑</div>
+          <div class="problem-detail-chat-requirement-logic-start-actions">
+            <button type="button" class="btn-confirm-start-requirement-logic" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'bmcStartBlock') {
+      if (item?.bmc) return;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-start problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      const confirmed = !!msg.confirmed;
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
         <div class="problem-detail-chat-msg-content-wrap">
           <div class="problem-detail-chat-msg-content">我将发起商业模式画布 BMC 生成</div>
           <div class="problem-detail-chat-bmc-start-actions">
@@ -2415,7 +2722,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
       const cardBlock = document.createElement('div');
-      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-card-collapsible';
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-card-collapsible problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
       const bmcRows = BMC_FIELDS.map(({ key, label }) => {
         const value = (data[key] != null ? String(data[key]).trim() : '') || '—';
         return `<div class="problem-detail-bmc-row"><span class="problem-detail-bmc-label">${escapeHtml(label)}</span><span class="problem-detail-bmc-value">${escapeHtml(value)}</span></div>`;
@@ -2423,6 +2731,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       const industryInsight = (data.industry_insight || '').trim() || '—';
       const painPoints = (data.pain_points || '').trim() || '—';
       cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
         <div class="problem-detail-bmc-card" role="button" tabindex="0">
           <div class="problem-detail-bmc-card-body">
             ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
@@ -2437,15 +2746,42 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(cardBlock);
       setupProblemDetailBmcCardToggle(cardBlock);
+    } else if (msg.type === 'requirementLogicBlock') {
+      const content = msg.content || '';
+      const parsed = msg.parsed || parseRequirementLogicFromMarkdown(content);
+      const confirmed = !!msg.confirmed;
+      const hasAnyContent = REQUIREMENT_LOGIC_SECTIONS.some(({ key }) => (parsed[key] || '').trim());
+      const rows = hasAnyContent
+        ? REQUIREMENT_LOGIC_SECTIONS.map(({ key, label }) => {
+            const val = (parsed[key] || '').trim() || '—';
+            return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(val).replace(/\n/g, '<br>')}</span></div>`;
+          }).join('')
+        : `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">原始输出</span><span class="problem-detail-basic-info-value">${escapeHtml(content).replace(/\n/g, '<br>')}</span></div>`;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible problem-detail-chat-msg-with-delete problem-detail-chat-requirement-logic-card';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <div class="problem-detail-basic-info-card" role="button" tabindex="0">
+          <div class="problem-detail-basic-info-card-body">${rows}</div>
+          <div class="problem-detail-basic-info-card-actions">
+            <button type="button" class="btn-confirm-requirement-logic" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
+      setupProblemDetailRequirementLogicCardToggle(cardBlock);
     } else if (msg.type === 'basicInfoJsonBlock') {
       const jsonBlock = document.createElement('div');
-      jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible';
-      jsonBlock.innerHTML = `<div class="problem-detail-chat-json-wrap" role="button" tabindex="0"><pre class="problem-detail-chat-json-pre">${escapeHtml(JSON.stringify(msg.json || {}, null, 2))}</pre></div><div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible problem-detail-chat-msg-with-delete';
+      jsonBlock.dataset.msgIndex = String(idx);
+      jsonBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button><div class="problem-detail-chat-json-wrap" role="button" tabindex="0"><pre class="problem-detail-chat-json-pre">${escapeHtml(JSON.stringify(msg.json || {}, null, 2))}</pre></div><div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(jsonBlock);
       setupProblemDetailJsonBlockToggle(jsonBlock);
     } else if (msg.type === 'basicInfoCard') {
       const cardBlock = document.createElement('div');
-      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
       const labels = [
         { key: 'company_name', label: '公司名称' },
         { key: 'credit_code', label: '信用代码' },
@@ -2465,6 +2801,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       }).join('');
       const confirmed = !!msg.confirmed;
       cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
         <div class="problem-detail-basic-info-card" role="button" tabindex="0">
           <div class="problem-detail-basic-info-card-body">${rows}</div>
           <div class="problem-detail-basic-info-card-actions">
@@ -2483,8 +2820,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
       } else {
         innerHtml = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(msg.content)}</div></div>`;
       }
-      block.className = `problem-detail-chat-msg problem-detail-chat-msg-${msg.role}${collapsibleClass}`;
-      block.innerHTML = innerHtml + `<div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      block.className = `problem-detail-chat-msg problem-detail-chat-msg-${msg.role}${collapsibleClass} problem-detail-chat-msg-with-delete`;
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>${innerHtml}<div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
       if (msg.role === 'user') setupProblemDetailChatTextToggle(block);
     }
@@ -2532,13 +2870,13 @@ function setupProblemDetailChatCardToggle(cardBlock) {
   const card = cardBlock?.querySelector('.problem-detail-basic-info-card');
   if (!card) return;
   card.addEventListener('click', (e) => {
-    if (e.target.closest('.btn-confirm-basic-info')) return;
+    if (e.target.closest('.btn-confirm-basic-info') || e.target.closest('.btn-confirm-requirement-logic')) return;
     cardBlock.classList.toggle('problem-detail-chat-card-expanded');
   });
   card.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      if (!e.target.closest('.btn-confirm-basic-info')) {
+      if (!e.target.closest('.btn-confirm-basic-info') && !e.target.closest('.btn-confirm-requirement-logic')) {
         cardBlock.classList.toggle('problem-detail-chat-card-expanded');
       }
     }
@@ -2560,6 +2898,42 @@ function setupProblemDetailBmcCardToggle(cardBlock) {
       }
     }
   });
+}
+
+function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
+  const card = cardBlock?.querySelector('.problem-detail-basic-info-card');
+  if (!card) return;
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('.btn-confirm-requirement-logic')) return;
+    cardBlock.classList.toggle('problem-detail-chat-card-expanded');
+  });
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (!e.target.closest('.btn-confirm-requirement-logic')) {
+        cardBlock.classList.toggle('problem-detail-chat-card-expanded');
+      }
+    }
+  });
+  const confirmBtn = cardBlock.querySelector('.btn-confirm-requirement-logic');
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = '已确认';
+      let idx = -1;
+      for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
+        if (problemDetailChatMessages[i].type === 'requirementLogicBlock') {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+      }
+    });
+  }
 }
 
 function setupProblemDetailJsonBlockToggle(jsonBlock) {
@@ -2715,9 +3089,9 @@ function renderProblemDetailContent() {
     const painPoints = (bmc.pain_points || '').trim();
     const bmcJsonStr = escapeHtml(JSON.stringify(bmc, null, 2));
     const bmcDetailContent = `
-      ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-value">${escapeHtml(industryInsight)}</div></div>` : ''}
+      ${industryInsight ? `<div class="problem-detail-bmc-section"><span class="problem-detail-label">行业背景洞察</span><span class="problem-detail-value">${escapeHtml(industryInsight).replace(/\n/g, '<br>')}</span></div>` : ''}
       <div class="problem-detail-bmc-grid">${bmcRows}</div>
-      ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-value">${escapeHtml(painPoints)}</div></div>` : ''}`;
+      ${painPoints ? `<div class="problem-detail-bmc-section"><span class="problem-detail-label">业务痛点预判</span><span class="problem-detail-value">${escapeHtml(painPoints).replace(/\n/g, '<br>')}</span></div>` : ''}`;
     bmcCardHtml = `
   <div class="problem-detail-card problem-detail-card-bmc">
     <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
@@ -2734,13 +3108,52 @@ function renderProblemDetailContent() {
     </div>
   </div>`;
   }
+  let requirementLogicCardHtml = '';
+  if (item.requirementLogic) {
+    const parsed = parseRequirementLogicFromMarkdown(item.requirementLogic);
+    const hasAnyContent = REQUIREMENT_LOGIC_SECTIONS.some(({ key }) => (parsed[key] || '').trim());
+    const logicRows = hasAnyContent
+      ? REQUIREMENT_LOGIC_SECTIONS.map(({ key, label }) => {
+          let val = (parsed[key] || '').trim() || '—';
+          val = val.replace(/\*\*/g, '');
+          return `<div class="problem-detail-row"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${escapeHtml(val).replace(/\n/g, '<br>')}</span></div>`;
+        }).join('')
+      : (() => {
+          let raw = (item.requirementLogic || '').replace(/\*\*/g, '');
+          raw = escapeHtml(raw).replace(/\n/g, '<br>');
+          return `<div class="problem-detail-row"><span class="problem-detail-label">原始输出</span><span class="problem-detail-value">${raw}</span></div>`;
+        })();
+    const logicJson = {};
+    REQUIREMENT_LOGIC_SECTIONS.forEach(({ key, label }) => {
+      logicJson[label] = (parsed[key] || '').trim() || '—';
+    });
+    const logicJsonStr = escapeHtml(JSON.stringify(logicJson, null, 2));
+    requirementLogicCardHtml = `
+  <div class="problem-detail-card problem-detail-card-requirement-logic">
+    <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
+      <span class="problem-detail-card-header-title">需求逻辑</span>
+      <div class="problem-detail-card-header-actions">
+        <button type="button" class="problem-detail-card-tab problem-detail-card-tab-active" data-tab="detail" aria-pressed="true">详情</button>
+        <button type="button" class="problem-detail-card-tab" data-tab="json" aria-pressed="false">JSON</button>
+      </div>
+      <span class="problem-detail-card-header-right">
+        <span class="problem-detail-card-header-arrow">▾</span>
+        <button type="button" class="btn-delete-requirement-logic" aria-label="删除需求逻辑">删除</button>
+      </span>
+    </div>
+    <div class="problem-detail-card-body">
+      <div class="problem-detail-card-body-detail">${logicRows}</div>
+      <div class="problem-detail-card-body-json" hidden><pre class="problem-detail-card-json-pre">${logicJsonStr}</pre></div>
+    </div>
+  </div>`;
+  }
   const cardsHtml = `<div class="problem-detail-card">
     <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
       <span class="problem-detail-card-header-title">初步需求</span>
       <span class="problem-detail-card-header-arrow">▾</span>
     </div>
     <div class="problem-detail-card-body">${rows}</div>
-  </div>${basicInfoCardHtml}${bmcCardHtml}`;
+  </div>${basicInfoCardHtml}${bmcCardHtml}${requirementLogicCardHtml}`;
   container.innerHTML = `<div class="problem-detail-substeps">${subStepsHtml}</div>
   <div class="problem-detail-workspace-scroll">
     <div class="problem-detail-workspace-cards">${cardsHtml}</div>
@@ -2760,11 +3173,11 @@ function setupProblemDetailCardToggle() {
       header.classList.toggle('problem-detail-card-header-collapsed', !collapsed);
     };
     header.addEventListener('click', (e) => {
-      if (e.target.closest('.problem-detail-card-tab')) return;
+      if (e.target.closest('.problem-detail-card-tab') || e.target.closest('.btn-delete-requirement-logic')) return;
       toggle();
     });
     header.addEventListener('keydown', (e) => {
-      if (e.target.closest('.problem-detail-card-tab')) return;
+      if (e.target.closest('.problem-detail-card-tab') || e.target.closest('.btn-delete-requirement-logic')) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         toggle();
@@ -2785,6 +3198,30 @@ function setupProblemDetailCardToggle() {
           bodyDetail.hidden = tabName !== 'detail';
           bodyJson.hidden = tabName !== 'json';
         });
+      });
+    }
+    const deleteBtn = card.querySelector('.btn-delete-requirement-logic');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const item = currentProblemDetailItem;
+        if (!item?.createdAt) return;
+        deleteDigitalProblemRequirementLogic(item.createdAt);
+        currentProblemDetailItem = { ...item, requirementLogic: undefined, completedStages: (item.completedStages || []).filter((x) => x !== 2).sort((a, b) => a - b) };
+        const container = el.problemDetailChatMessages;
+        problemDetailChatMessages = problemDetailChatMessages.filter(
+          (m) => m.type !== 'requirementLogicStartBlock' && m.type !== 'requirementLogicBlock'
+        );
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        if (container) {
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          requestAnimationFrame(() => {
+            container.scrollTop = container.scrollHeight;
+            maybeShowRequirementLogicStartBlock();
+          });
+        }
+        renderProblemDetailContent();
       });
     }
   });
