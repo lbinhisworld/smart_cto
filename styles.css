@@ -475,6 +475,7 @@ body {
   min-height: 0;
   padding: 0.75rem 1rem;
   overflow-y: auto;
+  overflow-x: hidden;
   font-size: 0.875rem;
   color: var(--text-muted);
   display: flex;

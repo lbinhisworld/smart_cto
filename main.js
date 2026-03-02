@@ -7,6 +7,7 @@ const VALUE_STREAM_API_URL = 'https://app-6aa0d22a.base44.app/api/apps/6969e6b3c
 
 const STORAGE_KEY = 'company_analyses';
 const DIGITAL_PROBLEMS_STORAGE_KEY = 'digital_problem_followups';
+const PROBLEM_DETAIL_CHATS_STORAGE_KEY = 'problem_detail_chats';
 
 /** DeepSeek 大模型配置：请在 main.js 中设置你的 API Key，或通过环境变量/配置注入 */
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -90,6 +91,9 @@ let currentProblemDetailItem = null;
 
 /** 问题详情页已确认的客户基本信息（解析后点击确认） */
 let problemDetailConfirmedBasicInfo = null;
+
+/** 当前问题详情页的聊天记录（用于持久化） */
+let problemDetailChatMessages = [];
 
 /** 聊天历史，用于 DeepSeek API 的 messages 上下文 */
 let chatHistory = [];
@@ -1514,6 +1518,21 @@ if (el.problemDetailChatMessages) {
       try {
         const data = JSON.parse(btn.dataset.json);
         problemDetailConfirmedBasicInfo = data;
+        const item = currentProblemDetailItem;
+        if (item?.createdAt) {
+          updateDigitalProblemBasicInfo(item.createdAt, data);
+        }
+        let idx = -1;
+        for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
+          if (problemDetailChatMessages[i].type === 'basicInfoCard') {
+            idx = i;
+            break;
+          }
+        }
+        if (idx >= 0) {
+          problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data, confirmed: true };
+          saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+        }
         renderProblemDetailContent();
         btn.textContent = '已确认';
         btn.disabled = true;
@@ -2031,6 +2050,29 @@ function removeDigitalProblem(index) {
   localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
 }
 
+function updateDigitalProblemBasicInfo(createdAt, basicInfo) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  list[idx] = { ...list[idx], basicInfo };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+function getProblemDetailChats() {
+  try {
+    const raw = localStorage.getItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveProblemDetailChat(createdAt, messages) {
+  const chats = getProblemDetailChats();
+  chats[createdAt] = messages;
+  localStorage.setItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY, JSON.stringify(chats));
+}
+
 function renderProblemFollowList() {
   const container = el.problemFollowListContent;
   if (!container) return;
@@ -2062,7 +2104,7 @@ function renderProblemFollowList() {
 
 function openProblemDetail(item) {
   currentProblemDetailItem = item;
-  problemDetailConfirmedBasicInfo = null;
+  problemDetailConfirmedBasicInfo = item.basicInfo || null;
   renderProblemDetailContent();
   initProblemDetailChat();
   switchView('problemDetail');
@@ -2072,12 +2114,75 @@ function initProblemDetailChat() {
   const container = el.problemDetailChatMessages;
   if (!container) return;
   container.innerHTML = '';
-  appendProblemDetailChatMessage(container, 'system', '请输入客户基本信息');
+  const item = currentProblemDetailItem;
+  const chatKey = item?.createdAt;
+  const storedChat = chatKey ? getProblemDetailChats()[chatKey] : null;
+  if (storedChat && Array.isArray(storedChat) && storedChat.length > 0) {
+    problemDetailChatMessages = storedChat;
+    renderProblemDetailChatFromStorage(container, storedChat);
+  } else {
+    problemDetailChatMessages = [{ role: 'system', content: '请输入客户基本信息', timestamp: getTimeStr() }];
+    appendProblemDetailChatMessage(container, 'system', '请输入客户基本信息', { noSave: true });
+    if (chatKey) saveProblemDetailChat(chatKey, problemDetailChatMessages);
+  }
   if (el.problemDetailChatInput) el.problemDetailChatInput.value = '';
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
 }
 
-function appendProblemDetailChatMessage(container, role, content) {
-  const timeStr = getTimeStr();
+function renderProblemDetailChatFromStorage(container, messages) {
+  messages.forEach((msg) => {
+    if (msg.type === 'basicInfoCard') {
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
+      const labels = [
+        { key: 'company_name', label: '公司名称' },
+        { key: 'credit_code', label: '信用代码' },
+        { key: 'legal_representative', label: '法人' },
+        { key: 'established_date', label: '成立时间' },
+        { key: 'registered_capital', label: '注册资本' },
+        { key: 'is_listed', label: '是否上市' },
+        { key: 'listing_location', label: '上市地' },
+        { key: 'business_scope', label: '经营范围' },
+        { key: 'core_qualifications', label: '核心资质' },
+        { key: 'official_website', label: '官方网站' },
+      ];
+      const data = msg.data || {};
+      const rows = labels.map(({ key, label }) => {
+        const value = (data[key] != null ? String(data[key]).trim() : '') || '—';
+        return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(value)}</span></div>`;
+      }).join('');
+      const confirmed = !!msg.confirmed;
+      cardBlock.innerHTML = `
+        <div class="problem-detail-basic-info-card" role="button" tabindex="0">
+          <div class="problem-detail-basic-info-card-body">${rows}</div>
+          <div class="problem-detail-basic-info-card-actions">
+            <button type="button" class="btn-confirm-basic-info" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${msg.timestamp || ''}</div>`;
+      container.appendChild(cardBlock);
+      setupProblemDetailChatCardToggle(cardBlock);
+    } else {
+      const block = document.createElement('div');
+      const collapsibleClass = msg.role === 'user' ? ' problem-detail-chat-msg-collapsible' : '';
+      let innerHtml = '';
+      if (msg.hasCheck) {
+        innerHtml = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(msg.content)}</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div>`;
+      } else {
+        innerHtml = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(msg.content)}</div></div>`;
+      }
+      block.className = `problem-detail-chat-msg problem-detail-chat-msg-${msg.role}${collapsibleClass}`;
+      block.innerHTML = innerHtml + `<div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+      if (msg.role === 'user') setupProblemDetailChatTextToggle(block);
+    }
+  });
+}
+
+function appendProblemDetailChatMessage(container, role, content, options) {
+  const timeStr = options?.timestamp ?? getTimeStr();
   const block = document.createElement('div');
   const collapsibleClass = role === 'user' ? ' problem-detail-chat-msg-collapsible' : '';
   block.className = `problem-detail-chat-msg problem-detail-chat-msg-${role}${collapsibleClass}`;
@@ -2087,7 +2192,16 @@ function appendProblemDetailChatMessage(container, role, content) {
     setupProblemDetailChatTextToggle(block);
   }
   container.scrollTop = container.scrollHeight;
+  if (!options?.noSave) {
+    problemDetailChatMessages.push({ role, content, timestamp: timeStr });
+    saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+  }
   return block;
+}
+
+function pushAndSaveProblemDetailChat(msg) {
+  problemDetailChatMessages.push(msg);
+  saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
 }
 
 function setupProblemDetailChatTextToggle(msgBlock) {
@@ -2142,6 +2256,7 @@ async function handleProblemDetailChatSend() {
     parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
     parsingBlock.classList.add('problem-detail-chat-msg-parsed');
     parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">解析完成</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span>`;
+    pushAndSaveProblemDetailChat({ role: 'system', content: '解析完成', timestamp: getTimeStr(), hasCheck: true });
     const cardBlock = document.createElement('div');
     cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
     const labels = [
@@ -2170,10 +2285,12 @@ async function handleProblemDetailChatSend() {
       <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(cardBlock);
     setupProblemDetailChatCardToggle(cardBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
     container.scrollTop = container.scrollHeight;
   } catch (err) {
     parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
     parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">解析失败：${escapeHtml(err.message || String(err))}</div>`;
+    pushAndSaveProblemDetailChat({ role: 'system', content: '解析失败：' + (err.message || String(err)), timestamp: getTimeStr() });
   }
 }
 
