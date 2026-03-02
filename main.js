@@ -2374,7 +2374,7 @@ function maybeShowBmcStartBlock() {
   if (!container || !item?.createdAt) return;
   if (item.bmc) return;
   const completedStages = item.completedStages || [];
-  const currentStage = [0, 1, 2, 3].find((i) => !completedStages.includes(i)) ?? 4;
+  const currentStage = [0, 1, 2].find((i) => !completedStages.includes(i)) ?? 3;
   if (currentStage !== 1) return;
   if (!problemDetailConfirmedBasicInfo) return;
   const hasBmcStart = problemDetailChatMessages.some((m) => m.type === 'bmcStartBlock');
@@ -2656,11 +2656,10 @@ function renderProblemDetailContent() {
   const subSteps = [
     '企业背景洞察',
     '商业画布加载',
-    '价值流生成',
-    '完整需求理解',
+    '需求逻辑构建',
   ];
   const completedStages = item.completedStages || [];
-  const currentStage = [0, 1, 2, 3].find((i) => !completedStages.includes(i)) ?? 4;
+  const currentStage = [0, 1, 2].find((i) => !completedStages.includes(i)) ?? 3;
   const subStepsHtml = subSteps.map((name, i) => {
     const done = completedStages.includes(i);
     const current = i === currentStage;
@@ -2688,13 +2687,21 @@ function renderProblemDetailContent() {
       const value = (problemDetailConfirmedBasicInfo[key] != null ? String(problemDetailConfirmedBasicInfo[key]).trim() : '') || '—';
       return `<div class="problem-detail-row"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${escapeHtml(value)}</span></div>`;
     }).join('');
+    const basicInfoJsonStr = escapeHtml(JSON.stringify(problemDetailConfirmedBasicInfo, null, 2));
     basicInfoCardHtml = `
   <div class="problem-detail-card problem-detail-card-basic-info">
     <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
       <span class="problem-detail-card-header-title">客户基本信息</span>
+      <div class="problem-detail-card-header-actions">
+        <button type="button" class="problem-detail-card-tab problem-detail-card-tab-active" data-tab="detail" aria-pressed="true">详情</button>
+        <button type="button" class="problem-detail-card-tab" data-tab="json" aria-pressed="false">JSON</button>
+      </div>
       <span class="problem-detail-card-header-arrow">▾</span>
     </div>
-    <div class="problem-detail-card-body">${basicInfoRows}</div>
+    <div class="problem-detail-card-body">
+      <div class="problem-detail-card-body-detail">${basicInfoRows}</div>
+      <div class="problem-detail-card-body-json" hidden><pre class="problem-detail-card-json-pre">${basicInfoJsonStr}</pre></div>
+    </div>
   </div>`;
   }
   let bmcCardHtml = '';
@@ -2706,16 +2713,24 @@ function renderProblemDetailContent() {
     }).join('');
     const industryInsight = (bmc.industry_insight || '').trim();
     const painPoints = (bmc.pain_points || '').trim();
+    const bmcJsonStr = escapeHtml(JSON.stringify(bmc, null, 2));
+    const bmcDetailContent = `
+      ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-value">${escapeHtml(industryInsight)}</div></div>` : ''}
+      <div class="problem-detail-bmc-grid">${bmcRows}</div>
+      ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-value">${escapeHtml(painPoints)}</div></div>` : ''}`;
     bmcCardHtml = `
   <div class="problem-detail-card problem-detail-card-bmc">
     <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
       <span class="problem-detail-card-header-title">商业模式画布 BMC</span>
+      <div class="problem-detail-card-header-actions">
+        <button type="button" class="problem-detail-card-tab problem-detail-card-tab-active" data-tab="detail" aria-pressed="true">详情</button>
+        <button type="button" class="problem-detail-card-tab" data-tab="json" aria-pressed="false">JSON</button>
+      </div>
       <span class="problem-detail-card-header-arrow">▾</span>
     </div>
     <div class="problem-detail-card-body">
-      ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-value">${escapeHtml(industryInsight)}</div></div>` : ''}
-      <div class="problem-detail-bmc-grid">${bmcRows}</div>
-      ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-value">${escapeHtml(painPoints)}</div></div>` : ''}
+      <div class="problem-detail-card-body-detail">${bmcDetailContent}</div>
+      <div class="problem-detail-card-body-json" hidden><pre class="problem-detail-card-json-pre">${bmcJsonStr}</pre></div>
     </div>
   </div>`;
   }
@@ -2744,13 +2759,34 @@ function setupProblemDetailCardToggle() {
       header.setAttribute('aria-expanded', String(!collapsed));
       header.classList.toggle('problem-detail-card-header-collapsed', !collapsed);
     };
-    header.addEventListener('click', toggle);
+    header.addEventListener('click', (e) => {
+      if (e.target.closest('.problem-detail-card-tab')) return;
+      toggle();
+    });
     header.addEventListener('keydown', (e) => {
+      if (e.target.closest('.problem-detail-card-tab')) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         toggle();
       }
     });
+    const tabs = card.querySelectorAll('.problem-detail-card-tab');
+    const bodyDetail = body.querySelector('.problem-detail-card-body-detail');
+    const bodyJson = body.querySelector('.problem-detail-card-body-json');
+    if (tabs.length && bodyDetail && bodyJson) {
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const tabName = tab.dataset.tab;
+          tabs.forEach((t) => {
+            t.classList.toggle('problem-detail-card-tab-active', t.dataset.tab === tabName);
+            t.setAttribute('aria-pressed', t.dataset.tab === tabName ? 'true' : 'false');
+          });
+          bodyDetail.hidden = tabName !== 'detail';
+          bodyJson.hidden = tabName !== 'json';
+        });
+      });
+    }
   });
 }
 

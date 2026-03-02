@@ -1002,6 +1002,59 @@ body {
   font-weight: 600;
 }
 
+.problem-detail-card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.problem-detail-card-tab {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.problem-detail-card-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.problem-detail-card-tab-active {
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.2);
+  border-color: rgba(88, 166, 255, 0.4);
+}
+
+.problem-detail-card-basic-info .problem-detail-card-tab-active {
+  color: #2e7d32;
+  background: rgba(63, 185, 80, 0.25);
+  border-color: rgba(63, 185, 80, 0.45);
+}
+
+.problem-detail-card-json-pre {
+  margin: 0;
+  padding: 1rem;
+  font-size: 0.8125rem;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.problem-detail-card-body-detail[hidden],
+.problem-detail-card-body-json[hidden] {
+  display: none;
+}
+
 .problem-detail-card-header:hover {
   background: rgba(88, 166, 255, 0.25);
 }
