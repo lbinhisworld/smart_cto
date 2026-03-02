@@ -11,13 +11,35 @@
 </head>
 <body>
   <div class="app">
-    <nav class="top-nav">
+    <nav id="topNav" class="top-nav">
       <button type="button" id="btnHome" class="btn-nav">首页</button>
+      <button type="button" id="btnCanvas" class="btn-nav">画布</button>
       <button type="button" id="btnList" class="btn-nav">列表</button>
       <span id="navDetailLabel" class="btn-nav btn-nav-active" hidden>企业详情</span>
     </nav>
 
-    <div id="homeView" class="view">
+    <div id="homeView" class="view home-intake-view">
+      <div class="home-intake-center">
+        <h1 class="home-intake-title">请输入企业名称及需要解决的数字化问题</h1>
+        <div class="home-intake-row">
+          <textarea id="digitalProblemInput" class="home-intake-input" placeholder="在此输入企业名称、数字化需求描述、IT现状、时间要求等信息…" rows="6"></textarea>
+          <button type="button" id="btnParse" class="btn-parse">解析</button>
+        </div>
+        <div id="parsePreview" class="parse-preview" hidden>
+          <div class="parse-preview-header">
+            <h3 class="parse-preview-title">解析预览</h3>
+            <button type="button" id="btnStartFollow" class="btn-start-follow">启动跟进</button>
+          </div>
+          <dl class="parse-preview-grid" id="parsePreviewContent"></dl>
+        </div>
+        <section id="problemFollowListSection" class="problem-follow-section">
+          <h3 class="problem-follow-title">数字化问题解决跟进列表</h3>
+          <div id="problemFollowListContent" class="problem-follow-list"></div>
+        </section>
+      </div>
+    </div>
+
+    <div id="canvasView" class="view" hidden>
       <header class="header">
         <h1>企业信息与商业画布查询</h1>
         <p class="subtitle">输入公司名称，查询企业基本信息及 BMC 商业画布</p>
@@ -76,6 +98,33 @@
       </main>
     </div>
 
+    <div id="problemDetailView" class="view problem-detail-view" hidden>
+      <header class="problem-detail-header">
+        <button type="button" id="btnProblemDetailBack" class="btn-problem-detail-back">← 返回</button>
+        <h1 class="problem-detail-title">问题详情</h1>
+      </header>
+      <div class="problem-detail-progress">
+        <div class="problem-detail-stage problem-detail-stage-active" data-stage="0">需求理解</div>
+        <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
+        <div class="problem-detail-stage" data-stage="1">工作流对齐</div>
+        <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
+        <div class="problem-detail-stage" data-stage="2">ITGap分析</div>
+        <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
+        <div class="problem-detail-stage" data-stage="3">IT策略规划</div>
+      </div>
+      <div class="problem-detail-body">
+        <aside class="problem-detail-chat">
+          <div class="problem-detail-chat-header">对话</div>
+          <div id="problemDetailChatMessages" class="problem-detail-chat-body"></div>
+          <div class="problem-detail-chat-input-wrap">
+            <textarea id="problemDetailChatInput" class="problem-detail-chat-input" placeholder="输入消息…" rows="3"></textarea>
+            <button type="button" id="problemDetailChatSend" class="problem-detail-chat-send" aria-label="发送">↑</button>
+          </div>
+        </aside>
+        <main id="problemDetailContent" class="problem-detail-workspace"></main>
+      </div>
+    </div>
+
     <div id="listView" class="view" hidden>
       <header class="header">
         <h1>已存储客户列表</h1>
@@ -113,6 +162,26 @@
             <button type="button" id="btnCloseHistory" class="history-close" aria-label="关闭">×</button>
           </div>
           <div id="historyContent" class="history-panel-body"></div>
+        </aside>
+        <aside id="basicInfoJsonPanel" class="basic-info-json-panel">
+          <div class="basic-info-json-header">
+            <span>基本信息 JSON</span>
+            <button type="button" id="btnCloseBasicInfoJson" class="basic-info-json-close" aria-label="关闭">×</button>
+          </div>
+          <pre id="basicInfoJsonContent" class="basic-info-json-content"></pre>
+          <div class="basic-info-json-footer">
+            <button type="button" id="btnCopyBasicInfoJson" class="btn-copy-basic-info-json">复制</button>
+          </div>
+        </aside>
+        <aside id="bmcJsonPanel" class="bmc-json-panel">
+          <div class="bmc-json-header">
+            <span>商业画布 JSON</span>
+            <button type="button" id="btnCloseBmcJson" class="bmc-json-close" aria-label="关闭">×</button>
+          </div>
+          <pre id="bmcJsonContent" class="bmc-json-content"></pre>
+          <div class="bmc-json-footer">
+            <button type="button" id="btnCopyBmcJson" class="btn-copy-bmc-json">复制</button>
+          </div>
         </aside>
       </div>
     </div>

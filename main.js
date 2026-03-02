@@ -6,6 +6,7 @@ const API_URL = 'https://app-6aa0d22a.base44.app/api/apps/6969e6b3cbb5e6b66aa0d2
 const VALUE_STREAM_API_URL = 'https://app-6aa0d22a.base44.app/api/apps/6969e6b3cbb5e6b66aa0d22a/functions/getCompanyValueStreams';
 
 const STORAGE_KEY = 'company_analyses';
+const DIGITAL_PROBLEMS_STORAGE_KEY = 'digital_problem_followups';
 
 /** DeepSeek 大模型配置：请在 main.js 中设置你的 API Key，或通过环境变量/配置注入 */
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -23,6 +24,7 @@ const el = {
   btnQuery: document.getElementById('btnQuery'),
   btnSave: document.getElementById('btnSave'),
   btnHome: document.getElementById('btnHome'),
+  btnCanvas: document.getElementById('btnCanvas'),
   btnList: document.getElementById('btnList'),
   navDetailLabel: document.getElementById('navDetailLabel'),
   chatPanel: document.getElementById('chatPanel'),
@@ -46,17 +48,48 @@ const el = {
   valueStreamContent: document.getElementById('valueStreamContent'),
   metadataList: document.getElementById('metadataList'),
   homeView: document.getElementById('homeView'),
+  canvasView: document.getElementById('canvasView'),
   listView: document.getElementById('listView'),
   detailView: document.getElementById('detailView'),
+  problemDetailView: document.getElementById('problemDetailView'),
+  problemDetailContent: document.getElementById('problemDetailContent'),
+  problemDetailChatMessages: document.getElementById('problemDetailChatMessages'),
+  problemDetailChatInput: document.getElementById('problemDetailChatInput'),
+  problemDetailChatSend: document.getElementById('problemDetailChatSend'),
+  btnProblemDetailBack: document.getElementById('btnProblemDetailBack'),
+  digitalProblemInput: document.getElementById('digitalProblemInput'),
+  btnParse: document.getElementById('btnParse'),
+  parsePreview: document.getElementById('parsePreview'),
+  parsePreviewContent: document.getElementById('parsePreviewContent'),
+  btnStartFollow: document.getElementById('btnStartFollow'),
+  problemFollowListContent: document.getElementById('problemFollowListContent'),
   savedListContent: document.getElementById('savedListContent'),
   detailResult: document.getElementById('detailResult'),
   detailContent: document.querySelector('.detail-content'),
   detailTitle: document.getElementById('detailTitle'),
   searchSuggestions: document.getElementById('searchSuggestions'),
+  topNav: document.getElementById('topNav'),
+  basicInfoJsonPanel: document.getElementById('basicInfoJsonPanel'),
+  basicInfoJsonContent: document.getElementById('basicInfoJsonContent'),
+  btnCloseBasicInfoJson: document.getElementById('btnCloseBasicInfoJson'),
+  btnCopyBasicInfoJson: document.getElementById('btnCopyBasicInfoJson'),
+  bmcJsonPanel: document.getElementById('bmcJsonPanel'),
+  bmcJsonContent: document.getElementById('bmcJsonContent'),
+  btnCloseBmcJson: document.getElementById('btnCloseBmcJson'),
+  btnCopyBmcJson: document.getElementById('btnCopyBmcJson'),
 };
 
 let lastQueriedCompanyName = '';
 let lastQueryResult = null;
+
+/** 最近一次解析结果，用于「启动跟进」 */
+let lastParsedResult = null;
+
+/** 当前问题详情页展示的跟进项 */
+let currentProblemDetailItem = null;
+
+/** 问题详情页已确认的客户基本信息（解析后点击确认） */
+let problemDetailConfirmedBasicInfo = null;
 
 /** 聊天历史，用于 DeepSeek API 的 messages 上下文 */
 let chatHistory = [];
@@ -854,6 +887,7 @@ async function query() {
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[DOMContentLoaded] 页面加载完成，检查按钮:');
   debugValueStreamButton();
+  renderProblemFollowList();
   if (el.btnValueStreamList) {
     el.btnValueStreamList.addEventListener('click', loadValueStreamList);
   } else {
@@ -949,9 +983,12 @@ function saveCurrent() {
 
 function switchView(view) {
   el.homeView.hidden = view !== 'home';
+  el.canvasView.hidden = view !== 'canvas';
   el.listView.hidden = view !== 'list';
   el.detailView.hidden = view !== 'detail';
+  if (el.problemDetailView) el.problemDetailView.hidden = view !== 'problemDetail';
   if (el.navDetailLabel) el.navDetailLabel.hidden = view !== 'detail';
+  if (el.topNav) el.topNav.hidden = view === 'problemDetail';
 }
 
 function renderSavedList() {
@@ -1392,11 +1429,17 @@ function buildDetailHTML(record) {
 
   return `
     <section class="basic-info section-card">
-      <h2>基本信息</h2>
+      <div class="basic-info-header">
+        <h2>基本信息</h2>
+        <button type="button" class="btn-basic-info-json">生成 JSON</button>
+      </div>
       <div class="info-grid">${basicHtml}</div>
     </section>
     <section class="bmc-section section-card">
-      <h2>商业画布 (BMC)</h2>
+      <div class="bmc-section-header">
+        <h2>商业画布 (BMC)</h2>
+        <button type="button" class="btn-bmc-json">生成 JSON</button>
+      </div>
       <div class="bmc-grid">${bmcHtml}</div>
       ${bmcReviewHtml}
     </section>
@@ -1423,11 +1466,98 @@ el.companyName.addEventListener('blur', () => {
   }, 150);
 });
 if (el.btnSave) el.btnSave.addEventListener('click', saveCurrent);
+if (el.btnParse) el.btnParse.addEventListener('click', handleParseClick);
+if (el.btnStartFollow) el.btnStartFollow.addEventListener('click', handleStartFollowClick);
+if (el.problemFollowListContent) {
+  el.problemFollowListContent.addEventListener('click', (e) => {
+    const delBtn = e.target.closest('.btn-problem-follow-delete');
+    if (delBtn) {
+      const index = parseInt(delBtn.getAttribute('data-index'), 10);
+      if (!Number.isNaN(index)) {
+        removeDigitalProblem(index);
+        renderProblemFollowList();
+      }
+      return;
+    }
+    const startBtn = e.target.closest('.btn-problem-follow-start');
+    if (startBtn) {
+      const index = parseInt(startBtn.getAttribute('data-index'), 10);
+      if (!Number.isNaN(index)) {
+        const list = getDigitalProblems();
+        const item = list[index];
+        if (item) openProblemDetail(item);
+      }
+    }
+  });
+}
+if (el.btnProblemDetailBack) {
+  el.btnProblemDetailBack.addEventListener('click', () => {
+    switchView('home');
+    renderProblemFollowList();
+  });
+}
+if (el.problemDetailChatSend) {
+  el.problemDetailChatSend.addEventListener('click', handleProblemDetailChatSend);
+}
+if (el.problemDetailChatInput) {
+  el.problemDetailChatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleProblemDetailChatSend();
+    }
+  });
+}
+if (el.problemDetailChatMessages) {
+  el.problemDetailChatMessages.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-confirm-basic-info');
+    if (btn && btn.dataset.json) {
+      try {
+        const data = JSON.parse(btn.dataset.json);
+        problemDetailConfirmedBasicInfo = data;
+        renderProblemDetailContent();
+        btn.textContent = '已确认';
+        btn.disabled = true;
+      } catch (_) {}
+    }
+  });
+}
 if (el.btnHome) el.btnHome.addEventListener('click', () => {
   saveChatToRecord();
   switchView('home');
-  if (el.companyName) el.companyName.value = '';
+  renderProblemFollowList();
   if (el.searchSuggestions) { el.searchSuggestions.hidden = true; el.searchSuggestions.innerHTML = ''; }
+});
+if (el.btnCanvas) el.btnCanvas.addEventListener('click', () => {
+  saveChatToRecord();
+  switchView('canvas');
+  const record = currentDetailRecord;
+  const queryData = lastQueryResult;
+  let basicInfo, bmc, metadata;
+  if (record) {
+    basicInfo = record.basicInfo;
+    bmc = record.bmc;
+    metadata = record.metadata;
+    lastQueriedCompanyName = (record.companyName || '').trim();
+    lastQueryResult = { basic_info: basicInfo, business_model_canvas: bmc, metadata };
+    currentValueStreamList = record.valueStreams || [];
+  } else if (queryData) {
+    basicInfo = queryData.basic_info;
+    bmc = queryData.business_model_canvas;
+    metadata = queryData.metadata;
+  }
+  if (basicInfo || bmc || metadata) {
+    if (el.companyName) el.companyName.value = lastQueriedCompanyName || '';
+    renderBasicInfo(basicInfo);
+    renderBMC(bmc);
+    renderMetadata(metadata);
+    el.valueStreamSection.hidden = true;
+    el.valueStreamContent.innerHTML = '';
+    showError('');
+    showResult(true);
+  } else {
+    showError('请先查询企业或从列表选择企业，再查看画布');
+    showResult(false);
+  }
 });
 if (el.btnList) el.btnList.addEventListener('click', () => {
   saveChatToRecord();
@@ -1445,6 +1575,87 @@ if (el.chatInput) el.chatInput.addEventListener('keydown', (e) => {
     sendChatMessage();
   }
 });
+
+if (el.detailResult) {
+  el.detailResult.addEventListener('click', (e) => {
+    if (e.target.closest('.btn-basic-info-json')) {
+      openBasicInfoJsonPanel();
+    } else if (e.target.closest('.btn-bmc-json')) {
+      openBmcJsonPanel();
+    }
+  });
+}
+if (el.btnCloseBasicInfoJson) {
+  el.btnCloseBasicInfoJson.addEventListener('click', closeBasicInfoJsonPanel);
+}
+if (el.btnCopyBasicInfoJson) {
+  el.btnCopyBasicInfoJson.addEventListener('click', copyBasicInfoJson);
+}
+if (el.btnCloseBmcJson) {
+  el.btnCloseBmcJson.addEventListener('click', closeBmcJsonPanel);
+}
+if (el.btnCopyBmcJson) {
+  el.btnCopyBmcJson.addEventListener('click', copyBmcJson);
+}
+
+function openBasicInfoJsonPanel() {
+  if (!currentDetailRecord || !el.basicInfoJsonPanel || !el.basicInfoJsonContent) return;
+  const basicInfo = currentDetailRecord.basicInfo || {};
+  const jsonStr = JSON.stringify(basicInfo, null, 2);
+  el.basicInfoJsonContent.textContent = jsonStr;
+  el.basicInfoJsonPanel.classList.add('basic-info-json-panel-open');
+  document.querySelector('.detail-body')?.classList.add('basic-info-json-panel-open');
+}
+
+function closeBasicInfoJsonPanel() {
+  el.basicInfoJsonPanel?.classList.remove('basic-info-json-panel-open');
+  document.querySelector('.detail-body')?.classList.remove('basic-info-json-panel-open');
+}
+
+function copyBasicInfoJson() {
+  const text = el.basicInfoJsonContent?.textContent;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = el.btnCopyBasicInfoJson;
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = '已复制';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    }
+  }).catch(() => {
+    alert('复制失败');
+  });
+}
+
+function openBmcJsonPanel() {
+  if (!currentDetailRecord || !el.bmcJsonPanel || !el.bmcJsonContent) return;
+  const bmc = currentDetailRecord.bmc || {};
+  const jsonStr = JSON.stringify(bmc, null, 2);
+  el.bmcJsonContent.textContent = jsonStr;
+  el.bmcJsonPanel.classList.add('bmc-json-panel-open');
+  const body = document.querySelector('.detail-body');
+  if (body) body.classList.add('bmc-json-panel-open');
+}
+
+function closeBmcJsonPanel() {
+  el.bmcJsonPanel?.classList.remove('bmc-json-panel-open');
+  document.querySelector('.detail-body')?.classList.remove('bmc-json-panel-open');
+}
+
+function copyBmcJson() {
+  const text = el.bmcJsonContent?.textContent;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = el.btnCopyBmcJson;
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = '已复制';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    }
+  }).catch(() => {
+    alert('复制失败');
+  });
+}
 
 function getTimeStr() {
   const now = new Date();
@@ -1664,6 +1875,427 @@ ${pageStructure || '(无详情数据)'}`;
     return '请求失败：' + (data.error.message || JSON.stringify(data.error));
   }
   return data.choices?.[0]?.message?.content ?? '未收到有效回复。';
+}
+
+/** 调用大模型解析数字化问题输入，提取客户名称、需求、IT现状、时间要求 */
+async function parseDigitalProblemInput(text) {
+  const systemPrompt = `你是一个专业的数字化需求分析助手。用户会输入一段关于企业名称及数字化问题的描述，请从中提炼出以下四个字段，以 JSON 格式返回，不要包含其他内容：
+
+{
+  "customerName": "客户名称",
+  "customerNeedsOrChallenges": "客户需求或挑战",
+  "customerItStatus": "客户IT现状",
+  "projectTimeRequirement": "项目时间要求"
+}
+
+如果某字段无法从输入中推断，该字段填 "—" 或空字符串。只返回 JSON，不要有 markdown 代码块包裹。`;
+
+  const res = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text },
+      ],
+    }),
+  });
+  const data = await res.json();
+  if (data.error) {
+    throw new Error(data.error.message || JSON.stringify(data.error));
+  }
+  const content = data.choices?.[0]?.message?.content ?? '';
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  const jsonStr = jsonMatch ? jsonMatch[0] : content;
+  return JSON.parse(jsonStr);
+}
+
+/** 解析用户输入的客户基本信息，提取结构化字段 */
+async function parseCompanyBasicInfoInput(text) {
+  const systemPrompt = `你是一个专业的企业信息提取助手。用户会输入一段关于企业基本信息的描述（可能是复制粘贴或自由输入），请从中提炼出以下字段，以 JSON 格式返回，不要包含其他内容：
+
+{
+  "company_name": "企业名称/公司名称",
+  "credit_code": "统一社会信用代码",
+  "legal_representative": "法定代表人",
+  "established_date": "成立日期",
+  "registered_capital": "注册资本",
+  "is_listed": "是否上市",
+  "listing_location": "上市地点",
+  "business_scope": "经营范围",
+  "core_qualifications": "核心资质",
+  "official_website": "官网"
+}
+
+如果某字段无法从输入中推断，该字段填 "" 或 "—"。只返回 JSON，不要有 markdown 代码块包裹。`;
+
+  const res = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text },
+      ],
+    }),
+  });
+  const data = await res.json();
+  if (data.error) {
+    throw new Error(data.error.message || JSON.stringify(data.error));
+  }
+  const content = data.choices?.[0]?.message?.content ?? '';
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  const jsonStr = jsonMatch ? jsonMatch[0] : content;
+  return JSON.parse(jsonStr);
+}
+
+const PARSE_PREVIEW_FIELDS = [
+  { key: 'customerName', label: '客户名称' },
+  { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
+  { key: 'customerItStatus', label: '客户IT现状' },
+  { key: 'projectTimeRequirement', label: '项目时间要求' },
+];
+
+function renderParsePreview(parsed) {
+  if (!el.parsePreviewContent) return;
+  el.parsePreviewContent.innerHTML = PARSE_PREVIEW_FIELDS.map(({ key, label }) => {
+    const value = parsed[key] != null ? String(parsed[key]).trim() : '—';
+    return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value) || '—'}</dd>`;
+  }).join('');
+  if (el.parsePreview) {
+    el.parsePreview.hidden = false;
+  }
+}
+
+async function handleParseClick() {
+  const input = el.digitalProblemInput;
+  if (!input) return;
+  const text = (input.value || '').trim();
+  if (!text) {
+    alert('请先输入企业名称及需要解决的数字化问题');
+    return;
+  }
+  const btn = el.btnParse;
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = '解析中…';
+  if (el.parsePreview) el.parsePreview.hidden = true;
+  try {
+    if (!DEEPSEEK_API_KEY) {
+      throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
+    }
+    const parsed = await parseDigitalProblemInput(text);
+    lastParsedResult = parsed;
+    renderParsePreview(parsed);
+  } catch (err) {
+    const msg = err.message || String(err);
+    if (el.parsePreviewContent) {
+      el.parsePreviewContent.innerHTML = `<dt>解析失败</dt><dd>${escapeHtml(msg)}</dd>`;
+    }
+    if (el.parsePreview) {
+      el.parsePreview.hidden = false;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '解析';
+  }
+}
+
+function getDigitalProblems() {
+  try {
+    const raw = localStorage.getItem(DIGITAL_PROBLEMS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDigitalProblem(item) {
+  const list = getDigitalProblems();
+  list.unshift({ ...item, createdAt: new Date().toISOString() });
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+function removeDigitalProblem(index) {
+  const list = getDigitalProblems();
+  if (index < 0 || index >= list.length) return;
+  list.splice(index, 1);
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+function renderProblemFollowList() {
+  const container = el.problemFollowListContent;
+  if (!container) return;
+  const list = getDigitalProblems();
+  if (!list.length) {
+    container.innerHTML = '<p class="problem-follow-empty">暂无跟进项，解析后点击「启动跟进」添加</p>';
+    return;
+  }
+  const labels = [
+    { key: 'customerName', label: '客户名称' },
+    { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
+    { key: 'customerItStatus', label: '客户IT现状' },
+    { key: 'projectTimeRequirement', label: '项目时间要求' },
+  ];
+  container.innerHTML = list.map((item, index) => {
+    const rows = labels.map(({ key, label }) => {
+      const value = (item[key] != null ? String(item[key]).trim() : '') || '—';
+      return `<div class="problem-follow-item-row"><span class="problem-follow-item-label">${escapeHtml(label)}</span><span class="problem-follow-item-value">${escapeHtml(value)}</span></div>`;
+    }).join('');
+    return `<div class="problem-follow-item" data-index="${index}">
+      <div class="problem-follow-item-body">${rows}</div>
+      <div class="problem-follow-item-actions">
+        <button type="button" class="btn-problem-follow-start" data-index="${index}">开始</button>
+        <button type="button" class="btn-problem-follow-delete" data-index="${index}" aria-label="删除">删除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openProblemDetail(item) {
+  currentProblemDetailItem = item;
+  problemDetailConfirmedBasicInfo = null;
+  renderProblemDetailContent();
+  initProblemDetailChat();
+  switchView('problemDetail');
+}
+
+function initProblemDetailChat() {
+  const container = el.problemDetailChatMessages;
+  if (!container) return;
+  container.innerHTML = '';
+  appendProblemDetailChatMessage(container, 'system', '请输入客户基本信息');
+  if (el.problemDetailChatInput) el.problemDetailChatInput.value = '';
+}
+
+function appendProblemDetailChatMessage(container, role, content) {
+  const timeStr = getTimeStr();
+  const block = document.createElement('div');
+  const collapsibleClass = role === 'user' ? ' problem-detail-chat-msg-collapsible' : '';
+  block.className = `problem-detail-chat-msg problem-detail-chat-msg-${role}${collapsibleClass}`;
+  block.innerHTML = `<div class="problem-detail-chat-msg-content-wrap" role="button" tabindex="0"><div class="problem-detail-chat-msg-content">${escapeHtml(content)}</div></div><div class="problem-detail-chat-msg-time">${timeStr}</div>`;
+  container.appendChild(block);
+  if (role === 'user') {
+    setupProblemDetailChatTextToggle(block);
+  }
+  container.scrollTop = container.scrollHeight;
+  return block;
+}
+
+function setupProblemDetailChatTextToggle(msgBlock) {
+  const wrap = msgBlock?.querySelector('.problem-detail-chat-msg-content-wrap');
+  if (!wrap) return;
+  wrap.addEventListener('click', () => {
+    msgBlock.classList.toggle('problem-detail-chat-msg-expanded');
+  });
+  wrap.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      msgBlock.classList.toggle('problem-detail-chat-msg-expanded');
+    }
+  });
+}
+
+function setupProblemDetailChatCardToggle(cardBlock) {
+  const card = cardBlock?.querySelector('.problem-detail-basic-info-card');
+  if (!card) return;
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('.btn-confirm-basic-info')) return;
+    cardBlock.classList.toggle('problem-detail-chat-card-expanded');
+  });
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (!e.target.closest('.btn-confirm-basic-info')) {
+        cardBlock.classList.toggle('problem-detail-chat-card-expanded');
+      }
+    }
+  });
+}
+
+async function handleProblemDetailChatSend() {
+  const input = el.problemDetailChatInput;
+  const container = el.problemDetailChatMessages;
+  if (!input || !container) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+  appendProblemDetailChatMessage(container, 'user', text);
+  const parsingBlock = document.createElement('div');
+  parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+  parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在进行解析</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(parsingBlock);
+  container.scrollTop = container.scrollHeight;
+  try {
+    if (!DEEPSEEK_API_KEY) {
+      throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
+    }
+    const parsed = await parseCompanyBasicInfoInput(text);
+    parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
+    parsingBlock.classList.add('problem-detail-chat-msg-parsed');
+    parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">解析完成</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span>`;
+    const cardBlock = document.createElement('div');
+    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
+    const labels = [
+      { key: 'company_name', label: '公司名称' },
+      { key: 'credit_code', label: '信用代码' },
+      { key: 'legal_representative', label: '法人' },
+      { key: 'established_date', label: '成立时间' },
+      { key: 'registered_capital', label: '注册资本' },
+      { key: 'is_listed', label: '是否上市' },
+      { key: 'listing_location', label: '上市地' },
+      { key: 'business_scope', label: '经营范围' },
+      { key: 'core_qualifications', label: '核心资质' },
+      { key: 'official_website', label: '官方网站' },
+    ];
+    const rows = labels.map(({ key, label }) => {
+      const value = (parsed[key] != null ? String(parsed[key]).trim() : '') || '—';
+      return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(value)}</span></div>`;
+    }).join('');
+    cardBlock.innerHTML = `
+      <div class="problem-detail-basic-info-card" role="button" tabindex="0">
+        <div class="problem-detail-basic-info-card-body">${rows}</div>
+        <div class="problem-detail-basic-info-card-actions">
+          <button type="button" class="btn-confirm-basic-info" data-json="${String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button>
+        </div>
+      </div>
+      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(cardBlock);
+    setupProblemDetailChatCardToggle(cardBlock);
+    container.scrollTop = container.scrollHeight;
+  } catch (err) {
+    parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
+    parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">解析失败：${escapeHtml(err.message || String(err))}</div>`;
+  }
+}
+
+function renderProblemDetailContent() {
+  const container = el.problemDetailContent;
+  if (!container) return;
+  const item = currentProblemDetailItem;
+  if (!item) {
+    container.innerHTML = '<p class="problem-follow-empty">暂无详情</p>';
+    return;
+  }
+  const labels = [
+    { key: 'customerName', label: '客户名称' },
+    { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
+    { key: 'customerItStatus', label: '客户IT现状' },
+    { key: 'projectTimeRequirement', label: '项目时间要求' },
+  ];
+  const rows = labels.map(({ key, label }) => {
+    const value = (item[key] != null ? String(item[key]).trim() : '') || '—';
+    return `<div class="problem-detail-row"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${escapeHtml(value)}</span></div>`;
+  }).join('');
+  const subSteps = [
+    '企业背景洞察',
+    '商业画布加载',
+    '价值流生成',
+    '完整需求理解',
+  ];
+  const subStepsHtml = subSteps.map((name) =>
+    `<span class="problem-detail-substep">${escapeHtml(name)}</span>`
+  ).join('<span class="problem-detail-substep-sep">·</span>');
+  const basicInfoLabels = [
+    { key: 'company_name', label: '公司名称' },
+    { key: 'credit_code', label: '信用代码' },
+    { key: 'legal_representative', label: '法人' },
+    { key: 'established_date', label: '成立时间' },
+    { key: 'registered_capital', label: '注册资本' },
+    { key: 'is_listed', label: '是否上市' },
+    { key: 'listing_location', label: '上市地' },
+    { key: 'business_scope', label: '经营范围' },
+    { key: 'core_qualifications', label: '核心资质' },
+    { key: 'official_website', label: '官方网站' },
+  ];
+  let basicInfoCardHtml = '';
+  if (problemDetailConfirmedBasicInfo) {
+    const basicInfoRows = basicInfoLabels.map(({ key, label }) => {
+      const value = (problemDetailConfirmedBasicInfo[key] != null ? String(problemDetailConfirmedBasicInfo[key]).trim() : '') || '—';
+      return `<div class="problem-detail-row"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${escapeHtml(value)}</span></div>`;
+    }).join('');
+    basicInfoCardHtml = `
+  <div class="problem-detail-card problem-detail-card-basic-info">
+    <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
+      <span class="problem-detail-card-header-title">客户基本信息</span>
+      <span class="problem-detail-card-header-arrow">▾</span>
+    </div>
+    <div class="problem-detail-card-body">${basicInfoRows}</div>
+  </div>`;
+  }
+  container.innerHTML = `<div class="problem-detail-substeps">${subStepsHtml}</div>
+  <div class="problem-detail-card">
+    <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
+      <span class="problem-detail-card-header-title">初步需求</span>
+      <span class="problem-detail-card-header-arrow">▾</span>
+    </div>
+    <div class="problem-detail-card-body">${rows}</div>
+  </div>${basicInfoCardHtml}`;
+  setupProblemDetailCardToggle();
+}
+
+function setupProblemDetailCardToggle() {
+  el.problemDetailContent?.querySelectorAll('.problem-detail-card').forEach((card) => {
+    const header = card.querySelector('.problem-detail-card-header');
+    const body = card.querySelector('.problem-detail-card-body');
+    if (!header || !body) return;
+    const toggle = () => {
+      const collapsed = body.hidden;
+      body.hidden = !collapsed;
+      header.setAttribute('aria-expanded', String(!collapsed));
+      header.classList.toggle('problem-detail-card-header-collapsed', !collapsed);
+    };
+    header.addEventListener('click', toggle);
+    header.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  });
+}
+
+function handleStartFollowClick() {
+  if (!lastParsedResult) {
+    alert('请先点击「解析」按钮完成解析');
+    return;
+  }
+  if (el.digitalProblemInput) el.digitalProblemInput.value = '';
+  const item = {
+    customerName: lastParsedResult.customerName ?? '',
+    customerNeedsOrChallenges: lastParsedResult.customerNeedsOrChallenges ?? '',
+    customerItStatus: lastParsedResult.customerItStatus ?? '',
+    projectTimeRequirement: lastParsedResult.projectTimeRequirement ?? '',
+  };
+  saveDigitalProblem(item);
+  if (el.parsePreview) el.parsePreview.classList.add('parse-preview-exiting');
+  renderProblemFollowList();
+  const firstItem = el.problemFollowListContent?.querySelector('.problem-follow-item');
+  if (firstItem) {
+    firstItem.classList.add('problem-follow-item-enter');
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => firstItem.classList.add('problem-follow-item-enter-active'));
+    });
+  }
+  const duration = 450;
+  setTimeout(() => {
+    if (el.parsePreview) {
+      el.parsePreview.classList.remove('parse-preview-exiting');
+      el.parsePreview.hidden = true;
+    }
+    lastParsedResult = null;
+    if (firstItem) {
+      firstItem.classList.remove('problem-follow-item-enter', 'problem-follow-item-enter-active');
+    }
+  }, duration);
 }
 
 function renderModificationOrPlain(container, assistantContent) {
