@@ -1513,6 +1513,47 @@ if (el.problemDetailChatInput) {
 }
 if (el.problemDetailChatMessages) {
   el.problemDetailChatMessages.addEventListener('click', (e) => {
+    const startBmcBtn = e.target.closest('.btn-confirm-start-bmc');
+    if (startBmcBtn && !startBmcBtn.disabled) {
+      startBmcBtn.disabled = true;
+      startBmcBtn.textContent = '已确认';
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'bmcStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+      }
+      runBmcGeneration();
+      return;
+    }
+    const bmcBtn = e.target.closest('.btn-confirm-bmc');
+    if (bmcBtn && bmcBtn.dataset.json) {
+      try {
+        const bmc = JSON.parse(bmcBtn.dataset.json);
+        const item = currentProblemDetailItem;
+        if (item?.createdAt) {
+          updateDigitalProblemBmc(item.createdAt, bmc);
+          const completed = item.completedStages || [];
+          if (!completed.includes(1)) completed.push(1);
+          completed.sort((a, b) => a - b);
+          currentProblemDetailItem = { ...item, bmc, completedStages: completed };
+        }
+        let idx = -1;
+        for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
+          if (problemDetailChatMessages[i].type === 'bmcCard') {
+            idx = i;
+            break;
+          }
+        }
+        if (idx >= 0) {
+          problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: bmc, confirmed: true };
+          saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+        }
+        renderProblemDetailContent();
+        bmcBtn.textContent = '已确认';
+        bmcBtn.disabled = true;
+      } catch (_) {}
+      return;
+    }
     const btn = e.target.closest('.btn-confirm-basic-info');
     if (btn && btn.dataset.json) {
       try {
@@ -1540,6 +1581,7 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailContent();
         btn.textContent = '已确认';
         btn.disabled = true;
+        requestAnimationFrame(() => maybeShowBmcStartBlock());
       } catch (_) {}
     }
   });
@@ -1980,6 +2022,106 @@ async function parseCompanyBasicInfoInput(text) {
   return JSON.parse(jsonStr);
 }
 
+const BMC_GENERATION_PROMPT = `# Role
+你是一位拥有15年经验的【首席商业架构师】与【数字化转型专家】。你擅长通过有限的工商基础数据，透视企业的底层运作逻辑，并能精准识别制造业、服务业或科技企业的核心商业要素。
+
+# Task
+请基于提供的【客户基础信息】，运用商业模式画布（Business Model Canvas）框架，深度分析该企业的经营模式。
+
+# Input Data (JSON/Text)：公司基本信息 json 数据
+
+# Analysis Logic (推演要求)
+在构建画布时，请不要简单重复经营范围，而是基于行业常识进行逻辑推演：
+1. **产业链定位**：判断其处于上游原材料、中游加工制造、还是下游终端销售？
+2. **核心驱动力**：该企业是靠"技术创新"驱动、"规模成本"驱动，还是"特许经营/资质"驱动？
+3. **客户关系特征**：是B2B的长账期/强关系模式，还是B2C的快消/流量模式？
+
+# Output Format (输出要求)
+请按以下结构输出，使用 JSON 格式，只返回 JSON 不要有其他内容：
+
+{
+  "industry_insight": "行业背景洞察：简述该企业所属赛道的现状、准入门槛及当前的数字化趋势。",
+  "customer_segments": "客户细分 (CS)：识别直接买家与最终受益者。",
+  "value_propositions": "价值主张 (VP)：解决客户什么痛点？提供什么独特的性能、成本或品牌价值？",
+  "channels": "渠道通路 (CH)：销售网络、物流交付及售后反馈路径。",
+  "customer_relationships": "客户关系 (CR)：合作深度。",
+  "revenue_streams": "收入来源 (RS)：盈利模式。",
+  "key_resources": "核心资源 (KR)：关键资产。",
+  "key_activities": "关键业务 (KA)：每日核心运作。",
+  "key_partnerships": "重要合作 (KP)：上游供应商、技术研发机构等。",
+  "cost_structure": "成本结构 (CS)：主要开支。",
+  "pain_points": "业务痛点预判：基于上述画布，推测该企业在排产/库存/销售/财务环节可能面临的数字化挑战（至少3条）。"
+}`;
+
+const BMC_LABEL_TO_KEY = {
+  '客户细分': 'customer_segments',
+  '价值主张': 'value_propositions',
+  '渠道通路': 'channels',
+  '客户关系': 'customer_relationships',
+  '收入来源': 'revenue_streams',
+  '核心资源': 'key_resources',
+  '关键业务': 'key_activities',
+  '重要合作': 'key_partnerships',
+  '成本结构': 'cost_structure',
+};
+
+function parseBmcFromMarkdown(text) {
+  const result = { industry_insight: '', pain_points: '' };
+  BMC_FIELDS.forEach((f) => { result[f.key] = ''; });
+  result.comprehensive_review = '';
+  const lines = text.split('\n');
+  let section = '';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^##\s*1\.\s*行业背景洞察/i.test(line)) { section = 'industry_insight'; continue; }
+    if (/^##\s*2\.\s*商业模式画布/i.test(line)) { section = 'bmc_table'; continue; }
+    if (/^##\s*3\.\s*业务痛点预判/i.test(line)) { section = 'pain_points'; continue; }
+    if (section === 'industry_insight' && line && !line.startsWith('##')) {
+      result.industry_insight += (result.industry_insight ? '\n' : '') + line.trim();
+    }
+    if (section === 'bmc_table' && line.includes('|')) {
+      const m = line.match(/\*\*([^*]+)\*\*\s*\|\s*(.+)/);
+      if (m) {
+        const label = m[1].replace(/\s*\([A-Z]+\)\s*$/, '').trim();
+        const content = m[2].replace(/\|$/, '').trim();
+        const key = BMC_LABEL_TO_KEY[label] || BMC_FIELDS.find((f) => f.label === label)?.key;
+        if (key) result[key] = content;
+      }
+    }
+    if (section === 'pain_points' && line && !line.startsWith('##')) {
+      result.pain_points += (result.pain_points ? '\n' : '') + line.trim();
+    }
+  }
+  result.comprehensive_review = [result.industry_insight, result.pain_points].filter(Boolean).join('\n\n');
+  return result;
+}
+
+async function generateBmcFromBasicInfo(basicInfoJson) {
+  const inputStr = typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJson, null, 2);
+  const res = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: 'system', content: BMC_GENERATION_PROMPT },
+        { role: 'user', content: inputStr },
+      ],
+    }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  const content = (data.choices?.[0]?.message?.content ?? '').trim();
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try { return JSON.parse(jsonMatch[0]); } catch (_) {}
+  }
+  return parseBmcFromMarkdown(content);
+}
+
 const PARSE_PREVIEW_FIELDS = [
   { key: 'customerName', label: '客户名称' },
   { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
@@ -2066,6 +2208,18 @@ function updateDigitalProblemBasicInfo(createdAt, basicInfo) {
   localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
 }
 
+function updateDigitalProblemBmc(createdAt, bmc) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const completed = item.completedStages || [];
+  if (!completed.includes(1)) completed.push(1);
+  completed.sort((a, b) => a - b);
+  list[idx] = { ...item, bmc, completedStages: completed };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
 function getProblemDetailChats() {
   try {
     const raw = localStorage.getItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY);
@@ -2146,12 +2300,150 @@ function initProblemDetailChat() {
   if (el.problemDetailChatInput) el.problemDetailChatInput.value = '';
   requestAnimationFrame(() => {
     container.scrollTop = container.scrollHeight;
+    maybeShowBmcStartBlock();
   });
 }
 
+async function runBmcGeneration() {
+  const container = el.problemDetailChatMessages;
+  if (!container || !problemDetailConfirmedBasicInfo || !DEEPSEEK_API_KEY) return;
+  const loading1 = document.createElement('div');
+  loading1.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+  loading1.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在提取客户基本信息 json 数据</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(loading1);
+  container.scrollTop = container.scrollHeight;
+  await new Promise((r) => setTimeout(r, 400));
+  const json = problemDetailConfirmedBasicInfo;
+  loading1.remove();
+  const extractedBlock = document.createElement('div');
+  extractedBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsed';
+  extractedBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">基本信息 json 提取完毕</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(extractedBlock);
+  const jsonBlock = document.createElement('div');
+  jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible';
+  jsonBlock.innerHTML = `<div class="problem-detail-chat-json-wrap" role="button" tabindex="0"><pre class="problem-detail-chat-json-pre">${escapeHtml(JSON.stringify(json, null, 2))}</pre></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(jsonBlock);
+  setupProblemDetailJsonBlockToggle(jsonBlock);
+  pushAndSaveProblemDetailChat({ role: 'system', content: '基本信息 json 提取完毕', timestamp: getTimeStr(), hasCheck: true });
+  pushAndSaveProblemDetailChat({ type: 'basicInfoJsonBlock', json, timestamp: getTimeStr() });
+  container.scrollTop = container.scrollHeight;
+
+  const loading2 = document.createElement('div');
+  loading2.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+  loading2.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在生成企业商业画布 BMC</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(loading2);
+  container.scrollTop = container.scrollHeight;
+  try {
+    const bmc = await generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
+    loading2.remove();
+    const cardBlock = document.createElement('div');
+    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-card-collapsible';
+    const bmcRows = BMC_FIELDS.map(({ key, label }) => {
+      const value = (bmc[key] != null ? String(bmc[key]).trim() : '') || '—';
+      return `<div class="problem-detail-bmc-row"><span class="problem-detail-bmc-label">${escapeHtml(label)}</span><span class="problem-detail-bmc-value">${escapeHtml(value)}</span></div>`;
+    }).join('');
+    const industryInsight = (bmc.industry_insight || '').trim() || '—';
+    const painPoints = (bmc.pain_points || '').trim() || '—';
+    cardBlock.innerHTML = `
+      <div class="problem-detail-bmc-card" role="button" tabindex="0">
+        <div class="problem-detail-bmc-card-body">
+          ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
+          <div class="problem-detail-bmc-grid">${bmcRows}</div>
+          ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-bmc-content">${escapeHtml(painPoints)}</div></div>` : ''}
+        </div>
+        <div class="problem-detail-bmc-card-expand-hint">点击展开</div>
+        <div class="problem-detail-bmc-card-actions">
+          <button type="button" class="btn-confirm-bmc" data-json="${String(JSON.stringify(bmc)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button>
+        </div>
+      </div>
+      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(cardBlock);
+    setupProblemDetailBmcCardToggle(cardBlock);
+    pushAndSaveProblemDetailChat({ type: 'bmcCard', data: bmc, confirmed: false, timestamp: getTimeStr() });
+    container.scrollTop = container.scrollHeight;
+  } catch (err) {
+    loading2.classList.remove('problem-detail-chat-msg-parsing');
+    loading2.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">生成失败：${escapeHtml(err.message || String(err))}</div>`;
+    pushAndSaveProblemDetailChat({ role: 'system', content: '生成失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+  }
+}
+
+function maybeShowBmcStartBlock() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (item.bmc) return;
+  const completedStages = item.completedStages || [];
+  const currentStage = [0, 1, 2, 3].find((i) => !completedStages.includes(i)) ?? 4;
+  if (currentStage !== 1) return;
+  if (!problemDetailConfirmedBasicInfo) return;
+  const hasBmcStart = problemDetailChatMessages.some((m) => m.type === 'bmcStartBlock');
+  if (hasBmcStart) return;
+  const block = document.createElement('div');
+  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-start';
+  block.innerHTML = `
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">我将发起商业模式画布 BMC 生成</div>
+      <div class="problem-detail-chat-bmc-start-actions">
+        <button type="button" class="btn-confirm-start-bmc">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  pushAndSaveProblemDetailChat({ type: 'bmcStartBlock', timestamp: getTimeStr() });
+  container.scrollTop = container.scrollHeight;
+}
+
 function renderProblemDetailChatFromStorage(container, messages) {
+  const item = currentProblemDetailItem;
   messages.forEach((msg) => {
-    if (msg.type === 'basicInfoCard') {
+    if (msg.type === 'bmcStartBlock') {
+      if (item?.bmc) return;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-start';
+      const confirmed = !!msg.confirmed;
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">我将发起商业模式画布 BMC 生成</div>
+          <div class="problem-detail-chat-bmc-start-actions">
+            <button type="button" class="btn-confirm-start-bmc" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'bmcCard') {
+      const data = msg.data || {};
+      const confirmed = !!msg.confirmed;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-card-collapsible';
+      const bmcRows = BMC_FIELDS.map(({ key, label }) => {
+        const value = (data[key] != null ? String(data[key]).trim() : '') || '—';
+        return `<div class="problem-detail-bmc-row"><span class="problem-detail-bmc-label">${escapeHtml(label)}</span><span class="problem-detail-bmc-value">${escapeHtml(value)}</span></div>`;
+      }).join('');
+      const industryInsight = (data.industry_insight || '').trim() || '—';
+      const painPoints = (data.pain_points || '').trim() || '—';
+      cardBlock.innerHTML = `
+        <div class="problem-detail-bmc-card" role="button" tabindex="0">
+          <div class="problem-detail-bmc-card-body">
+            ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
+            <div class="problem-detail-bmc-grid">${bmcRows}</div>
+            ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-bmc-content">${escapeHtml(painPoints)}</div></div>` : ''}
+          </div>
+          <div class="problem-detail-bmc-card-expand-hint">点击展开</div>
+          <div class="problem-detail-bmc-card-actions">
+            <button type="button" class="btn-confirm-bmc" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
+      setupProblemDetailBmcCardToggle(cardBlock);
+    } else if (msg.type === 'basicInfoJsonBlock') {
+      const jsonBlock = document.createElement('div');
+      jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible';
+      jsonBlock.innerHTML = `<div class="problem-detail-chat-json-wrap" role="button" tabindex="0"><pre class="problem-detail-chat-json-pre">${escapeHtml(JSON.stringify(msg.json || {}, null, 2))}</pre></div><div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(jsonBlock);
+      setupProblemDetailJsonBlockToggle(jsonBlock);
+    } else if (msg.type === 'basicInfoCard') {
       const cardBlock = document.createElement('div');
       cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
       const labels = [
@@ -2249,6 +2541,37 @@ function setupProblemDetailChatCardToggle(cardBlock) {
       if (!e.target.closest('.btn-confirm-basic-info')) {
         cardBlock.classList.toggle('problem-detail-chat-card-expanded');
       }
+    }
+  });
+}
+
+function setupProblemDetailBmcCardToggle(cardBlock) {
+  const card = cardBlock?.querySelector('.problem-detail-bmc-card');
+  if (!card) return;
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('.btn-confirm-bmc')) return;
+    cardBlock.classList.toggle('problem-detail-chat-card-expanded');
+  });
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (!e.target.closest('.btn-confirm-bmc')) {
+        cardBlock.classList.toggle('problem-detail-chat-card-expanded');
+      }
+    }
+  });
+}
+
+function setupProblemDetailJsonBlockToggle(jsonBlock) {
+  const wrap = jsonBlock?.querySelector('.problem-detail-chat-json-wrap');
+  if (!wrap) return;
+  wrap.addEventListener('click', () => {
+    jsonBlock.classList.toggle('problem-detail-chat-json-expanded');
+  });
+  wrap.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      jsonBlock.classList.toggle('problem-detail-chat-json-expanded');
     }
   });
 }
@@ -2374,14 +2697,39 @@ function renderProblemDetailContent() {
     <div class="problem-detail-card-body">${basicInfoRows}</div>
   </div>`;
   }
-  container.innerHTML = `<div class="problem-detail-substeps">${subStepsHtml}</div>
-  <div class="problem-detail-card">
+  let bmcCardHtml = '';
+  if (item.bmc) {
+    const bmc = item.bmc;
+    const bmcRows = BMC_FIELDS.map(({ key, label }) => {
+      const value = (bmc[key] != null ? String(bmc[key]).trim() : '') || '—';
+      return `<div class="problem-detail-row"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${escapeHtml(value)}</span></div>`;
+    }).join('');
+    const industryInsight = (bmc.industry_insight || '').trim();
+    const painPoints = (bmc.pain_points || '').trim();
+    bmcCardHtml = `
+  <div class="problem-detail-card problem-detail-card-bmc">
+    <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
+      <span class="problem-detail-card-header-title">商业模式画布 BMC</span>
+      <span class="problem-detail-card-header-arrow">▾</span>
+    </div>
+    <div class="problem-detail-card-body">
+      ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-value">${escapeHtml(industryInsight)}</div></div>` : ''}
+      <div class="problem-detail-bmc-grid">${bmcRows}</div>
+      ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-value">${escapeHtml(painPoints)}</div></div>` : ''}
+    </div>
+  </div>`;
+  }
+  const cardsHtml = `<div class="problem-detail-card">
     <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
       <span class="problem-detail-card-header-title">初步需求</span>
       <span class="problem-detail-card-header-arrow">▾</span>
     </div>
     <div class="problem-detail-card-body">${rows}</div>
-  </div>${basicInfoCardHtml}`;
+  </div>${basicInfoCardHtml}${bmcCardHtml}`;
+  container.innerHTML = `<div class="problem-detail-substeps">${subStepsHtml}</div>
+  <div class="problem-detail-workspace-scroll">
+    <div class="problem-detail-workspace-cards">${cardsHtml}</div>
+  </div>`;
   setupProblemDetailCardToggle();
 }
 
