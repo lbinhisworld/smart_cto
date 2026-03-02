@@ -712,7 +712,7 @@ body {
   gap: 1rem;
 }
 
-/* 需求理解阶段子环节 */
+/* 需求理解阶段子环节 - 任务阶段追踪 */
 .problem-detail-substeps {
   display: flex;
   align-items: center;
@@ -724,13 +724,46 @@ body {
 }
 
 .problem-detail-substep {
-  padding: 0.25rem 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.problem-detail-substep-done {
+  color: var(--text);
+  border-color: rgba(63, 185, 80, 0.4);
+  background: rgba(63, 185, 80, 0.08);
+}
+
+.problem-detail-substep-current {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  animation: problem-detail-substep-glow 1.5s ease-in-out infinite;
+}
+
+.problem-detail-substep-check {
+  margin-left: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--success);
+}
+
+@keyframes problem-detail-substep-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.5), 0 0 6px rgba(88, 166, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.9), 0 0 14px rgba(88, 166, 255, 0.5);
+  }
 }
 
 .problem-detail-substep-sep {
-  margin: 0 0.25rem;
+  margin: 0 0.2rem;
   color: var(--text-muted);
   opacity: 0.6;
+  font-size: 0.7rem;
 }
 
 .problem-detail-card {

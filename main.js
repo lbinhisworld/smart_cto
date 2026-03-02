@@ -1521,6 +1521,10 @@ if (el.problemDetailChatMessages) {
         const item = currentProblemDetailItem;
         if (item?.createdAt) {
           updateDigitalProblemBasicInfo(item.createdAt, data);
+          const completed = item.completedStages || [];
+          if (!completed.includes(0)) completed.push(0);
+          completed.sort((a, b) => a - b);
+          currentProblemDetailItem = { ...item, basicInfo: data, completedStages: completed };
         }
         let idx = -1;
         for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
@@ -2054,7 +2058,11 @@ function updateDigitalProblemBasicInfo(createdAt, basicInfo) {
   const list = getDigitalProblems();
   const idx = list.findIndex((it) => it.createdAt === createdAt);
   if (idx < 0) return;
-  list[idx] = { ...list[idx], basicInfo };
+  const item = list[idx];
+  const completed = item.completedStages || [];
+  if (!completed.includes(0)) completed.push(0);
+  completed.sort((a, b) => a - b);
+  list[idx] = { ...item, basicInfo, completedStages: completed };
   localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
 }
 
@@ -2105,6 +2113,16 @@ function renderProblemFollowList() {
 function openProblemDetail(item) {
   currentProblemDetailItem = item;
   problemDetailConfirmedBasicInfo = item.basicInfo || null;
+  // 若已确认企业基本信息，则企业背景洞察视为已完成
+  if (item.basicInfo) {
+    const completed = item.completedStages || [];
+    if (!completed.includes(0)) {
+      completed.push(0);
+      completed.sort((a, b) => a - b);
+      updateDigitalProblemBasicInfo(item.createdAt, item.basicInfo);
+      currentProblemDetailItem = { ...item, completedStages: completed };
+    }
+  }
   renderProblemDetailContent();
   initProblemDetailChat();
   switchView('problemDetail');
@@ -2318,9 +2336,17 @@ function renderProblemDetailContent() {
     '价值流生成',
     '完整需求理解',
   ];
-  const subStepsHtml = subSteps.map((name) =>
-    `<span class="problem-detail-substep">${escapeHtml(name)}</span>`
-  ).join('<span class="problem-detail-substep-sep">·</span>');
+  const completedStages = item.completedStages || [];
+  const currentStage = [0, 1, 2, 3].find((i) => !completedStages.includes(i)) ?? 4;
+  const subStepsHtml = subSteps.map((name, i) => {
+    const done = completedStages.includes(i);
+    const current = i === currentStage;
+    let cls = 'problem-detail-substep';
+    if (done) cls += ' problem-detail-substep-done';
+    else if (current) cls += ' problem-detail-substep-current';
+    const icon = done ? ' <span class="problem-detail-substep-check">✅</span>' : '';
+    return `<span class="${cls}">${escapeHtml(name)}${icon}</span>`;
+  }).join('<span class="problem-detail-substep-sep">→</span>');
   const basicInfoLabels = [
     { key: 'company_name', label: '公司名称' },
     { key: 'credit_code', label: '信用代码' },
