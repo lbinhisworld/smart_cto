@@ -89,6 +89,9 @@ let lastParsedResult = null;
 /** 当前问题详情页展示的跟进项 */
 let currentProblemDetailItem = null;
 
+/** 当前正在浏览的大节段（可点击切换，用于回看需求理解等） */
+let problemDetailViewingMajorStage = 0;
+
 /** 问题详情页已确认的客户基本信息（解析后点击确认） */
 let problemDetailConfirmedBasicInfo = null;
 
@@ -633,7 +636,7 @@ function parseValueStreamGraph(data) {
     stages: list.map((s, i) => {
       if (!s) return { name: `阶段${i + 1}`, steps: [] };
       if (typeof s === 'string') return { name: extractPureStageName(s), steps: [] };
-      const rawSteps = s.steps ?? s.phases ?? s.items ?? s.nodes ?? s.children ?? [];
+      const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? s.nodes ?? s.children ?? [];
       const steps = Array.isArray(rawSteps) ? rawSteps : [];
       const rawStageName = s.name ?? s.title ?? s.stage_name ?? s.phase_name ?? s.label ?? s.node_name ?? s.node_label ?? `阶段${i + 1}`;
       const stageName = extractPureStageName(rawStageName);
@@ -642,12 +645,16 @@ function parseValueStreamGraph(data) {
         steps: steps.map((st, j) => {
           if (typeof st === 'string') {
             const { name: stepName, desc: stepDesc } = extractStepNameAndDesc({ name: st });
-            return { name: stepName || st, desc: stepDesc };
+            return { name: stepName || st, desc: stepDesc, role: '', duration: '' };
           }
           const { name: stepName, desc: stepDesc } = extractStepNameAndDesc(st);
+          const role = formatValue(st.role ?? st.executor ?? st.执行角色) || '';
+          const duration = formatValue(st.duration ?? st.lead_time ?? st.预估耗时 ?? st.提前期) || '';
           return {
             name: stepName || `环节${j + 1}`,
             desc: stepDesc,
+            role,
+            duration,
           };
         }),
       };
@@ -667,13 +674,22 @@ function renderValueStreamViewHTML(item) {
   const stagesHtml = stages.map((stage, si) => {
     const stepsHtml = stage.steps.length === 0
       ? '<div class="vs-step-node vs-step-empty">—</div>'
-      : stage.steps.map((step, ji) => `
+      : stage.steps.map((step, ji) => {
+          const roleDurationHtml = (step.role || step.duration)
+            ? `<div class="vs-step-meta">
+                ${step.role ? `<span class="vs-step-meta-chip vs-step-meta-role">${escapeHtml(step.role)}</span>` : ''}
+                ${step.duration ? `<span class="vs-step-meta-chip vs-step-meta-duration">${escapeHtml(step.duration)}</span>` : ''}
+              </div>`
+            : '';
+          return `
           <div class="vs-step-node" data-vs-step-name="${escapeHtml(step.name)}">
             <span class="vs-step-name">${escapeHtml(step.name)}</span>
             ${step.desc ? `<span class="vs-step-desc">${escapeHtml(step.desc)}</span>` : ''}
+            ${roleDurationHtml}
           </div>
           ${ji < stage.steps.length - 1 ? '<div class="vs-arrow-inner" aria-hidden="true">↓</div>' : ''}
-        `).join('');
+        `;
+        }).join('');
 
     return `
       <div class="vs-graph-stage" data-stage="${si}" data-vs-stage-name="${escapeHtml(stage.name)}">
@@ -1500,6 +1516,29 @@ if (el.btnProblemDetailBack) {
     renderProblemFollowList();
   });
 }
+if (el.problemDetailView) {
+  const handleStageSwitch = (stageEl) => {
+    if (!stageEl || !currentProblemDetailItem) return;
+    const stage = parseInt(stageEl.getAttribute('data-stage'), 10);
+    if (isNaN(stage)) return;
+    const currentMajorStage = currentProblemDetailItem.currentMajorStage ?? 0;
+    if (stage > currentMajorStage) return;
+    problemDetailViewingMajorStage = stage;
+    updateProblemDetailProgressStages(currentMajorStage, problemDetailViewingMajorStage);
+    renderProblemDetailContent();
+  };
+  el.problemDetailView.addEventListener('click', (e) => {
+    const stageEl = e.target.closest('.problem-detail-stage.problem-detail-stage-clickable');
+    if (stageEl) handleStageSwitch(stageEl);
+  });
+  el.problemDetailView.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const stageEl = e.target.closest('.problem-detail-stage.problem-detail-stage-clickable');
+    if (!stageEl) return;
+    e.preventDefault();
+    handleStageSwitch(stageEl);
+  });
+}
 if (el.problemDetailChatSend) {
   el.problemDetailChatSend.addEventListener('click', handleProblemDetailChatSend);
 }
@@ -1528,9 +1567,22 @@ if (el.problemDetailChatMessages) {
           requestAnimationFrame(() => {
             maybeShowBmcStartBlock();
             maybeShowRequirementLogicStartBlock();
+            maybeShowValueStreamStartBlock();
           });
         }
       }
+      return;
+    }
+    const startValueStreamBtn = e.target.closest('.btn-confirm-start-value-stream');
+    if (startValueStreamBtn && !startValueStreamBtn.disabled) {
+      startValueStreamBtn.disabled = true;
+      startValueStreamBtn.textContent = '已确认';
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'valueStreamStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+      }
+      runValueStreamGeneration();
       return;
     }
     const startReqLogicBtn = e.target.closest('.btn-confirm-start-requirement-logic');
@@ -1555,6 +1607,62 @@ if (el.problemDetailChatMessages) {
         saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
       }
       runBmcGeneration();
+      return;
+    }
+    const valueStreamBtn = e.target.closest('.btn-confirm-value-stream');
+    if (valueStreamBtn && valueStreamBtn.dataset.json && !valueStreamBtn.disabled) {
+      try {
+        const valueStream = JSON.parse(valueStreamBtn.dataset.json);
+        let idx = -1;
+        for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
+          if (problemDetailChatMessages[i].type === 'valueStreamCard') {
+            idx = i;
+            break;
+          }
+        }
+        if (idx >= 0) {
+          problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: valueStream, confirmed: true };
+          saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+        }
+        valueStreamBtn.textContent = '已确认';
+        valueStreamBtn.disabled = true;
+        const hasDrawStart = problemDetailChatMessages.some((m) => m.type === 'drawValueStreamStartBlock');
+        if (!hasDrawStart) {
+          const drawBlock = document.createElement('div');
+          drawBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-draw-value-stream-start';
+          drawBlock.innerHTML = `
+            <div class="problem-detail-chat-msg-content-wrap">
+              <div class="problem-detail-chat-msg-content">开始绘制价值流图</div>
+              <div class="problem-detail-chat-draw-value-stream-start-actions">
+                <button type="button" class="btn-confirm-draw-value-stream" data-json="${String(JSON.stringify(valueStream)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button>
+              </div>
+            </div>
+            <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+          el.problemDetailChatMessages?.appendChild(drawBlock);
+          pushAndSaveProblemDetailChat({ type: 'drawValueStreamStartBlock', data: valueStream, timestamp: getTimeStr() });
+          el.problemDetailChatMessages.scrollTop = el.problemDetailChatMessages.scrollHeight;
+        }
+      } catch (_) {}
+      return;
+    }
+    const drawValueStreamBtn = e.target.closest('.btn-confirm-draw-value-stream');
+    if (drawValueStreamBtn && drawValueStreamBtn.dataset.json && !drawValueStreamBtn.disabled) {
+      try {
+        const valueStream = JSON.parse(drawValueStreamBtn.dataset.json);
+        const item = currentProblemDetailItem;
+        if (item?.createdAt) {
+          updateDigitalProblemValueStream(item.createdAt, valueStream);
+          currentProblemDetailItem = { ...item, valueStream, workflowAlignCompletedStages: [...(item.workflowAlignCompletedStages || []).filter((x) => x !== 0), 0].sort((a, b) => a - b) };
+        }
+        drawValueStreamBtn.textContent = '已确认';
+        drawValueStreamBtn.disabled = true;
+        const drawIdx = problemDetailChatMessages.findIndex((m) => m.type === 'drawValueStreamStartBlock');
+        if (drawIdx >= 0) {
+          problemDetailChatMessages[drawIdx] = { ...problemDetailChatMessages[drawIdx], confirmed: true };
+          saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+        }
+        renderProblemDetailContent();
+      } catch (_) {}
       return;
     }
     const bmcBtn = e.target.closest('.btn-confirm-bmc');
@@ -1583,7 +1691,10 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailContent();
         bmcBtn.textContent = '已确认';
         bmcBtn.disabled = true;
-        requestAnimationFrame(() => maybeShowRequirementLogicStartBlock());
+        requestAnimationFrame(() => {
+          maybeShowRequirementLogicStartBlock();
+          maybeShowValueStreamStartBlock();
+        });
       } catch (_) {}
       return;
     }
@@ -2140,6 +2251,46 @@ const REQUIREMENT_LOGIC_PROMPT = `# Role
 
 注意：每个 ## 标题下方必须紧跟具体分析内容，不可留空。`;
 
+const VALUE_STREAM_PROMPT = `# 角色设定
+你是一位资深的业务架构师与 B-End 需求分析师，擅长通过客户的工商背景、商业画布（BMC）及具体业务逻辑，梳理并绘制业务核心价值流图（Value Stream Map）。你的目标是识别业务环节中的转化效率、角色分工，并为后续的 IT Gap 分析提供可视化基础。
+
+# 输入数据说明
+我将为你提供三个维度的 JSON 数据：
+- enterprise_info: 当前需求单→需求理解页面中的客户基本信息 json 数据。
+- bmc_data: 当前需求单→需求理解页面中的商业模式画布 BMC json 数据。
+- requirement_logic: 当前需求单→需求理解页面中的需求逻辑 json 数据。
+
+# 绘图指令与规范
+请根据输入数据，生成价值流图结构：
+1. **阶段划分（Stages）**：将全流程划分为 5 个左右的核心阶段（如：市场洞察、方案决策、执行交付等）。
+2. **原子任务（Tasks）**：每个阶段内包含 1-3 个具体的作业项。
+3. **节点属性**：每个作业项必须标注：
+   - 3.1）任务名称（如：整理数据）
+   - 3.2）执行角色（如：数据专员）
+   - 3.3）预估耗时/提前期（如：30分钟、1天）
+4. **逻辑连接**：使用箭头连接任务，体现前后序依赖关系。
+
+# 输出格式
+请先输出逻辑说明（简要说明价值流设计思路），然后提供一个可用于绘图的 JSON 代码块。JSON 结构需满足前端绘图组件要求，建议格式示例：
+\`\`\`json
+{
+  "stages": [
+    {
+      "name": "阶段名称",
+      "tasks": [
+        {
+          "name": "任务名称",
+          "role": "执行角色",
+          "duration": "预估耗时"
+        }
+      ]
+    }
+  ],
+  "connections": [{"from": "任务A", "to": "任务B"}]
+}
+\`\`\`
+只返回逻辑说明和 JSON 代码块，不要有其他内容。`;
+
 const BMC_LABEL_TO_KEY = {
   '客户细分': 'customer_segments',
   '价值主张': 'value_propositions',
@@ -2299,6 +2450,42 @@ ${typeof bmcJson === 'string' ? bmcJson : JSON.stringify(bmcJson, null, 2)}
   return (data.choices?.[0]?.message?.content ?? '').trim();
 }
 
+async function generateValueStreamFromInputs(enterpriseInfo, bmcData, requirementLogic) {
+  const userContent = `请基于以下三个维度的数据生成价值流图：
+
+## 1. enterprise_info（客户基本信息）
+\`\`\`json
+${typeof enterpriseInfo === 'string' ? enterpriseInfo : JSON.stringify(enterpriseInfo || {}, null, 2)}
+\`\`\`
+
+## 2. bmc_data（商业模式画布 BMC）
+\`\`\`json
+${typeof bmcData === 'string' ? bmcData : JSON.stringify(bmcData || {}, null, 2)}
+\`\`\`
+
+## 3. requirement_logic（需求逻辑）
+\`\`\`json
+${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic || {}, null, 2)}
+\`\`\``;
+  const res = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: 'system', content: VALUE_STREAM_PROMPT },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return (data.choices?.[0]?.message?.content ?? '').trim();
+}
+
 const PARSE_PREVIEW_FIELDS = [
   { key: 'customerName', label: '客户名称' },
   { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
@@ -2409,6 +2596,27 @@ function updateDigitalProblemRequirementLogic(createdAt, requirementLogic) {
   localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
 }
 
+function updateDigitalProblemMajorStage(createdAt, majorStage) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  list[idx] = { ...item, currentMajorStage: majorStage };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+function updateDigitalProblemValueStream(createdAt, valueStream) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const wfCompleted = item.workflowAlignCompletedStages || [];
+  if (!wfCompleted.includes(0)) wfCompleted.push(0);
+  wfCompleted.sort((a, b) => a - b);
+  list[idx] = { ...item, valueStream, workflowAlignCompletedStages: wfCompleted };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
 function deleteDigitalProblemRequirementLogic(createdAt) {
   const list = getDigitalProblems();
   const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -2477,6 +2685,10 @@ function openProblemDetail(item) {
       currentProblemDetailItem = { ...item, completedStages: completed };
     }
   }
+  // 使用已保存的 currentMajorStage，确保再次进入时自动加载对应大节段页面
+  const majorStage = currentProblemDetailItem.currentMajorStage ?? item.currentMajorStage ?? 0;
+  problemDetailViewingMajorStage = majorStage;
+  updateProblemDetailProgressStages(majorStage, problemDetailViewingMajorStage);
   renderProblemDetailContent();
   initProblemDetailChat();
   switchView('problemDetail');
@@ -2502,6 +2714,7 @@ function initProblemDetailChat() {
     container.scrollTop = container.scrollHeight;
     maybeShowBmcStartBlock();
     maybeShowRequirementLogicStartBlock();
+    maybeShowValueStreamStartBlock();
   });
 }
 
@@ -2621,65 +2834,100 @@ function maybeShowRequirementLogicStartBlock() {
   container.scrollTop = container.scrollHeight;
 }
 
-async function runRequirementLogicConstruction() {
+function maybeShowValueStreamStartBlock() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
   if (!container || !item?.createdAt) return;
+  if (item.valueStream) return;
+  const currentMajorStage = item.currentMajorStage ?? 0;
+  if (currentMajorStage < 1) return;
+  const wfCompleted = item.workflowAlignCompletedStages || [];
+  const wfCurrent = [0, 1, 2].find((i) => !wfCompleted.includes(i)) ?? 3;
+  if (wfCurrent !== 0) return;
+  const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo;
+  if (!basicInfo || !item.bmc || !item.requirementLogic) return;
+  const hasStart = problemDetailChatMessages.some((m) => m.type === 'valueStreamStartBlock');
+  if (hasStart) return;
+  const block = document.createElement('div');
+  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-start';
+  block.innerHTML = `
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">我即将开始需求相关核心价值流图绘制</div>
+      <div class="problem-detail-chat-value-stream-start-actions">
+        <button type="button" class="btn-confirm-start-value-stream">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  pushAndSaveProblemDetailChat({ type: 'valueStreamStartBlock', timestamp: getTimeStr() });
+  container.scrollTop = container.scrollHeight;
+}
+
+async function runValueStreamGeneration() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!DEEPSEEK_API_KEY) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用价值流图生成功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用价值流图生成功能。', timestamp: getTimeStr() });
+    return;
+  }
   const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || {};
   const bmc = item.bmc || {};
-  const preliminaryReq = {
-    customerName: item.customerName,
-    customerNeedsOrChallenges: item.customerNeedsOrChallenges,
-    customerItStatus: item.customerItStatus,
-    projectTimeRequirement: item.projectTimeRequirement,
-  };
+  const requirementLogic = item.requirementLogic || {};
   try {
-    const titleBlock = document.createElement('div');
-    titleBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    titleBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">提炼需求逻辑</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(titleBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '提炼需求逻辑', timestamp: getTimeStr() });
-    container.scrollTop = container.scrollHeight;
     const loadingBlock = document.createElement('div');
     loadingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
-    loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在分析需求逻辑…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在生成需求相关核心价值流图 VSM…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(loadingBlock);
     container.scrollTop = container.scrollHeight;
-    const content = await generateRequirementLogicFromInputs(preliminaryReq, basicInfo, bmc);
+    const content = await generateValueStreamFromInputs(basicInfo, bmc, requirementLogic);
     loadingBlock.remove();
-    const parsed = parseRequirementLogicFromMarkdown(content);
-    const hasAnyContent = REQUIREMENT_LOGIC_SECTIONS.some(({ key }) => (parsed[key] || '').trim());
-    const rows = hasAnyContent
-      ? REQUIREMENT_LOGIC_SECTIONS.map(({ key, label }) => {
-          const val = (parsed[key] || '').trim() || '—';
-          return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(val).replace(/\n/g, '<br>')}</span></div>`;
-        }).join('')
-      : `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">原始输出</span><span class="problem-detail-basic-info-value">${escapeHtml(content).replace(/\n/g, '<br>')}</span></div>`;
-    pushAndSaveProblemDetailChat({ type: 'requirementLogicBlock', content, parsed, timestamp: getTimeStr(), confirmed: false });
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    let valueStreamJson = null;
+    if (jsonMatch) {
+      try {
+        valueStreamJson = JSON.parse(jsonMatch[1].trim());
+      } catch (_) {}
+    }
+    if (!valueStreamJson) {
+      const fallbackMatch = content.match(/\{[\s\S]*\}/);
+      if (fallbackMatch) {
+        try {
+          valueStreamJson = JSON.parse(fallbackMatch[0]);
+        } catch (_) {}
+      }
+    }
+    const valueStream = valueStreamJson || { raw: content };
+    pushAndSaveProblemDetailChat({ type: 'valueStreamCard', data: valueStream, logicText: content.replace(/```[\s\S]*?```/g, '').trim(), timestamp: getTimeStr(), confirmed: false });
     const cardBlock = document.createElement('div');
-    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible problem-detail-chat-msg-with-delete problem-detail-chat-requirement-logic-card';
+    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
     cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+    const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
     cardBlock.innerHTML = `
       <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
-      <div class="problem-detail-basic-info-card" role="button" tabindex="0">
-        <div class="problem-detail-basic-info-card-body">${rows}</div>
-        <div class="problem-detail-basic-info-card-actions">
-          <button type="button" class="btn-confirm-requirement-logic">确认</button>
+      <div class="problem-detail-chat-value-stream-card-wrap">
+        <div class="problem-detail-chat-value-stream-card-header">价值流图设计 JSON</div>
+        <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
+        <div class="problem-detail-chat-value-stream-card-actions">
+          <button type="button" class="btn-confirm-value-stream" data-json="${String(JSON.stringify(valueStream)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button>
         </div>
       </div>
       <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(cardBlock);
-    setupProblemDetailRequirementLogicCardToggle(cardBlock);
     container.scrollTop = container.scrollHeight;
-    updateDigitalProblemRequirementLogic(item.createdAt, content);
-    currentProblemDetailItem = { ...item, requirementLogic: content, completedStages: [...(item.completedStages || []).filter((x) => x !== 2), 2].sort((a, b) => a - b) };
+    updateDigitalProblemValueStream(item.createdAt, valueStream);
+    currentProblemDetailItem = { ...item, valueStream, workflowAlignCompletedStages: [...(item.workflowAlignCompletedStages || []).filter((x) => x !== 0), 0].sort((a, b) => a - b) };
     renderProblemDetailContent();
   } catch (err) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">提炼失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">价值流图生成失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '提炼失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '价值流图生成失败：' + (err.message || String(err)), timestamp: getTimeStr() });
   }
 }
 
@@ -2698,6 +2946,22 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-msg-content">我即将开始提取需求逻辑</div>
           <div class="problem-detail-chat-requirement-logic-start-actions">
             <button type="button" class="btn-confirm-start-requirement-logic" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'valueStreamStartBlock') {
+      if (item?.valueStream) return;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-start problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      const confirmed = !!msg.confirmed;
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">我即将开始需求相关核心价值流图绘制</div>
+          <div class="problem-detail-chat-value-stream-start-actions">
+            <button type="button" class="btn-confirm-start-value-stream" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -2771,6 +3035,39 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(cardBlock);
       setupProblemDetailRequirementLogicCardToggle(cardBlock);
+    } else if (msg.type === 'drawValueStreamStartBlock') {
+      const data = msg.data || {};
+      const confirmed = !!msg.confirmed;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-draw-value-stream-start';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">开始绘制价值流图</div>
+          <div class="problem-detail-chat-draw-value-stream-start-actions">
+            <button type="button" class="btn-confirm-draw-value-stream" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'valueStreamCard') {
+      const data = msg.data || {};
+      const confirmed = !!msg.confirmed;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      const jsonStr = escapeHtml(JSON.stringify(data, null, 2));
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <div class="problem-detail-chat-value-stream-card-wrap">
+          <div class="problem-detail-chat-value-stream-card-header">价值流图设计 JSON</div>
+          <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
+          <div class="problem-detail-chat-value-stream-card-actions">
+            <button type="button" class="btn-confirm-value-stream" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
     } else if (msg.type === 'basicInfoJsonBlock') {
       const jsonBlock = document.createElement('div');
       jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible problem-detail-chat-msg-with-delete';
@@ -2932,8 +3229,31 @@ function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
         saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
       }
+      const item = currentProblemDetailItem;
+      if (item?.createdAt) {
+        updateDigitalProblemMajorStage(item.createdAt, 1);
+        currentProblemDetailItem = { ...item, currentMajorStage: 1 };
+        problemDetailViewingMajorStage = 1;
+        updateProblemDetailProgressStages(1, problemDetailViewingMajorStage);
+        renderProblemDetailContent();
+        requestAnimationFrame(() => maybeShowValueStreamStartBlock());
+      }
     });
   }
+}
+
+function setupProblemDetailValueStreamTabs(container) {
+  const card = container?.querySelector('.problem-detail-value-stream-card');
+  if (!card) return;
+  const tabs = card.querySelectorAll('.problem-detail-value-stream-tab');
+  const panels = card.querySelectorAll('.problem-detail-value-stream-panel');
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const tabName = tab.getAttribute('data-tab');
+      tabs.forEach((t) => t.classList.toggle('problem-detail-value-stream-tab-active', t.getAttribute('data-tab') === tabName));
+      panels.forEach((p) => { p.hidden = p.getAttribute('data-panel') !== tabName; });
+    });
+  });
 }
 
 function setupProblemDetailJsonBlockToggle(jsonBlock) {
@@ -3009,12 +3329,85 @@ async function handleProblemDetailChatSend() {
   }
 }
 
+const PROBLEM_DETAIL_MAJOR_STAGE_LABELS = ['需求理解', '工作流对齐', 'ITGap分析', 'IT策略规划'];
+
+function updateProblemDetailProgressStages(currentMajorStage, viewingMajorStage) {
+  const viewing = viewingMajorStage ?? currentMajorStage;
+  const progress = document.querySelector('.problem-detail-progress');
+  if (!progress) return;
+  const stages = progress.querySelectorAll('.problem-detail-stage');
+  stages.forEach((el) => {
+    const stage = parseInt(el.getAttribute('data-stage'), 10);
+    if (isNaN(stage)) return;
+    const label = PROBLEM_DETAIL_MAJOR_STAGE_LABELS[stage] ?? el.textContent.replace(/\s*✅\s*$/, '').trim();
+    el.classList.remove('problem-detail-stage-active', 'problem-detail-stage-done', 'problem-detail-stage-flashing', 'problem-detail-stage-clickable');
+    el.textContent = label;
+    const isReached = stage <= currentMajorStage;
+    if (stage < currentMajorStage) {
+      el.classList.add('problem-detail-stage-done');
+      el.textContent = label + ' ✅';
+    }
+    if (stage === viewing) {
+      el.classList.add('problem-detail-stage-active');
+      if (stage === 1) el.classList.add('problem-detail-stage-flashing');
+    }
+    if (isReached) el.classList.add('problem-detail-stage-clickable');
+  });
+}
+
 function renderProblemDetailContent() {
   const container = el.problemDetailContent;
   if (!container) return;
   const item = currentProblemDetailItem;
   if (!item) {
     container.innerHTML = '<p class="problem-follow-empty">暂无详情</p>';
+    return;
+  }
+  const currentMajorStage = item.currentMajorStage ?? 0;
+  if (problemDetailViewingMajorStage >= 1) {
+    const workflowSubsteps = ['绘制价值流', 'IT现状标注', '痛点标注'];
+    const wfCompleted = item.workflowAlignCompletedStages || [];
+    const wfCurrent = [0, 1, 2].find((i) => !wfCompleted.includes(i)) ?? 3;
+    const workflowSubstepsHtml = workflowSubsteps.map((name, i) => {
+      const done = wfCompleted.includes(i);
+      const current = i === wfCurrent;
+      let cls = 'problem-detail-substep';
+      if (done) cls += ' problem-detail-substep-done';
+      else if (current) cls += ' problem-detail-substep-current';
+      const icon = done ? ' <span class="problem-detail-substep-check">✅</span>' : '';
+      return `<span class="${cls}">${escapeHtml(name)}${icon}</span>`;
+    }).join('<span class="problem-detail-substep-sep">→</span>');
+    const valueStream = item.valueStream;
+    let workspaceContent = '';
+    if (valueStream && !valueStream.raw) {
+      const graphHtml = renderValueStreamViewHTML(valueStream);
+      const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
+      workspaceContent = `
+      <div class="problem-detail-value-stream-card">
+        <div class="problem-detail-value-stream-card-header">
+          <button type="button" class="problem-detail-value-stream-tab problem-detail-value-stream-tab-active" data-tab="view">价值流图</button>
+          <button type="button" class="problem-detail-value-stream-tab" data-tab="json">价值流图json</button>
+        </div>
+        <div class="problem-detail-value-stream-card-body">
+          <div class="problem-detail-value-stream-panel" data-panel="view">${graphHtml}</div>
+          <div class="problem-detail-value-stream-panel" data-panel="json" hidden><pre class="problem-detail-card-json-pre">${jsonStr}</pre></div>
+        </div>
+      </div>`;
+    } else {
+      workspaceContent = `
+        <div class="problem-detail-workflow-align-placeholder">
+          <h3 class="problem-detail-workflow-align-title">工作流对齐</h3>
+          <p class="problem-detail-workflow-align-desc">此阶段将基于需求逻辑，进行工作流与业务场景的对齐分析。请先在聊天区确认价值流图设计 JSON 后点击「开始绘制价值流图」的确认按钮。</p>
+        </div>`;
+    }
+    container.innerHTML = `
+      <div class="problem-detail-substeps">${workflowSubstepsHtml}</div>
+      <div class="problem-detail-workspace-scroll">
+        ${workspaceContent}
+      </div>`;
+    if (valueStream && !valueStream.raw) {
+      setupProblemDetailValueStreamTabs(container);
+    }
     return;
   }
   const labels = [
