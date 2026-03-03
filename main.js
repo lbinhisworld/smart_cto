@@ -14,6 +14,32 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const DEEPSEEK_API_KEY = 'sk-051df7f3ec0a406cb1ceb0fa83317d76'; // 请填入你的 DeepSeek API Key
 const DEEPSEEK_MODEL = 'deepseek-chat';
 
+/** 调用 DeepSeek 大模型，返回 content、usage、耗时 */
+async function fetchDeepSeekChat(messages) {
+  const start = Date.now();
+  const res = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({ model: DEEPSEEK_MODEL, messages }),
+  });
+  const data = await res.json();
+  const durationMs = Date.now() - start;
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  const content = (data.choices?.[0]?.message?.content ?? '').trim();
+  const usage = data.usage || {};
+  return { content, usage, model: DEEPSEEK_MODEL, durationMs };
+}
+
+/** 构建 LLM 调用元信息 HTML（模型、token、耗时） */
+function buildLlmMetaHtml(meta) {
+  if (!meta) return '';
+  const totalTokens = meta.usage?.total_tokens ?? ((meta.usage?.prompt_tokens || 0) + (meta.usage?.completion_tokens || 0));
+  return `<div class="problem-detail-chat-msg-llm-meta">模型: ${escapeHtml(meta.model || DEEPSEEK_MODEL)} | 消耗 token: ${totalTokens} | 耗时: ${meta.durationMs || 0}ms</div>`;
+}
+
 /** 当前详情页的公司名称，用于对话上下文 */
 let currentDetailCompanyName = '';
 
@@ -645,16 +671,26 @@ function parseValueStreamGraph(data) {
         steps: steps.map((st, j) => {
           if (typeof st === 'string') {
             const { name: stepName, desc: stepDesc } = extractStepNameAndDesc({ name: st });
-            return { name: stepName || st, desc: stepDesc, role: '', duration: '' };
+            return { name: stepName || st, desc: stepDesc, role: '', duration: '', itStatusLabel: '', painPoint: '' };
           }
           const { name: stepName, desc: stepDesc } = extractStepNameAndDesc(st);
           const role = formatValue(st.role ?? st.executor ?? st.执行角色) || '';
           const duration = formatValue(st.duration ?? st.lead_time ?? st.预估耗时 ?? st.提前期) || '';
+          const itStatus = st.itStatus ?? st.it_status;
+          const itStatusLabel = itStatus && typeof itStatus === 'object'
+            ? (itStatus.type === '手工' ? `手工-${itStatus.detail || '—'}` : itStatus.type === '系统' ? `系统-${itStatus.detail || '—'}` : '')
+            : (typeof itStatus === 'string' ? itStatus : '');
+          const rawPainPoint = formatValue(st.painPoint ?? st.pain_point) || '';
+          const trimmed = rawPainPoint.trim();
+          const isNoPainPoint = /^(无明显痛点|无痛点|暂无|无)$/i.test(trimmed) || /^无明显痛点/i.test(trimmed);
+          const painPoint = isNoPainPoint ? '' : rawPainPoint;
           return {
             name: stepName || `环节${j + 1}`,
             desc: stepDesc,
             role,
             duration,
+            itStatusLabel: itStatusLabel || '',
+            painPoint,
           };
         }),
       };
@@ -681,11 +717,19 @@ function renderValueStreamViewHTML(item) {
                 ${step.duration ? `<span class="vs-step-meta-chip vs-step-meta-duration">${escapeHtml(step.duration)}</span>` : ''}
               </div>`
             : '';
+          const itStatusHtml = step.itStatusLabel
+            ? `<div class="vs-step-meta"><span class="vs-step-meta-chip vs-step-meta-it-status">IT现状：${escapeHtml(step.itStatusLabel)}</span></div>`
+            : '';
+          const painPointHtml = step.painPoint
+            ? `<div class="vs-step-meta"><div class="vs-step-pain-point-card">${escapeHtml(step.painPoint)}</div></div>`
+            : '';
           return `
           <div class="vs-step-node" data-vs-step-name="${escapeHtml(step.name)}">
             <span class="vs-step-name">${escapeHtml(step.name)}</span>
             ${step.desc ? `<span class="vs-step-desc">${escapeHtml(step.desc)}</span>` : ''}
             ${roleDurationHtml}
+            ${itStatusHtml}
+            ${painPointHtml}
           </div>
           ${ji < stage.steps.length - 1 ? '<div class="vs-arrow-inner" aria-hidden="true">↓</div>' : ''}
         `;
@@ -1558,7 +1602,49 @@ if (el.problemDetailChatMessages) {
       if (msgBlock) {
         const idx = parseInt(msgBlock.dataset.msgIndex, 10);
         if (!isNaN(idx) && idx >= 0 && idx < problemDetailChatMessages.length) {
-          problemDetailChatMessages.splice(idx, 1);
+          const msg = problemDetailChatMessages[idx];
+          const isPainPointStartBlock = msg?.type === 'painPointStartBlock';
+          const isPainPointDoneMsg = msg?.role === 'system' && msg?.content === '痛点标注完成';
+          const shouldRollbackPainPoint = (isPainPointStartBlock || isPainPointDoneMsg) && currentProblemDetailItem?.createdAt;
+          if (shouldRollbackPainPoint) {
+            rollbackValueStreamPainPoint(currentProblemDetailItem.createdAt);
+            currentProblemDetailItem = {
+              ...currentProblemDetailItem,
+              valueStream: (() => {
+                const vs = currentProblemDetailItem.valueStream;
+                if (!vs || vs.raw) return vs;
+                const rawStages = vs.stages ?? vs.phases ?? vs.nodes ?? [];
+                if (!Array.isArray(rawStages)) return vs;
+                const stages = rawStages.map((s) => {
+                  if (!s || typeof s !== 'object') return s;
+                  const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+                  const steps = rawSteps.map((st) => {
+                    if (typeof st !== 'object' || st == null) return st;
+                    const { painPoint, pain_point, ...rest } = st;
+                    return rest;
+                  });
+                  return { ...s, steps };
+                });
+                return { ...vs, stages };
+              })(),
+              workflowAlignCompletedStages: (currentProblemDetailItem.workflowAlignCompletedStages || []).filter((x) => x !== 2).sort((a, b) => a - b),
+            };
+            renderProblemDetailContent();
+          }
+          let spliceIdx = idx;
+          if (isPainPointStartBlock && shouldRollbackPainPoint) {
+            let lastDoneIdx = -1;
+            for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
+              const m = problemDetailChatMessages[i];
+              if (m?.role === 'system' && m?.content === '痛点标注完成') {
+                lastDoneIdx = i;
+                break;
+              }
+            }
+            if (lastDoneIdx >= 0) problemDetailChatMessages.splice(lastDoneIdx, 1);
+            spliceIdx = lastDoneIdx >= 0 && lastDoneIdx < idx ? idx - 1 : idx;
+          }
+          problemDetailChatMessages.splice(spliceIdx, 1);
           saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
           const container = el.problemDetailChatMessages;
           container.innerHTML = '';
@@ -1568,9 +1654,35 @@ if (el.problemDetailChatMessages) {
             maybeShowBmcStartBlock();
             maybeShowRequirementLogicStartBlock();
             maybeShowValueStreamStartBlock();
+            maybeShowItStatusStartBlock();
+            maybeShowPainPointStartBlock();
           });
         }
       }
+      return;
+    }
+    const startItStatusBtn = e.target.closest('.btn-confirm-start-it-status');
+    if (startItStatusBtn && !startItStatusBtn.disabled) {
+      startItStatusBtn.disabled = true;
+      startItStatusBtn.textContent = '已确认';
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'itStatusStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+      }
+      runItStatusAnnotation();
+      return;
+    }
+    const startPainPointBtn = e.target.closest('.btn-confirm-start-pain-point');
+    if (startPainPointBtn && !startPainPointBtn.disabled) {
+      startPainPointBtn.disabled = true;
+      startPainPointBtn.textContent = '已确认';
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'painPointStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+      }
+      runPainPointAnnotation();
       return;
     }
     const startValueStreamBtn = e.target.closest('.btn-confirm-start-value-stream');
@@ -1662,6 +1774,10 @@ if (el.problemDetailChatMessages) {
           saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
         }
         renderProblemDetailContent();
+        requestAnimationFrame(() => {
+          maybeShowItStatusStartBlock();
+          maybeShowPainPointStartBlock();
+        });
       } catch (_) {}
       return;
     }
@@ -1694,6 +1810,8 @@ if (el.problemDetailChatMessages) {
         requestAnimationFrame(() => {
           maybeShowRequirementLogicStartBlock();
           maybeShowValueStreamStartBlock();
+          maybeShowItStatusStartBlock();
+          maybeShowPainPointStartBlock();
         });
       } catch (_) {}
       return;
@@ -2142,28 +2260,13 @@ async function parseCompanyBasicInfoInput(text) {
 
 如果某字段无法从输入中推断，该字段填 "" 或 "—"。只返回 JSON，不要有 markdown 代码块包裹。`;
 
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: text },
-      ],
-    }),
-  });
-  const data = await res.json();
-  if (data.error) {
-    throw new Error(data.error.message || JSON.stringify(data.error));
-  }
-  const content = data.choices?.[0]?.message?.content ?? '';
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: text },
+  ]);
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch ? jsonMatch[0] : content;
-  return JSON.parse(jsonStr);
+  return { parsed: JSON.parse(jsonStr), usage, model, durationMs };
 }
 
 const BMC_GENERATION_PROMPT = `# Role
@@ -2291,6 +2394,75 @@ const VALUE_STREAM_PROMPT = `# 角色设定
 \`\`\`
 只返回逻辑说明和 JSON 代码块，不要有其他内容。`;
 
+const IT_STATUS_ANNOTATION_PROMPT = `# 角色设定
+你是一位资深的业务架构师与 IT 现状分析专家，擅长结合需求逻辑判断各业务环节的 IT 支撑方式。
+
+# 输入数据
+1. **requirement_logic**：当前需求单→需求理解页面→需求逻辑→需求背后的逻辑链条总结部分的 json 数据。
+2. **value_stream**：已绘制的价值流图 JSON，包含 stages 及每个 stage 下的 steps（环节节点）。
+
+# 任务
+请结合需求逻辑，在价值流图的每个环节节点标注该环节的 IT 现状：
+- **手工**：若该环节依赖人工操作，需进一步区分：\`纸质\` 或 \`excel\`
+- **系统**：若该环节有系统支撑，标注具体系统名称（如：ERP、MES、OA 等）
+
+# 输出格式
+请直接返回一个 JSON 代码块，结构与输入 value_stream 一致，但在每个 step 中增加 \`itStatus\` 字段：
+\`\`\`json
+{
+  "stages": [
+    {
+      "name": "阶段名称",
+      "steps": [
+        {
+          "name": "环节名称",
+          "role": "执行角色",
+          "duration": "预估耗时",
+          "itStatus": { "type": "手工", "detail": "纸质" }
+        },
+        {
+          "name": "另一环节",
+          "itStatus": { "type": "系统", "detail": "ERP系统" }
+        }
+      ]
+    }
+  ]
+}
+\`\`\`
+- itStatus.type 只能是 \`手工\` 或 \`系统\`
+- itStatus.detail：手工时为 \`纸质\` 或 \`excel\`；系统时为具体系统名称
+- 保持原有 stages、steps 结构及 name、role、duration 等字段不变，仅新增 itStatus`;
+
+const PAIN_POINT_ANNOTATION_PROMPT = `# 角色设定
+你是一位资深的业务架构师与痛点分析专家，擅长结合需求逻辑识别各业务环节中的痛点。
+
+# 输入数据
+1. **requirement_logic**：当前需求单→需求理解页面→需求逻辑内容。
+2. **value_stream**：已绘制的价值流图 JSON，包含 stages 及每个 stage 下的 steps（环节节点）。
+
+# 任务
+请结合需求逻辑，在价值流图的每个环节节点中提炼该环节涉及到的痛点。为每个 step 增加 \`painPoint\` 字段，内容为该环节痛点的精炼概括（一句话或简短列表）。若某环节无明显痛点，可留空字符串或简短说明「无明显痛点」。
+
+# 输出格式
+请直接返回一个 JSON 代码块，结构与输入 value_stream 一致，但在每个 step 中增加 \`painPoint\` 字段：
+\`\`\`json
+{
+  "stages": [
+    {
+      "name": "阶段名称",
+      "steps": [
+        {
+          "name": "环节名称",
+          "painPoint": "该环节痛点的提炼概括"
+        }
+      ]
+    }
+  ]
+}
+\`\`\`
+- painPoint 为字符串，提炼当前环节涉及到的痛点
+- 保持原有 stages、steps 结构及 name、role、duration、itStatus 等字段不变，仅新增 painPoint`;
+
 const BMC_LABEL_TO_KEY = {
   '客户细分': 'customer_segments',
   '价值主张': 'value_propositions',
@@ -2390,28 +2562,18 @@ function parseRequirementLogicFromMarkdown(text) {
 
 async function generateBmcFromBasicInfo(basicInfoJson) {
   const inputStr = typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJson, null, 2);
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [
-        { role: 'system', content: BMC_GENERATION_PROMPT },
-        { role: 'user', content: inputStr },
-      ],
-    }),
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  const content = (data.choices?.[0]?.message?.content ?? '').trim();
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: BMC_GENERATION_PROMPT },
+    { role: 'user', content: inputStr },
+  ]);
   const jsonMatch = content.match(/\{[\s\S]*\}/);
+  let parsed;
   if (jsonMatch) {
-    try { return JSON.parse(jsonMatch[0]); } catch (_) {}
+    try { parsed = JSON.parse(jsonMatch[0]); } catch (_) { parsed = parseBmcFromMarkdown(content); }
+  } else {
+    parsed = parseBmcFromMarkdown(content);
   }
-  return parseBmcFromMarkdown(content);
+  return { parsed, usage, model, durationMs };
 }
 
 async function generateRequirementLogicFromInputs(preliminaryReqJson, basicInfoJson, bmcJson) {
@@ -2431,23 +2593,53 @@ ${typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJs
 \`\`\`json
 ${typeof bmcJson === 'string' ? bmcJson : JSON.stringify(bmcJson, null, 2)}
 \`\`\``;
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [
-        { role: 'system', content: REQUIREMENT_LOGIC_PROMPT },
-        { role: 'user', content: userContent },
-      ],
-    }),
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  return (data.choices?.[0]?.message?.content ?? '').trim();
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: REQUIREMENT_LOGIC_PROMPT },
+    { role: 'user', content: userContent },
+  ]);
+  return { content, usage, model, durationMs };
+}
+
+async function generateItStatusAnnotation(valueStream, requirementLogic) {
+  const userContent = `请结合需求逻辑，在价值流图各环节标注 IT 现状。
+
+## requirement_logic（需求逻辑 - 逻辑链条总结等）
+\`\`\`json
+${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic || {}, null, 2)}
+\`\`\`
+
+## value_stream（已绘制的价值流图）
+\`\`\`json
+${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || {}, null, 2)}
+\`\`\`
+
+请按提示词要求，为每个环节增加 itStatus 字段，直接返回完整 JSON 代码块。`;
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: IT_STATUS_ANNOTATION_PROMPT },
+    { role: 'user', content: userContent },
+  ]);
+  return { content, usage, model, durationMs };
+}
+
+async function generatePainPointAnnotation(valueStream, requirementLogic) {
+  const userContent = `请结合需求逻辑，在价值流图各环节标注痛点。
+
+## requirement_logic（需求逻辑 - 需求理解页面→需求逻辑内容）
+\`\`\`json
+${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic || {}, null, 2)}
+\`\`\`
+
+## value_stream（已绘制的价值流图）
+\`\`\`json
+${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || {}, null, 2)}
+\`\`\`
+
+请按提示词要求，为每个环节增加 painPoint 字段，直接返回完整 JSON 代码块。`;
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: PAIN_POINT_ANNOTATION_PROMPT },
+    { role: 'user', content: userContent },
+  ]);
+  return { content, usage, model, durationMs };
 }
 
 async function generateValueStreamFromInputs(enterpriseInfo, bmcData, requirementLogic) {
@@ -2467,23 +2659,11 @@ ${typeof bmcData === 'string' ? bmcData : JSON.stringify(bmcData || {}, null, 2)
 \`\`\`json
 ${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic || {}, null, 2)}
 \`\`\``;
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [
-        { role: 'system', content: VALUE_STREAM_PROMPT },
-        { role: 'user', content: userContent },
-      ],
-    }),
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  return (data.choices?.[0]?.message?.content ?? '').trim();
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: VALUE_STREAM_PROMPT },
+    { role: 'user', content: userContent },
+  ]);
+  return { content, usage, model, durationMs };
 }
 
 const PARSE_PREVIEW_FIELDS = [
@@ -2617,6 +2797,59 @@ function updateDigitalProblemValueStream(createdAt, valueStream) {
   localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
 }
 
+function updateDigitalProblemValueStreamItStatus(createdAt, valueStream) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const wfCompleted = item.workflowAlignCompletedStages || [];
+  if (!wfCompleted.includes(0)) wfCompleted.push(0);
+  if (!wfCompleted.includes(1)) wfCompleted.push(1);
+  wfCompleted.sort((a, b) => a - b);
+  list[idx] = { ...item, valueStream, workflowAlignCompletedStages: wfCompleted };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+function updateDigitalProblemValueStreamPainPoint(createdAt, valueStream) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const wfCompleted = item.workflowAlignCompletedStages || [];
+  if (!wfCompleted.includes(0)) wfCompleted.push(0);
+  if (!wfCompleted.includes(1)) wfCompleted.push(1);
+  if (!wfCompleted.includes(2)) wfCompleted.push(2);
+  wfCompleted.sort((a, b) => a - b);
+  list[idx] = { ...item, valueStream, workflowAlignCompletedStages: wfCompleted };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+/** 撤销痛点标注：移除价值流图中的痛点，并将需求单状态回退至 IT 现状标注 */
+function rollbackValueStreamPainPoint(createdAt) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const valueStream = item.valueStream;
+  if (!valueStream || valueStream.raw) return;
+  const rawStages = valueStream.stages ?? valueStream.phases ?? valueStream.nodes ?? [];
+  if (!Array.isArray(rawStages)) return;
+  const stages = rawStages.map((s) => {
+    if (!s || typeof s !== 'object') return s;
+    const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+    const steps = rawSteps.map((st) => {
+      if (typeof st !== 'object' || st == null) return st;
+      const { painPoint, pain_point, ...rest } = st;
+      return rest;
+    });
+    return { ...s, steps };
+  });
+  const vsWithoutPain = { ...valueStream, stages };
+  const wfCompleted = (item.workflowAlignCompletedStages || []).filter((x) => x !== 2).sort((a, b) => a - b);
+  list[idx] = { ...item, valueStream: vsWithoutPain, workflowAlignCompletedStages: wfCompleted };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
 function deleteDigitalProblemRequirementLogic(createdAt) {
   const list = getDigitalProblems();
   const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -2715,6 +2948,8 @@ function initProblemDetailChat() {
     maybeShowBmcStartBlock();
     maybeShowRequirementLogicStartBlock();
     maybeShowValueStreamStartBlock();
+    maybeShowItStatusStartBlock();
+    maybeShowPainPointStartBlock();
   });
 }
 
@@ -2748,8 +2983,9 @@ async function runBmcGeneration() {
   container.appendChild(loading2);
   container.scrollTop = container.scrollHeight;
   try {
-    const bmc = await generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
+    const { parsed: bmc, usage, model, durationMs } = await generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
     loading2.remove();
+    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     const cardBlock = document.createElement('div');
     cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-card-collapsible';
     const bmcRows = BMC_FIELDS.map(({ key, label }) => {
@@ -2770,10 +3006,10 @@ async function runBmcGeneration() {
           <button type="button" class="btn-confirm-bmc" data-json="${String(JSON.stringify(bmc)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button>
         </div>
       </div>
-      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
     container.appendChild(cardBlock);
     setupProblemDetailBmcCardToggle(cardBlock);
-    pushAndSaveProblemDetailChat({ type: 'bmcCard', data: bmc, confirmed: false, timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ type: 'bmcCard', data: bmc, confirmed: false, timestamp: getTimeStr(), llmMeta: { usage, model, durationMs } });
     container.scrollTop = container.scrollHeight;
   } catch (err) {
     loading2.classList.remove('problem-detail-chat-msg-parsing');
@@ -2863,6 +3099,258 @@ function maybeShowValueStreamStartBlock() {
   container.scrollTop = container.scrollHeight;
 }
 
+function maybeShowItStatusStartBlock() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  const valueStream = item.valueStream;
+  if (!valueStream || valueStream.raw) return;
+  const hasItStatus = (() => {
+    const rawStages = valueStream.stages ?? valueStream.phases ?? valueStream.nodes ?? [];
+    if (!Array.isArray(rawStages)) return false;
+    for (const s of rawStages) {
+      const steps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+      for (const st of steps) {
+        if (st && typeof st === 'object' && (st.itStatus || st.it_status)) return true;
+      }
+    }
+    return false;
+  })();
+  if (hasItStatus) return;
+  const currentMajorStage = item.currentMajorStage ?? 0;
+  if (currentMajorStage < 1) return;
+  const wfCompleted = item.workflowAlignCompletedStages || [];
+  const wfCurrent = [0, 1, 2].find((i) => !wfCompleted.includes(i)) ?? 3;
+  if (wfCurrent !== 1) return;
+  if (!item.requirementLogic) return;
+  const hasStart = problemDetailChatMessages.some((m) => m.type === 'itStatusStartBlock');
+  if (hasStart) return;
+  const block = document.createElement('div');
+  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-it-status-start';
+  block.innerHTML = `
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">即将开始 IT 现状标注</div>
+      <div class="problem-detail-chat-it-status-start-actions">
+        <button type="button" class="btn-confirm-start-it-status">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  pushAndSaveProblemDetailChat({ type: 'itStatusStartBlock', timestamp: getTimeStr() });
+  container.scrollTop = container.scrollHeight;
+}
+
+function maybeShowPainPointStartBlock() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  const valueStream = item.valueStream;
+  if (!valueStream || valueStream.raw) return;
+  const hasPainPoint = (() => {
+    const rawStages = valueStream.stages ?? valueStream.phases ?? valueStream.nodes ?? [];
+    if (!Array.isArray(rawStages)) return false;
+    for (const s of rawStages) {
+      const steps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+      for (const st of steps) {
+        const pp = st?.painPoint ?? st?.pain_point;
+        if (pp && typeof pp === 'string' && pp.trim()) return true;
+      }
+    }
+    return false;
+  })();
+  if (hasPainPoint) return;
+  const currentMajorStage = item.currentMajorStage ?? 0;
+  if (currentMajorStage < 1) return;
+  const wfCompleted = item.workflowAlignCompletedStages || [];
+  const wfCurrent = [0, 1, 2].find((i) => !wfCompleted.includes(i)) ?? 3;
+  if (wfCurrent !== 2) return;
+  if (!item.requirementLogic) return;
+  const hasStart = problemDetailChatMessages.some((m) => m.type === 'painPointStartBlock');
+  if (hasStart) return;
+  pushAndSaveProblemDetailChat({ type: 'painPointStartBlock', timestamp: getTimeStr() });
+  const block = document.createElement('div');
+  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-pain-point-start problem-detail-chat-msg-with-delete';
+  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+  block.innerHTML = `
+    <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">即将开始价值流图环节节点痛点标注</div>
+      <div class="problem-detail-chat-pain-point-start-actions">
+        <button type="button" class="btn-confirm-start-pain-point">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function runItStatusAnnotation() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!DEEPSEEK_API_KEY) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用 IT 现状标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用 IT 现状标注功能。', timestamp: getTimeStr() });
+    return;
+  }
+  const valueStream = item.valueStream;
+  const requirementLogic = item.requirementLogic || {};
+  const logicForPrompt = typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic, null, 2);
+  try {
+    const loadingBlock = document.createElement('div');
+    loadingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在标注价值流图各环节 IT 现状…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(loadingBlock);
+    container.scrollTop = container.scrollHeight;
+    const { content, usage, model, durationMs } = await generateItStatusAnnotation(valueStream, logicForPrompt);
+    loadingBlock.remove();
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    let annotatedVs = null;
+    if (jsonMatch) {
+      try {
+        annotatedVs = JSON.parse(jsonMatch[1].trim());
+      } catch (_) {}
+    }
+    if (!annotatedVs) {
+      const fallbackMatch = content.match(/\{[\s\S]*\}/);
+      if (fallbackMatch) {
+        try {
+          annotatedVs = JSON.parse(fallbackMatch[0]);
+        } catch (_) {}
+      }
+    }
+    const mergedVs = annotatedVs ? mergeItStatusIntoValueStream(valueStream, annotatedVs) : valueStream;
+    updateDigitalProblemValueStreamItStatus(item.createdAt, mergedVs);
+    currentProblemDetailItem = { ...item, valueStream: mergedVs, workflowAlignCompletedStages: [...new Set([...(item.workflowAlignCompletedStages || []), 0, 1])].sort((a, b) => a - b) };
+    renderProblemDetailContent();
+    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+    const doneBlock = document.createElement('div');
+    doneBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsed';
+    doneBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">IT 现状标注完成</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
+    container.appendChild(doneBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: 'IT 现状标注完成', timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
+    container.scrollTop = container.scrollHeight;
+    requestAnimationFrame(() => maybeShowPainPointStartBlock());
+  } catch (err) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">IT 现状标注失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: 'IT 现状标注失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+  }
+}
+
+async function runPainPointAnnotation(isRerun) {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!DEEPSEEK_API_KEY) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用痛点标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用痛点标注功能。', timestamp: getTimeStr() });
+    return;
+  }
+  const valueStream = item.valueStream;
+  const requirementLogic = item.requirementLogic || {};
+  const logicForPrompt = typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic, null, 2);
+  let loadingBlock = isRerun ? (() => { const arr = container.querySelectorAll('.problem-detail-chat-msg-parsing'); return arr[arr.length - 1] || null; })() : null;
+  if (!loadingBlock) {
+    loadingBlock = document.createElement('div');
+    loadingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在标注价值流图各环节痛点…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(loadingBlock);
+  }
+  container.scrollTop = container.scrollHeight;
+  try {
+    const { content, usage, model, durationMs } = await generatePainPointAnnotation(valueStream, logicForPrompt);
+    loadingBlock.remove();
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    let annotatedVs = null;
+    if (jsonMatch) {
+      try {
+        annotatedVs = JSON.parse(jsonMatch[1].trim());
+      } catch (_) {}
+    }
+    if (!annotatedVs) {
+      const fallbackMatch = content.match(/\{[\s\S]*\}/);
+      if (fallbackMatch) {
+        try {
+          annotatedVs = JSON.parse(fallbackMatch[0]);
+        } catch (_) {}
+      }
+    }
+    const mergedVs = annotatedVs ? mergePainPointIntoValueStream(valueStream, annotatedVs) : valueStream;
+    updateDigitalProblemValueStreamPainPoint(item.createdAt, mergedVs);
+    currentProblemDetailItem = { ...item, valueStream: mergedVs, workflowAlignCompletedStages: [...new Set([...(item.workflowAlignCompletedStages || []), 0, 1, 2])].sort((a, b) => a - b) };
+    renderProblemDetailContent();
+    const doneText = isRerun ? '痛点标注完毕' : '痛点标注完成';
+    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+    const doneBlock = document.createElement('div');
+    doneBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsed';
+    doneBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(doneText)}</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
+    container.appendChild(doneBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: doneText, timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
+    container.scrollTop = container.scrollHeight;
+  } catch (err) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">痛点标注失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '痛点标注失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+  }
+}
+
+function mergeItStatusIntoValueStream(baseVs, annotatedVs) {
+  const baseStages = baseVs.stages ?? baseVs.phases ?? baseVs.nodes ?? [];
+  const annStages = annotatedVs.stages ?? annotatedVs.phases ?? annotatedVs.nodes ?? [];
+  if (!Array.isArray(baseStages) || !Array.isArray(annStages)) return baseVs;
+  const stages = baseStages.map((baseStage, si) => {
+    const annStage = annStages[si];
+    if (!annStage) return baseStage;
+    const baseSteps = baseStage.steps ?? baseStage.tasks ?? baseStage.phases ?? baseStage.items ?? [];
+    const annSteps = annStage.steps ?? annStage.tasks ?? annStage.phases ?? annStage.items ?? [];
+    const steps = baseSteps.map((baseStep, ji) => {
+      const annStep = annSteps[ji];
+      const itStatus = annStep?.itStatus ?? annStep?.it_status;
+      if (!itStatus || typeof itStatus !== 'object') return baseStep;
+      const step = typeof baseStep === 'object' && baseStep !== null ? { ...baseStep } : { name: String(baseStep) };
+      step.itStatus = itStatus;
+      return step;
+    });
+    return { ...baseStage, steps };
+  });
+  return { ...baseVs, stages };
+}
+
+function mergePainPointIntoValueStream(baseVs, annotatedVs) {
+  const baseStages = baseVs.stages ?? baseVs.phases ?? baseVs.nodes ?? [];
+  const annStages = annotatedVs.stages ?? annotatedVs.phases ?? annotatedVs.nodes ?? [];
+  if (!Array.isArray(baseStages) || !Array.isArray(annStages)) return baseVs;
+  const stages = baseStages.map((baseStage, si) => {
+    const annStage = annStages[si];
+    if (!annStage) return baseStage;
+    const baseSteps = baseStage.steps ?? baseStage.tasks ?? baseStage.phases ?? baseStage.items ?? [];
+    const annSteps = annStage.steps ?? annStage.tasks ?? annStage.phases ?? annStage.items ?? [];
+    const steps = baseSteps.map((baseStep, ji) => {
+      const annStep = annSteps[ji];
+      const painPoint = annStep?.painPoint ?? annStep?.pain_point;
+      if (painPoint == null || (typeof painPoint === 'string' && !painPoint.trim())) return baseStep;
+      const trimmed = typeof painPoint === 'string' ? painPoint.trim() : String(painPoint);
+      if (/^(无明显痛点|无痛点|暂无|无)$/i.test(trimmed) || /^无明显痛点/i.test(trimmed)) return baseStep;
+      const step = typeof baseStep === 'object' && baseStep !== null ? { ...baseStep } : { name: String(baseStep) };
+      step.painPoint = trimmed;
+      return step;
+    });
+    return { ...baseStage, steps };
+  });
+  return { ...baseVs, stages };
+}
+
 async function runValueStreamGeneration() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -2884,7 +3372,7 @@ async function runValueStreamGeneration() {
     loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在生成需求相关核心价值流图 VSM…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(loadingBlock);
     container.scrollTop = container.scrollHeight;
-    const content = await generateValueStreamFromInputs(basicInfo, bmc, requirementLogic);
+    const { content, usage, model, durationMs } = await generateValueStreamFromInputs(basicInfo, bmc, requirementLogic);
     loadingBlock.remove();
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
     let valueStreamJson = null;
@@ -2902,7 +3390,8 @@ async function runValueStreamGeneration() {
       }
     }
     const valueStream = valueStreamJson || { raw: content };
-    pushAndSaveProblemDetailChat({ type: 'valueStreamCard', data: valueStream, logicText: content.replace(/```[\s\S]*?```/g, '').trim(), timestamp: getTimeStr(), confirmed: false });
+    pushAndSaveProblemDetailChat({ type: 'valueStreamCard', data: valueStream, logicText: content.replace(/```[\s\S]*?```/g, '').trim(), timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
+    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     const cardBlock = document.createElement('div');
     cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
     cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
@@ -2916,7 +3405,7 @@ async function runValueStreamGeneration() {
           <button type="button" class="btn-confirm-value-stream" data-json="${String(JSON.stringify(valueStream)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button>
         </div>
       </div>
-      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
     container.appendChild(cardBlock);
     container.scrollTop = container.scrollHeight;
     updateDigitalProblemValueStream(item.createdAt, valueStream);
@@ -2946,6 +3435,60 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-msg-content">我即将开始提取需求逻辑</div>
           <div class="problem-detail-chat-requirement-logic-start-actions">
             <button type="button" class="btn-confirm-start-requirement-logic" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'itStatusStartBlock') {
+      const hasItStatus = item?.valueStream && !item.valueStream.raw && (() => {
+        const rawStages = item.valueStream.stages ?? item.valueStream.phases ?? item.valueStream.nodes ?? [];
+        if (!Array.isArray(rawStages)) return false;
+        for (const s of rawStages) {
+          const steps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+          for (const st of steps) {
+            if (st && typeof st === 'object' && (st.itStatus || st.it_status)) return true;
+          }
+        }
+        return false;
+      })();
+      if (hasItStatus) return;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-it-status-start';
+      block.dataset.msgIndex = String(idx);
+      const confirmed = !!msg.confirmed;
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">即将开始 IT 现状标注</div>
+          <div class="problem-detail-chat-it-status-start-actions">
+            <button type="button" class="btn-confirm-start-it-status" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'painPointStartBlock') {
+      const hasPainPoint = item?.valueStream && !item.valueStream.raw && (() => {
+        const rawStages = item.valueStream.stages ?? item.valueStream.phases ?? item.valueStream.nodes ?? [];
+        if (!Array.isArray(rawStages)) return false;
+        for (const s of rawStages) {
+          const steps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+          for (const st of steps) {
+            const pp = st?.painPoint ?? st?.pain_point;
+            if (pp && typeof pp === 'string' && pp.trim()) return true;
+          }
+        }
+        return false;
+      })();
+      if (hasPainPoint) return;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-pain-point-start problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      const confirmed = !!msg.confirmed;
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">即将开始价值流图环节节点痛点标注</div>
+          <div class="problem-detail-chat-pain-point-start-actions">
+            <button type="button" class="btn-confirm-start-pain-point" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -2985,6 +3528,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'bmcCard') {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
       const cardBlock = document.createElement('div');
       cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-card-collapsible problem-detail-chat-msg-with-delete';
       cardBlock.dataset.msgIndex = String(idx);
@@ -3007,7 +3551,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
             <button type="button" class="btn-confirm-bmc" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
           </div>
         </div>
-        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(cardBlock);
       setupProblemDetailBmcCardToggle(cardBlock);
     } else if (msg.type === 'requirementLogicBlock') {
@@ -3053,6 +3597,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'valueStreamCard') {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
       const cardBlock = document.createElement('div');
       cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
       cardBlock.dataset.msgIndex = String(idx);
@@ -3066,7 +3611,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
             <button type="button" class="btn-confirm-value-stream" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
           </div>
         </div>
-        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(cardBlock);
     } else if (msg.type === 'basicInfoJsonBlock') {
       const jsonBlock = document.createElement('div');
@@ -3117,9 +3662,10 @@ function renderProblemDetailChatFromStorage(container, messages) {
       } else {
         innerHtml = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(msg.content)}</div></div>`;
       }
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
       block.className = `problem-detail-chat-msg problem-detail-chat-msg-${msg.role}${collapsibleClass} problem-detail-chat-msg-with-delete`;
       block.dataset.msgIndex = String(idx);
-      block.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>${innerHtml}<div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      block.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>${innerHtml}<div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(block);
       if (msg.role === 'user') setupProblemDetailChatTextToggle(block);
     }
@@ -3236,7 +3782,11 @@ function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
         problemDetailViewingMajorStage = 1;
         updateProblemDetailProgressStages(1, problemDetailViewingMajorStage);
         renderProblemDetailContent();
-        requestAnimationFrame(() => maybeShowValueStreamStartBlock());
+        requestAnimationFrame(() => {
+          maybeShowValueStreamStartBlock();
+          maybeShowItStatusStartBlock();
+          maybeShowPainPointStartBlock();
+        });
       }
     });
   }
@@ -3278,6 +3828,28 @@ async function handleProblemDetailChatSend() {
   if (!text) return;
   input.value = '';
   appendProblemDetailChatMessage(container, 'user', text);
+  if (text === '重新进行痛点标注') {
+    const item = currentProblemDetailItem;
+    const valueStream = item?.valueStream;
+    const hasValueStream = valueStream && !valueStream.raw;
+    const hasRequirementLogic = !!(item?.requirementLogic);
+    if (!hasValueStream || !hasRequirementLogic) {
+      const errBlock = document.createElement('div');
+      errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+      errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先完成价值流图绘制和 IT 现状标注，并确认需求逻辑后再重新进行痛点标注。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(errBlock);
+      pushAndSaveProblemDetailChat({ role: 'system', content: '请先完成价值流图绘制和 IT 现状标注，并确认需求逻辑后再重新进行痛点标注。', timestamp: getTimeStr() });
+    } else {
+      const startBlock = document.createElement('div');
+      startBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+      startBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">好的，开始重新进行痛点标注</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(startBlock);
+      container.scrollTop = container.scrollHeight;
+      runPainPointAnnotation(true);
+    }
+    container.scrollTop = container.scrollHeight;
+    return;
+  }
   const parsingBlock = document.createElement('div');
   parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
   parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在进行解析</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -3287,11 +3859,15 @@ async function handleProblemDetailChatSend() {
     if (!DEEPSEEK_API_KEY) {
       throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
     }
-    const parsed = await parseCompanyBasicInfoInput(text);
+    const { parsed, usage, model, durationMs } = await parseCompanyBasicInfoInput(text);
     parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
     parsingBlock.classList.add('problem-detail-chat-msg-parsed');
+    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">解析完成</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span>`;
-    pushAndSaveProblemDetailChat({ role: 'system', content: '解析完成', timestamp: getTimeStr(), hasCheck: true });
+    if (parsingBlock.querySelector('.problem-detail-chat-msg-time')) {
+      parsingBlock.querySelector('.problem-detail-chat-msg-time').insertAdjacentHTML('afterend', llmMeta);
+    }
+    pushAndSaveProblemDetailChat({ role: 'system', content: '解析完成', timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
     const cardBlock = document.createElement('div');
     cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
     const labels = [
