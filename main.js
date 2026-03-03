@@ -797,6 +797,44 @@ function renderValueStreamViewHTML(item) {
 }
 
 /**
+ * 渲染端到端工作流图：读取价值流 JSON，按环节发生顺序从左到右排列圆角矩形卡片，卡片风格与价值流图一致
+ */
+function renderEndToEndFlowHTML(valueStream) {
+  const { stages } = parseValueStreamGraph(valueStream);
+  const allSteps = stages.flatMap((s) => s.steps);
+  if (allSteps.length === 0) {
+    return '<p class="vs-view-placeholder">暂无环节数据，无法渲染端到端流程</p>';
+  }
+  const stepCardsHtml = allSteps.map((step, i) => {
+    const roleDurationHtml = (step.role || step.duration)
+      ? `<div class="vs-step-meta">
+          ${step.role ? `<span class="vs-step-meta-chip vs-step-meta-role">${escapeHtml(step.role)}</span>` : ''}
+          ${step.duration ? `<span class="vs-step-meta-chip vs-step-meta-duration">${escapeHtml(step.duration)}</span>` : ''}
+        </div>`
+      : '';
+    const itStatusHtml = step.itStatusLabel
+      ? `<div class="vs-step-meta"><span class="vs-step-meta-chip vs-step-meta-it-status">IT现状：${escapeHtml(step.itStatusLabel)}</span></div>`
+      : '';
+    const painPointHtml = step.painPoint
+      ? `<div class="vs-step-meta"><div class="vs-step-pain-point-card">${escapeHtml(step.painPoint)}</div></div>`
+      : '';
+    return `
+      <div class="vs-e2e-step-card vs-step-node" data-vs-step-index="${i}">
+        <div class="vs-e2e-step-name-block">
+          <span class="vs-e2e-step-name-text">${escapeHtml(step.name)}</span>
+        </div>
+        ${step.desc ? `<span class="vs-step-desc">${escapeHtml(step.desc)}</span>` : ''}
+        ${roleDurationHtml}
+        ${itStatusHtml}
+        ${painPointHtml}
+      </div>
+      ${i < allSteps.length - 1 ? '<div class="vs-arrow-outer vs-e2e-arrow" aria-hidden="true">→</div>' : ''}
+    `;
+  }).join('');
+  return `<div class="vs-e2e-flow">${stepCardsHtml}</div>`;
+}
+
+/**
  * 将 API 返回解析为价值流列表（数组，每项含 name 及完整 JSON）
  */
 function getValueStreamList(data) {
@@ -1843,6 +1881,26 @@ if (el.problemDetailChatMessages) {
         saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
       }
       runPainPointAnnotation();
+      return;
+    }
+    const startItGapBtn = e.target.closest('.btn-confirm-start-it-gap');
+    if (startItGapBtn && !startItGapBtn.disabled) {
+      startItGapBtn.disabled = true;
+      startItGapBtn.textContent = '已确认';
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'itGapStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+      }
+      const item = currentProblemDetailItem;
+      if (item?.createdAt) {
+        updateDigitalProblemMajorStage(item.createdAt, 2);
+        updateDigitalProblemItGapCompletedStages(item.createdAt, [0]);
+        currentProblemDetailItem = { ...item, currentMajorStage: 2, itGapCompletedStages: [0] };
+        problemDetailViewingMajorStage = 2;
+        updateProblemDetailProgressStages(2, problemDetailViewingMajorStage);
+        renderProblemDetailContent();
+      }
       return;
     }
     const startValueStreamBtn = e.target.closest('.btn-confirm-start-value-stream');
@@ -3700,6 +3758,15 @@ function updateDigitalProblemMajorStage(createdAt, majorStage) {
   localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
 }
 
+function updateDigitalProblemItGapCompletedStages(createdAt, stages) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  list[idx] = { ...item, itGapCompletedStages: stages };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
 function updateDigitalProblemValueStream(createdAt, valueStream) {
   const list = getDigitalProblems();
   const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -4274,6 +4341,7 @@ function initProblemDetailChat() {
     maybeShowValueStreamStartBlock();
     maybeShowItStatusStartBlock();
     maybeShowPainPointStartBlock();
+    maybeShowItGapStartBlock();
   });
 }
 
@@ -4589,6 +4657,33 @@ function maybeShowPainPointStartBlock() {
   container.scrollTop = container.scrollHeight;
 }
 
+function maybeShowItGapStartBlock() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  const wfCompleted = item.workflowAlignCompletedStages || [];
+  if (wfCompleted.length < 3 || !wfCompleted.includes(0) || !wfCompleted.includes(1) || !wfCompleted.includes(2)) return;
+  const currentMajorStage = item.currentMajorStage ?? 0;
+  if (currentMajorStage < 1) return;
+  const hasStart = problemDetailChatMessages.some((m) => m.type === 'itGapStartBlock');
+  if (hasStart) return;
+  pushAndSaveProblemDetailChat({ type: 'itGapStartBlock', timestamp: getTimeStr() });
+  const block = document.createElement('div');
+  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-it-gap-start problem-detail-chat-msg-with-delete';
+  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+  block.innerHTML = `
+    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">即将在现有价值流上开始 ITGap 分析</div>
+      <div class="problem-detail-chat-it-gap-start-actions">
+        <button type="button" class="btn-confirm-start-it-gap">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+}
+
 async function runItStatusAnnotation() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -4703,6 +4798,7 @@ async function runPainPointAnnotation(isRerun) {
     container.appendChild(doneBlock);
     pushAndSaveProblemDetailChat({ role: 'system', content: doneText, timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
     container.scrollTop = container.scrollHeight;
+    requestAnimationFrame(() => maybeShowItGapStartBlock());
   } catch (err) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
@@ -4897,6 +4993,21 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-msg-content">即将开始价值流图环节节点痛点标注</div>
           <div class="problem-detail-chat-pain-point-start-actions">
             <button type="button" class="btn-confirm-start-pain-point" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'itGapStartBlock') {
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-it-gap-start problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      const confirmed = !!msg.confirmed;
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">即将在现有价值流上开始 ITGap 分析</div>
+          <div class="problem-detail-chat-it-gap-start-actions">
+            <button type="button" class="btn-confirm-start-it-gap" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -5481,7 +5592,7 @@ function updateProblemDetailProgressStages(currentMajorStage, viewingMajorStage)
     }
     if (stage === viewing) {
       el.classList.add('problem-detail-stage-active');
-      if (stage === 1) el.classList.add('problem-detail-stage-flashing');
+      if (stage === 1 || stage === 2) el.classList.add('problem-detail-stage-flashing');
     }
     if (isReached) el.classList.add('problem-detail-stage-clickable');
   });
@@ -5496,6 +5607,38 @@ function renderProblemDetailContent() {
     return;
   }
   const currentMajorStage = item.currentMajorStage ?? 0;
+  if (problemDetailViewingMajorStage >= 2) {
+    const itGapSubsteps = ['端到端流程绘制', '流程节点生成', '交互节点设计', '集成节点设计', '逻辑节点设计'];
+    const itGapCompleted = item.itGapCompletedStages || [];
+    const itGapCurrent = [0, 1, 2, 3, 4].find((i) => !itGapCompleted.includes(i)) ?? 5;
+    const itGapSubstepsHtml = itGapSubsteps.map((name, i) => {
+      const done = itGapCompleted.includes(i);
+      const current = i === itGapCurrent;
+      let cls = 'problem-detail-substep';
+      if (done) cls += ' problem-detail-substep-done';
+      else if (current) cls += ' problem-detail-substep-current';
+      const icon = done ? ' <span class="problem-detail-substep-check">✅</span>' : '';
+      return `<span class="${cls}">${escapeHtml(name)}${icon}</span>`;
+    }).join('<span class="problem-detail-substep-sep">→</span>');
+    const valueStream = item.valueStream;
+    let workspaceContent = '';
+    if (valueStream && !valueStream.raw) {
+      const e2eHtml = renderEndToEndFlowHTML(valueStream);
+      workspaceContent = `<div class="problem-detail-it-gap-e2e-wrap">${e2eHtml}</div>`;
+    } else {
+      workspaceContent = `
+        <div class="problem-detail-workflow-align-placeholder">
+          <h3 class="problem-detail-workflow-align-title">ITGap 分析</h3>
+          <p class="problem-detail-workflow-align-desc">请先完成工作流对齐阶段的价值流图绘制后再进行 ITGap 分析。</p>
+        </div>`;
+    }
+    container.innerHTML = `
+      <div class="problem-detail-substeps">${itGapSubstepsHtml}</div>
+      <div class="problem-detail-workspace-scroll">
+        ${workspaceContent}
+      </div>`;
+    return;
+  }
   if (problemDetailViewingMajorStage >= 1) {
     const workflowSubsteps = ['绘制价值流', 'IT现状标注', '痛点标注'];
     const wfCompleted = item.workflowAlignCompletedStages || [];
