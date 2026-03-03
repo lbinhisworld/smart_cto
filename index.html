@@ -39,6 +39,27 @@
       </div>
     </div>
 
+    <div id="taskTrackingView" class="view task-tracking-view" hidden>
+      <div class="task-tracking-header">
+        <button type="button" id="btnTaskTrackingBack" class="btn-task-tracking-back">← 返回</button>
+        <h2 id="taskTrackingTitle" class="task-tracking-title">任务追踪</h2>
+      </div>
+      <div class="task-tracking-body">
+        <aside class="task-tracking-sidebar">
+          <div class="task-tracking-sidebar-header">任务列表</div>
+          <div id="taskTrackingList" class="task-tracking-list"></div>
+          <div class="task-tracking-actions">
+            <button type="button" id="btnTaskTrackingEnter" class="btn-task-tracking-enter">进入执行</button>
+          </div>
+        </aside>
+        <main class="task-tracking-main">
+          <div id="taskTrackingDetail" class="task-tracking-detail">
+            <p class="task-tracking-detail-placeholder">请从左侧选择任务查看详情</p>
+          </div>
+        </main>
+      </div>
+    </div>
+
     <div id="canvasView" class="view" hidden>
       <header class="header">
         <h1>企业信息与商业画布查询</h1>
@@ -100,17 +121,20 @@
 
     <div id="problemDetailView" class="view problem-detail-view" hidden>
       <div class="problem-detail-progress">
-        <button type="button" id="btnProblemDetailBack" class="btn-problem-detail-back">← 返回</button>
-        <span class="problem-detail-progress-sep" aria-hidden="true">|</span>
-        <div class="problem-detail-stage" data-stage="0" role="button" tabindex="0">需求理解</div>
-        <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
-        <div class="problem-detail-stage" data-stage="1" role="button" tabindex="0">工作流对齐</div>
-        <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
-        <div class="problem-detail-stage" data-stage="2" role="button" tabindex="0">ITGap分析</div>
-        <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
-        <div class="problem-detail-stage" data-stage="3" role="button" tabindex="0">IT策略规划</div>
+        <div class="problem-detail-progress-left">
+          <button type="button" id="btnProblemDetailBack" class="btn-problem-detail-back">← 返回</button>
+          <span class="problem-detail-progress-sep" aria-hidden="true">|</span>
+          <div class="problem-detail-stage" data-stage="0" role="button" tabindex="0">需求理解</div>
+          <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
+          <div class="problem-detail-stage" data-stage="1" role="button" tabindex="0">工作流对齐</div>
+          <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
+          <div class="problem-detail-stage" data-stage="2" role="button" tabindex="0">ITGap分析</div>
+          <span class="problem-detail-progress-arrow" aria-hidden="true">▸</span>
+          <div class="problem-detail-stage" data-stage="3" role="button" tabindex="0">IT策略规划</div>
+        </div>
+        <button type="button" id="btnProblemDetailHistory" class="btn-problem-detail-history" aria-label="沟通历史">沟通历史</button>
       </div>
-      <div class="problem-detail-body">
+      <div class="problem-detail-body" id="problemDetailBody">
         <aside class="problem-detail-chat">
           <div class="problem-detail-chat-header">对话</div>
           <div id="problemDetailChatMessages" class="problem-detail-chat-body"></div>
@@ -120,6 +144,13 @@
           </div>
         </aside>
         <main id="problemDetailContent" class="problem-detail-workspace"></main>
+        <aside id="problemDetailHistoryPanel" class="problem-detail-history-panel" aria-hidden="true">
+          <div class="problem-detail-history-header">
+            <span class="problem-detail-history-title">沟通历史</span>
+            <button type="button" id="btnCloseProblemDetailHistory" class="problem-detail-history-close" aria-label="关闭">×</button>
+          </div>
+          <div id="problemDetailHistoryContent" class="problem-detail-history-body"></div>
+        </aside>
       </div>
     </div>
 

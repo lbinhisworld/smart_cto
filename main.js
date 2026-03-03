@@ -8,6 +8,17 @@ const VALUE_STREAM_API_URL = 'https://app-6aa0d22a.base44.app/api/apps/6969e6b3c
 const STORAGE_KEY = 'company_analyses';
 const DIGITAL_PROBLEMS_STORAGE_KEY = 'digital_problem_followups';
 const PROBLEM_DETAIL_CHATS_STORAGE_KEY = 'problem_detail_chats';
+const TASK_TRACKING_STORAGE_KEY = 'digital_problem_task_tracking';
+
+/** 数字化问题跟进任务定义 */
+const FOLLOW_TASKS = [
+  { id: 'task1', name: '企业背景洞察', stage: '需求理解', objective: '基于客户输入的企业信息，提炼并结构化企业基本信息，为后续 BMC 与需求逻辑分析提供基础。', evaluationCriteria: '成功提取并确认包含公司名称、信用代码、法人、成立日期、注册资本、经营范围等核心字段的结构化 JSON。' },
+  { id: 'task2', name: '商业画布加载', stage: '需求理解', objective: '基于企业基本信息，运用商业模式画布（BMC）框架生成结构化商业分析，识别客户细分、价值主张、渠道通路等九大模块。', evaluationCriteria: '生成完整的 BMC JSON，包含行业背景洞察、九大画布模块及业务痛点预判，用户确认后视为完成。' },
+  { id: 'task3', name: '需求逻辑构建', stage: '需求理解', objective: '基于客户初步需求、企业基本信息、BMC 三个维度，产出需求背后的逻辑链条分析，明确行业特性、商业模式局限与业务痛点的因果关联。', evaluationCriteria: '输出结构化的需求逻辑 Markdown，包含行业底层逻辑、因果关联、深层动机及逻辑链条总结，用户确认后视为完成。' },
+  { id: 'task4', name: '绘制价值流', stage: '工作流对齐', objective: '基于 enterprise_info、bmc_data、requirement_logic 生成业务核心价值流图，划分阶段与环节，标注执行角色与预估耗时。', evaluationCriteria: '生成符合前端绘图要求的价值流 JSON，用户确认并完成「开始绘制价值流图」后视为完成。' },
+  { id: 'task5', name: 'IT 现状标注', stage: '工作流对齐', objective: '结合需求逻辑，在价值流图每个环节节点标注该环节的 IT 支撑方式（手工/系统），区分纸质、excel 或具体系统名称。', evaluationCriteria: '每个环节均标注 itStatus，用户确认后视为完成。' },
+  { id: 'task6', name: '痛点标注', stage: '工作流对齐', objective: '结合需求逻辑，在价值流图每个环节节点提炼该环节涉及到的痛点，为后续 IT Gap 分析提供输入。', evaluationCriteria: '每个环节均标注 painPoint（无明显痛点的环节不展示卡片），用户确认后视为完成。' },
+];
 
 /** DeepSeek 大模型配置：请在 main.js 中设置你的 API Key，或通过环境变量/配置注入 */
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -84,12 +95,23 @@ const el = {
   problemDetailChatInput: document.getElementById('problemDetailChatInput'),
   problemDetailChatSend: document.getElementById('problemDetailChatSend'),
   btnProblemDetailBack: document.getElementById('btnProblemDetailBack'),
+  problemDetailBody: document.getElementById('problemDetailBody'),
+  btnProblemDetailHistory: document.getElementById('btnProblemDetailHistory'),
+  problemDetailHistoryPanel: document.getElementById('problemDetailHistoryPanel'),
+  btnCloseProblemDetailHistory: document.getElementById('btnCloseProblemDetailHistory'),
+  problemDetailHistoryContent: document.getElementById('problemDetailHistoryContent'),
   digitalProblemInput: document.getElementById('digitalProblemInput'),
   btnParse: document.getElementById('btnParse'),
   parsePreview: document.getElementById('parsePreview'),
   parsePreviewContent: document.getElementById('parsePreviewContent'),
   btnStartFollow: document.getElementById('btnStartFollow'),
   problemFollowListContent: document.getElementById('problemFollowListContent'),
+  taskTrackingView: document.getElementById('taskTrackingView'),
+  btnTaskTrackingBack: document.getElementById('btnTaskTrackingBack'),
+  taskTrackingTitle: document.getElementById('taskTrackingTitle'),
+  taskTrackingList: document.getElementById('taskTrackingList'),
+  taskTrackingDetail: document.getElementById('taskTrackingDetail'),
+  btnTaskTrackingEnter: document.getElementById('btnTaskTrackingEnter'),
   savedListContent: document.getElementById('savedListContent'),
   detailResult: document.getElementById('detailResult'),
   detailContent: document.querySelector('.detail-content'),
@@ -1051,8 +1073,9 @@ function switchView(view) {
   el.listView.hidden = view !== 'list';
   el.detailView.hidden = view !== 'detail';
   if (el.problemDetailView) el.problemDetailView.hidden = view !== 'problemDetail';
+  if (el.taskTrackingView) el.taskTrackingView.hidden = view !== 'taskTracking';
   if (el.navDetailLabel) el.navDetailLabel.hidden = view !== 'detail';
-  if (el.topNav) el.topNav.hidden = view === 'problemDetail';
+  if (el.topNav) el.topNav.hidden = (view === 'problemDetail' || view === 'taskTracking');
 }
 
 function renderSavedList() {
@@ -1139,12 +1162,13 @@ function formatHistoryTime(ts) {
 
 function formatChatTime(ts) {
   if (!ts) return getTimeStr();
-  try {
-    const d = new Date(ts);
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return getTimeStr();
+  const s = String(ts).trim();
+  if (!s) return getTimeStr();
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) {
+    return s;
   }
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 /** 从 parsed 获取价值流索引 */
@@ -1560,6 +1584,17 @@ if (el.btnProblemDetailBack) {
     renderProblemFollowList();
   });
 }
+if (el.btnTaskTrackingBack) {
+  el.btnTaskTrackingBack.addEventListener('click', () => {
+    switchView('home');
+    renderProblemFollowList();
+  });
+}
+if (el.btnTaskTrackingEnter) {
+  el.btnTaskTrackingEnter.addEventListener('click', () => {
+    if (currentProblemDetailItem) openProblemDetail(currentProblemDetailItem);
+  });
+}
 if (el.problemDetailView) {
   const handleStageSwitch = (stageEl) => {
     if (!stageEl || !currentProblemDetailItem) return;
@@ -1582,6 +1617,12 @@ if (el.problemDetailView) {
     e.preventDefault();
     handleStageSwitch(stageEl);
   });
+}
+if (el.btnProblemDetailHistory) {
+  el.btnProblemDetailHistory.addEventListener('click', () => toggleProblemDetailHistory(true));
+}
+if (el.btnCloseProblemDetailHistory) {
+  el.btnCloseProblemDetailHistory.addEventListener('click', () => toggleProblemDetailHistory(false));
 }
 if (el.problemDetailChatSend) {
   el.problemDetailChatSend.addEventListener('click', handleProblemDetailChatSend);
@@ -2876,6 +2917,181 @@ function saveProblemDetailChat(createdAt, messages) {
   localStorage.setItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY, JSON.stringify(chats));
 }
 
+function getTaskTrackingData() {
+  try {
+    const raw = localStorage.getItem(TASK_TRACKING_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveTaskTrackingData(createdAt, data) {
+  const all = getTaskTrackingData();
+  all[createdAt] = data;
+  localStorage.setItem(TASK_TRACKING_STORAGE_KEY, JSON.stringify(all));
+}
+
+/** 根据聊天消息类型推断所属任务 */
+function inferTaskIdFromMessage(msg) {
+  if (!msg) return null;
+  const type = msg.type;
+  const role = msg.role;
+  const content = msg.content || '';
+  if (type === 'basicInfoCard' || type === 'basicInfoJsonBlock' || (role === 'system' && (content === '解析完成' || content === '基本信息 json 提取完毕'))) return 'task1';
+  if (type === 'bmcCard' || type === 'bmcStartBlock' || (role === 'system' && content.includes('BMC'))) return 'task2';
+  if (type === 'requirementLogicBlock' || type === 'requirementLogicStartBlock') return 'task3';
+  if (type === 'valueStreamCard' || type === 'drawValueStreamStartBlock' || type === 'valueStreamStartBlock' || (role === 'system' && (content.includes('价值流') || content.includes('绘制')))) return 'task4';
+  if (type === 'itStatusStartBlock' || (role === 'system' && (content === 'IT 现状标注完成' || content === 'IT 现状标注失败'))) return 'task5';
+  if (type === 'painPointStartBlock' || (role === 'system' && (content === '痛点标注完成' || content === '痛点标注完毕' || content === '痛点标注失败'))) return 'task6';
+  return null;
+}
+
+/** 判断消息是否应纳入任务沟通历史：仅大模型返回内容或用户主动输入 */
+function shouldIncludeInCommunicationHistory(msg) {
+  if (!msg) return false;
+  if (msg.role === 'user') return true;
+  const type = msg.type;
+  if (type === 'basicInfoCard' || type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard') return true;
+  return false;
+}
+
+/** 将聊天消息按任务分段，返回 taskId -> communications（仅包含用户输入与大模型返回的内容块） */
+function getCommunicationsByTask(createdAt) {
+  const chats = getProblemDetailChats()[createdAt];
+  if (!Array.isArray(chats) || chats.length === 0) return {};
+  let currentTask = 'task1';
+  const byTask = {};
+  FOLLOW_TASKS.forEach((t) => { byTask[t.id] = []; });
+  for (const msg of chats) {
+    const inferred = inferTaskIdFromMessage(msg);
+    if (inferred) currentTask = inferred;
+    if (!shouldIncludeInCommunicationHistory(msg)) continue;
+    const speaker = msg.role === 'user' ? '用户' : '系统大模型';
+    const payload = { role: msg.role, content: msg.content, type: msg.type, timestamp: msg.timestamp };
+    if (msg.data) payload.data = msg.data;
+    if (msg.parsed) payload.parsed = msg.parsed;
+    const contentJson = JSON.stringify(payload, null, 2);
+    byTask[currentTask].push({
+      speaker,
+      time: msg.timestamp || '',
+      content: contentJson,
+    });
+  }
+  return byTask;
+}
+
+/** 判断任务是否已完成（基于 problem 状态） */
+function isTaskCompleted(item, taskId) {
+  if (!item) return false;
+  const completed = item.completedStages || [];
+  const wfCompleted = item.workflowAlignCompletedStages || [];
+  switch (taskId) {
+    case 'task1': return !!(item.basicInfo);
+    case 'task2': return completed.includes(1) || !!(item.bmc);
+    case 'task3': return completed.includes(2) || !!(item.requirementLogic);
+    case 'task4': return wfCompleted.includes(0) && !!(item.valueStream && !item.valueStream.raw);
+    case 'task5': return wfCompleted.includes(1);
+    case 'task6': return wfCompleted.includes(2);
+    default: return false;
+  }
+}
+
+function openTaskTracking(item) {
+  currentProblemDetailItem = item;
+  const createdAt = item?.createdAt;
+  if (!createdAt) return;
+  const customerName = (item.customerName || item.customer_name || '').trim() || '未命名';
+  if (el.taskTrackingTitle) el.taskTrackingTitle.textContent = `${customerName} - 任务追踪`;
+  const trackingData = getTaskTrackingData()[createdAt] || {};
+  const communications = getCommunicationsByTask(createdAt);
+  renderTaskTrackingList(item, trackingData, communications);
+  renderTaskTrackingDetail(null);
+  if (el.taskTrackingDetail) {
+    el.taskTrackingDetail.innerHTML = '<p class="task-tracking-detail-placeholder">请从左侧选择任务查看详情</p>';
+  }
+  switchView('taskTracking');
+}
+
+function renderTaskTrackingList(item, trackingData, communications) {
+  const container = el.taskTrackingList;
+  if (!container) return;
+  container.innerHTML = FOLLOW_TASKS.map((task) => {
+    const completed = isTaskCompleted(item, task.id);
+    const taskData = trackingData[task.id] || {};
+    const objective = taskData.objective ?? task.objective;
+    const evaluationCriteria = taskData.evaluationCriteria ?? task.evaluationCriteria;
+    const comms = communications[task.id] || [];
+    const commCount = comms.length;
+    const cls = completed ? ' task-tracking-item-done' : '';
+    return `
+      <div class="task-tracking-item${cls}" data-task-id="${task.id}" role="button" tabindex="0">
+        <div class="task-tracking-item-header">
+          <span class="task-tracking-item-name">${escapeHtml(task.id.charAt(0).toUpperCase() + task.id.slice(1) + '｜' + task.name)}</span>
+          ${completed ? '<span class="task-tracking-item-check">✅</span>' : ''}
+        </div>
+        <div class="task-tracking-item-meta">
+          <span class="task-tracking-item-stage">${escapeHtml(task.stage)}</span>
+          ${commCount > 0 ? `<span class="task-tracking-item-comm">${commCount} 条沟通</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  container.querySelectorAll('.task-tracking-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      const taskId = el.dataset.taskId;
+      const task = FOLLOW_TASKS.find((t) => t.id === taskId);
+      if (task) renderTaskTrackingDetail(task, item, trackingData[taskId], communications[taskId] || []);
+    });
+  });
+}
+
+function renderTaskTrackingDetail(task, item, taskData, communications) {
+  const container = el.taskTrackingDetail;
+  if (!container) return;
+  if (!task) {
+    container.innerHTML = '<p class="task-tracking-detail-placeholder">请从左侧选择任务查看详情</p>';
+    return;
+  }
+  const def = FOLLOW_TASKS.find((t) => t.id === task.id) || task;
+  const objective = (taskData?.objective ?? def.objective) || '—';
+  const evaluationCriteria = (taskData?.evaluationCriteria ?? def.evaluationCriteria) || '—';
+  const commsHtml = communications.length === 0
+    ? '<p class="task-tracking-comm-empty">暂无沟通记录</p>'
+    : communications.map((c) => {
+        const timeStr = c.time ? formatChatTime(c.time) : '—';
+        const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
+        return `
+        <div class="task-tracking-comm-item">
+          <div class="task-tracking-comm-meta">
+            <span class="task-tracking-comm-speaker">${escapeHtml(c.speaker)}</span>
+            <span class="task-tracking-comm-time">${escapeHtml(timeStr)}</span>
+          </div>
+          <pre class="task-tracking-comm-content">${escapeHtml(contentStr)}</pre>
+        </div>
+      `;
+      }).join('');
+  container.innerHTML = `
+    <div class="task-tracking-detail-card">
+      <h3 class="task-tracking-detail-title">${escapeHtml(task.id.charAt(0).toUpperCase() + task.id.slice(1) + '｜' + task.name)}</h3>
+      <div class="task-tracking-detail-section">
+        <h4>归属阶段</h4>
+        <p>${escapeHtml(task.stage)}</p>
+      </div>
+      <div class="task-tracking-detail-section">
+        <h4>任务目标</h4>
+        <p>${escapeHtml(objective)}</p>
+      </div>
+      <div class="task-tracking-detail-section">
+        <h4>评估标准</h4>
+        <p>${escapeHtml(evaluationCriteria)}</p>
+      </div>
+      <div class="task-tracking-detail-section">
+        <h4>沟通过程记录</h4>
+        <div class="task-tracking-comm-list">${commsHtml}</div>
+      </div>
+    </div>`;
+}
+
 function renderProblemFollowList() {
   const container = el.problemFollowListContent;
   if (!container) return;
@@ -2924,7 +3140,78 @@ function openProblemDetail(item) {
   updateProblemDetailProgressStages(majorStage, problemDetailViewingMajorStage);
   renderProblemDetailContent();
   initProblemDetailChat();
+  toggleProblemDetailHistory(false);
   switchView('problemDetail');
+}
+
+function toggleProblemDetailHistory(open) {
+  const panel = el.problemDetailHistoryPanel;
+  if (!panel) return;
+  const isOpen = open ?? !panel.classList.contains('problem-detail-history-panel-open');
+  panel.classList.toggle('problem-detail-history-panel-open', isOpen);
+  if (panel.setAttribute) panel.setAttribute('aria-hidden', String(!isOpen));
+  if (isOpen) renderProblemDetailHistory();
+}
+
+function renderProblemDetailHistory() {
+  const container = el.problemDetailHistoryContent;
+  if (!container) return;
+  const item = currentProblemDetailItem;
+  const createdAt = item?.createdAt;
+  const trackingData = createdAt ? (getTaskTrackingData()[createdAt] || {}) : {};
+  const communications = createdAt ? getCommunicationsByTask(createdAt) : {};
+  container.innerHTML = FOLLOW_TASKS.map((task) => {
+    const taskData = trackingData[task.id] || {};
+    const objective = (taskData.objective ?? task.objective) || '—';
+    const evaluationCriteria = (taskData.evaluationCriteria ?? task.evaluationCriteria) || '—';
+    const comms = communications[task.id] || [];
+    const commCount = comms.length;
+    const commsHtml = comms.length === 0
+      ? '<p class="problem-detail-history-comm-empty" style="margin:0.5rem 1rem;font-size:0.8rem;color:var(--text-muted)">暂无沟通记录</p>'
+      : comms.map((c) => {
+          const timeStr = c.time ? formatChatTime(c.time) : '—';
+          const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
+          return `
+            <div class="problem-detail-history-comm-item">
+              <div class="problem-detail-history-comm-meta">
+                <span>${escapeHtml(c.speaker)}</span>
+                <span>${escapeHtml(timeStr)}</span>
+              </div>
+              <pre class="problem-detail-history-comm-content">${escapeHtml(contentStr)}</pre>
+            </div>`;
+        }).join('');
+    return `
+      <div class="problem-detail-history-task-root" data-task-id="${task.id}">
+        <button type="button" class="problem-detail-history-task-node" data-task-id="${task.id}" role="button">
+          <span class="task-node-expand">▸</span>
+          <span class="task-node-name">${escapeHtml(task.id.charAt(0).toUpperCase() + task.id.slice(1) + '｜' + task.name)}</span>
+          ${commCount > 0 ? `<span class="task-node-badge">${commCount} 条</span>` : ''}
+        </button>
+        <div class="problem-detail-history-task-children" hidden>
+          <div class="problem-detail-history-task-info">
+            <h5>归属阶段</h5>
+            <p>${escapeHtml(task.stage)}</p>
+            <h5>任务目标</h5>
+            <p>${escapeHtml(objective)}</p>
+            <h5>评估标准</h5>
+            <p>${escapeHtml(evaluationCriteria)}</p>
+            <h5>沟通过程记录</h5>
+          </div>
+          <div class="problem-detail-history-comm-list">${commsHtml}</div>
+        </div>
+      </div>`;
+  }).join('');
+  container.querySelectorAll('.problem-detail-history-task-node').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const taskId = btn.dataset.taskId;
+      const root = btn.closest('.problem-detail-history-task-root');
+      const children = root?.querySelector('.problem-detail-history-task-children');
+      if (!children) return;
+      const expanded = !children.hidden;
+      children.hidden = expanded;
+      btn.classList.toggle('expanded', !expanded);
+    });
+  });
 }
 
 function initProblemDetailChat() {
@@ -3921,7 +4208,7 @@ function updateProblemDetailProgressStages(currentMajorStage, viewingMajorStage)
     const isReached = stage <= currentMajorStage;
     if (stage < currentMajorStage) {
       el.classList.add('problem-detail-stage-done');
-      el.textContent = label + ' ✅';
+      el.innerHTML = escapeHtml(label) + ' <span class="problem-detail-stage-icon">✅</span>';
     }
     if (stage === viewing) {
       el.classList.add('problem-detail-stage-active');
