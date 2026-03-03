@@ -1776,6 +1776,10 @@ body {
   margin-bottom: 0.5rem;
 }
 
+.problem-detail-history-task-children .problem-detail-history-timeline {
+  padding: 0 1rem 1rem;
+}
+
 .problem-detail-history-task-info {
   padding: 0.5rem 1rem 0.75rem;
   font-size: 0.8rem;
@@ -1795,6 +1799,12 @@ body {
 
 .problem-detail-history-comm-list {
   padding: 0 1rem 1rem;
+}
+
+.problem-detail-history-comm-empty {
+  margin: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .problem-detail-history-comm-item {

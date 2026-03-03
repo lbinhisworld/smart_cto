@@ -4077,48 +4077,83 @@ function renderProblemDetailHistory() {
   if (!container) return;
   const item = currentProblemDetailItem;
   const createdAt = item?.createdAt;
-  const timeline = createdAt ? getCommunicationsAsTimeline(createdAt) : [];
-  if (timeline.length === 0) {
-    container.innerHTML = '<p class="problem-detail-history-timeline-empty">暂无沟通过程记录</p>';
-    return;
-  }
-  container.innerHTML = `
-    <div class="problem-detail-history-timeline">
-      ${timeline.map((c, i) => {
-        const timeStr = c.time ? formatChatTime(c.time) : '—';
-        const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
-        return `
-        <div class="problem-detail-history-timeline-node" data-index="${i}">
-          <div class="problem-detail-history-timeline-dot"></div>
-          <div class="problem-detail-history-timeline-body">
-            <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
-              <span class="problem-detail-history-timeline-expand">▸</span>
-              <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
-              <span class="problem-detail-history-timeline-speaker">${escapeHtml(c.speaker)}</span>
-              <span class="problem-detail-history-timeline-task">${escapeHtml(c.taskName || '')}</span>
-            </button>
-            <div class="problem-detail-history-timeline-detail" hidden>
-              <div class="problem-detail-history-timeline-detail-meta">
-                <span>${escapeHtml(c.speaker)}</span>
-                <span>${escapeHtml(timeStr)}</span>
-                <span>${escapeHtml(c.taskName || '')}</span>
+  const trackingData = createdAt ? (getTaskTrackingData()[createdAt] || {}) : {};
+  const communications = createdAt ? getCommunicationsByTask(createdAt) : {};
+  container.innerHTML = FOLLOW_TASKS.map((task) => {
+    const taskData = trackingData[task.id] || {};
+    const objective = (taskData.objective ?? task.objective) || '—';
+    const evaluationCriteria = (taskData.evaluationCriteria ?? task.evaluationCriteria) || '—';
+    const comms = (communications[task.id] || []).slice().sort((a, b) => {
+      const ta = (a.time && new Date(a.time).getTime()) || 0;
+      const tb = (b.time && new Date(b.time).getTime()) || 0;
+      return ta - tb;
+    });
+    const commCount = comms.length;
+    const timelineHtml = comms.length === 0
+      ? '<p class="problem-detail-history-comm-empty">暂无沟通记录</p>'
+      : comms.map((c, i) => {
+          const timeStr = c.time ? formatChatTime(c.time) : '—';
+          const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
+          return `
+          <div class="problem-detail-history-timeline-node" data-index="${i}">
+            <div class="problem-detail-history-timeline-dot"></div>
+            <div class="problem-detail-history-timeline-body">
+              <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
+                <span class="problem-detail-history-timeline-expand">▸</span>
+                <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
+                <span class="problem-detail-history-timeline-speaker">${escapeHtml(c.speaker)}</span>
+              </button>
+              <div class="problem-detail-history-timeline-detail" hidden>
+                <div class="problem-detail-history-timeline-detail-meta">
+                  <span>${escapeHtml(c.speaker)}</span>
+                  <span>${escapeHtml(timeStr)}</span>
+                </div>
+                <pre class="problem-detail-history-timeline-detail-content">${escapeHtml(contentStr)}</pre>
               </div>
-              <pre class="problem-detail-history-timeline-detail-content">${escapeHtml(contentStr)}</pre>
             </div>
+          </div>`;
+        }).join('');
+    return `
+      <div class="problem-detail-history-task-root" data-task-id="${task.id}">
+        <button type="button" class="problem-detail-history-task-node" data-task-id="${task.id}" role="button">
+          <span class="task-node-expand">▸</span>
+          <span class="task-node-name">${escapeHtml(task.id.charAt(0).toUpperCase() + task.id.slice(1) + '｜' + task.name)}</span>
+          ${commCount > 0 ? `<span class="task-node-badge">${commCount} 条</span>` : ''}
+        </button>
+        <div class="problem-detail-history-task-children" hidden>
+          <div class="problem-detail-history-task-info">
+            <h5>归属阶段</h5>
+            <p>${escapeHtml(task.stage)}</p>
+            <h5>任务目标</h5>
+            <p>${escapeHtml(objective)}</p>
+            <h5>评估标准</h5>
+            <p>${escapeHtml(evaluationCriteria)}</p>
+            <h5>沟通过程记录</h5>
           </div>
-        </div>`;
-      }).join('')}
-    </div>`;
+          <div class="problem-detail-history-timeline">${timelineHtml}</div>
+        </div>
+      </div>`;
+  }).join('');
+  container.querySelectorAll('.problem-detail-history-task-node').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const root = btn.closest('.problem-detail-history-task-root');
+      const children = root?.querySelector('.problem-detail-history-task-children');
+      if (!children) return;
+      const expanded = !children.hidden;
+      children.hidden = expanded;
+      btn.classList.toggle('expanded', !expanded);
+    });
+  });
   container.querySelectorAll('.problem-detail-history-timeline-head').forEach((btn) => {
     btn.addEventListener('click', () => {
       const body = btn.closest('.problem-detail-history-timeline-body');
       const detail = body?.querySelector('.problem-detail-history-timeline-detail');
       if (!detail) return;
-      const expanded = !detail.hidden;
-      detail.hidden = expanded;
-      btn.classList.toggle('expanded', !expanded);
-      btn.setAttribute('aria-expanded', !expanded);
-      btn.querySelector('.problem-detail-history-timeline-expand')?.classList.toggle('expanded', !expanded);
+      const isExpanded = !detail.hidden;
+      detail.hidden = isExpanded;
+      btn.classList.toggle('expanded', !isExpanded);
+      btn.setAttribute('aria-expanded', !isExpanded);
+      btn.querySelector('.problem-detail-history-timeline-expand')?.classList.toggle('expanded', !isExpanded);
     });
   });
 }
