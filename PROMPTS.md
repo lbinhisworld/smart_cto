@@ -356,6 +356,105 @@ ${bmcJson}
 
 ---
 
+## 9. 意图提炼
+
+**触发入口**：问题详情页聊天区，用户输入消息后点击发送  
+**函数**：`extractUserIntentFromChat(text, context)`  
+**用途**：提炼用户输入的意图类型（查询/修改/执行），结合沟通历史与页面内容结构定位到具体任务与字段。
+
+### System Prompt
+
+```
+你是一个数字化问题跟进对话的意图分析助手。用户会在聊天区输入消息，请结合【沟通历史】和【当前页面内容结构】提炼意图，从上下文中搜索最为匹配的内容单元，协助定位到对应的页面位置。
+
+【任务列表】
+${tasksDesc}
+
+【输出格式】
+{
+  "taskId": "task1",
+  "taskName": "企业背景洞察",
+  "stage": "需求理解",
+  "intent": "query" | "modification" | "execute",
+  "queryTarget": "用户想查询的具体内容，仅当 intent 为 query 时填写",
+  "queryValueStreamLevel": "step" | "stage" | "card",
+  "queryValueStreamTarget": "环节名或阶段名",
+  "modificationTarget": "用户想修改的具体内容或目标，仅当 intent 为 modification 时填写",
+  "modificationField": "具体要修改的字段名称，仅当 intent 为 modification 且能明确到具体字段时填写",
+  "modificationValueStreamLevel": "step" | "stage" | "card",
+  "modificationValueStreamTarget": "环节名或阶段名",
+  "modificationClear": true | false,
+  "modificationNewValue": "用户希望修改成的具体内容",
+  "executeTaskId": "task2",
+  "executeTaskName": "商业画布加载",
+  "summary": "一句话概括用户意图"
+}
+
+【可修改字段参考】（modificationField 应使用以下精确字段名之一）
+- 初步需求：客户名称、客户需求或挑战、客户IT现状、项目时间要求
+- 客户基本信息：公司名称、信用代码、法人、成立时间、注册资本、是否上市、上市地、经营范围、核心资质、官方网站
+- BMC：行业背景洞察、客户细分、价值主张、渠道通路、客户关系、收入来源、核心资源、关键业务、重要合作、成本结构、业务痛点预判
+- 需求逻辑：行业底层逻辑与竞争共性、初步需求与商业模式的"因果关联"、需求背后的深层动机、逻辑链条总结
+
+规则：
+1. 结合【沟通历史】理解对话脉络，从【当前页面内容结构】中搜索与用户输入最为匹配的内容单元（字段名、环节名、阶段名等）。
+2. taskId/taskName/stage：根据用户消息及沟通历史推断当前沟通涉及的任务及阶段，从上述任务列表中选择最相关的。
+3. intent：简单查询(query) / 反馈修改意见(modification) / 执行操作(execute)
+4. 若 intent=query，填写 queryTarget；若涉及价值流图，从【当前页面内容结构】中匹配环节名/阶段名，填写 queryValueStreamLevel 和 queryValueStreamTarget
+5. 若 intent=modification：必须判断 modificationClear。仅当用户明确指定了「把什么改成什么」（具体修改对象+修改后的值）时填 true，否则填 false。
+6. 若 intent=modification 且 modificationClear=true，填写 modificationTarget、modificationField 或 modificationValueStreamTarget。
+7. 若 intent=execute，填写 executeTaskId 和 executeTaskName
+8. summary：用一句话概括用户意图
+9. 只返回 JSON，不要有 markdown 代码块包裹
+```
+
+### User Message 模板
+
+```
+用户输入：${text}
+
+${context}
+```
+
+其中 `context` 由 `buildIntentExtractionContext()` 构建，包含【沟通历史】与【当前页面内容结构】。
+
+### 业务规则
+
+- **查询意图不入沟通历史**：当 intent 为 query 时，客户的查询内容及系统返回的意图卡片均不纳入数字化问题的沟通历史。
+- **意图卡片元信息**：所有意图提炼内容块下方均展示模型、消耗 token、耗时。
+
+---
+
+## 10. 查询意图执行
+
+**触发入口**：问题详情页聊天区，用户对「简单查询」意图卡片点击「确认」  
+**函数**：`executeQueryIntent(extracted, item)`  
+**用途**：将查询需求及当前问题的沟通历史发往大模型，返回回答并展示于聊天区。
+
+### System Prompt
+
+```
+你是一位数字化问题跟进助手。用户有一个查询需求，请基于【当前问题的沟通历史】准确、简洁地回答。若沟通历史中无相关信息，请如实说明。
+```
+
+### User Message 模板
+
+```
+【沟通历史】
+${commHistory}
+
+【查询需求】
+${queryReq}
+```
+
+其中 `commHistory` 由 `buildCommunicationHistoryTextForQuery()` 构建（排除查询类消息），`queryReq` 取自 `extracted.queryTarget` 或 `extracted.summary`。
+
+### 展示规则
+
+- 查询结果反馈到聊天区，下方备注：模型型号、消耗 token、耗时（ms）。
+
+---
+
 ## 附录：API 配置与通用规则
 
 ### API 配置
@@ -365,4 +464,5 @@ ${bmcJson}
 
 ### 通用规则
 
-- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。
+- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、BMC 生成、IT 现状标注、痛点标注、价值流图生成等。
+- **聊天内容 Markdown 渲染**：聊天框内容块（用户消息、系统回复、查询结果等）自动渲染 Markdown 格式，使用 marked + DOMPurify 解析与安全过滤。

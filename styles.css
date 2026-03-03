@@ -112,14 +112,17 @@ body {
 /* 首页 - 数字化问题录入 */
 .home-intake-view {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   min-height: 60vh;
+  width: 100%;
 }
 
 .home-intake-center {
   width: 100%;
-  max-width: 720px;
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .home-intake-title {
@@ -246,50 +249,140 @@ body {
   color: var(--text);
 }
 
-/* 数字化问题解决跟进列表 */
+/* 数字化问题解决跟进列表 - 借鉴参考图：搜索栏、卡片网格、渐变顶条 */
 .problem-follow-section {
   margin-top: 2rem;
-  padding: 1.25rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 1.25rem 0;
+  width: 100%;
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
-.problem-follow-title {
-  font-size: 1rem;
-  font-weight: 600;
+.problem-follow-count {
+  font-size: 0.9rem;
+  color: var(--text-muted);
   margin: 0 0 1rem;
-  color: var(--text);
 }
 
 .problem-follow-list {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+}
+
+@media (max-width: 1200px) {
+  .problem-follow-list {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .problem-follow-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .problem-follow-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.problem-follow-card {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-}
-
-.problem-follow-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem 1.25rem;
   background: var(--surface-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  transition: transform 0.35s ease-out, opacity 0.35s ease-out;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.problem-follow-item-body {
-  flex: 1;
-  min-width: 0;
+.problem-follow-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
-.problem-follow-item-actions {
+.problem-follow-card-accent {
+  height: 4px;
   flex-shrink: 0;
+}
+
+.problem-follow-card-accent-a {
+  background: linear-gradient(90deg, #ec4899, #8b5cf6);
+}
+
+.problem-follow-card-accent-b {
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+}
+
+.problem-follow-card-body {
+  padding: 1rem 1.25rem;
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
+}
+
+.problem-follow-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-follow-card-date {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.problem-follow-card-actions {
+  display: flex;
   align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.problem-follow-card-actions .btn-problem-follow-start {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.problem-follow-card-actions .btn-problem-follow-delete {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.problem-follow-card-actions .btn-problem-follow-delete:hover {
+  color: #e57373;
+  border-color: #e57373;
+}
+
+.problem-follow-icon {
+  display: block;
+}
+
+.problem-follow-icon-delete {
+  stroke: currentColor;
 }
 
 .btn-problem-follow-delete {
@@ -324,41 +417,21 @@ body {
   opacity: 0.9;
 }
 
-.problem-follow-item-enter {
+.problem-follow-card-enter {
   transform: translateY(-60px);
   opacity: 0;
 }
 
-.problem-follow-item-enter.problem-follow-item-enter-active {
+.problem-follow-card-enter.problem-follow-card-enter-active {
   transform: translateY(0);
   opacity: 1;
-}
-
-.problem-follow-item-row {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
-}
-
-.problem-follow-item-row:last-child {
-  margin-bottom: 0;
-}
-
-.problem-follow-item-label {
-  font-weight: 500;
-  color: var(--text-muted);
-  min-width: 8em;
-}
-
-.problem-follow-item-value {
-  color: var(--text);
-  flex: 1;
 }
 
 .problem-follow-empty {
   color: var(--text-muted);
   font-style: italic;
   padding: 1rem 0;
+  grid-column: 1 / -1;
 }
 
 /* 任务追踪视图 */
@@ -781,6 +854,11 @@ body {
   color: var(--text);
 }
 
+.problem-detail-chat-msg-clarification {
+  background: rgba(255, 193, 7, 0.1);
+  border-color: rgba(255, 193, 7, 0.35);
+}
+
 .problem-detail-chat-msg-user {
   align-self: flex-end;
   margin-left: auto;
@@ -824,6 +902,46 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Markdown 渲染样式（聊天内容块） */
+.markdown-body {
+  white-space: normal;
+}
+.markdown-body p { margin: 0.35em 0; }
+.markdown-body p:first-child { margin-top: 0; }
+.markdown-body p:last-child { margin-bottom: 0; }
+.markdown-body strong, .markdown-body b { font-weight: 600; }
+.markdown-body em, .markdown-body i { font-style: italic; }
+.markdown-body code {
+  padding: 0.15em 0.35em;
+  font-size: 0.9em;
+  background: var(--bg-secondary, #f0f0f0);
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+}
+.markdown-body pre {
+  margin: 0.5em 0;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  background: var(--bg-secondary, #f5f5f5);
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+.markdown-body pre code {
+  padding: 0;
+  background: none;
+}
+.markdown-body a { color: var(--accent); text-decoration: underline; }
+.markdown-body ul, .markdown-body ol { margin: 0.35em 0; padding-left: 1.5em; }
+.markdown-body li { margin: 0.15em 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: 0.6em 0 0.35em; font-size: 1em; font-weight: 600; }
+.markdown-body blockquote {
+  margin: 0.5em 0;
+  padding-left: 1em;
+  border-left: 3px solid var(--border, #ddd);
+  color: var(--text-muted);
+}
+.markdown-body hr { margin: 0.75em 0; border: none; border-top: 1px solid var(--border); }
 
 .problem-detail-chat-msg-time {
   margin-top: 0.25rem;
@@ -951,6 +1069,33 @@ body {
 .problem-detail-basic-info-card-actions {
   padding-top: 0.5rem;
   border-top: 1px solid var(--border);
+}
+
+/* 意图提炼确认卡片 */
+.problem-detail-chat-intent-card .problem-detail-intent-card-inner {
+  background: rgba(88, 166, 255, 0.08);
+  border-color: rgba(88, 166, 255, 0.35);
+}
+
+.btn-confirm-intent-extraction {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-confirm-intent-extraction:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-confirm-intent-extraction:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .btn-confirm-basic-info {
