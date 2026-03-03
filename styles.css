@@ -1829,7 +1829,7 @@ body {
   word-break: break-all;
 }
 
-/* 沟通过程记录 - 时间线视图 */
+/* 任务过程日志 - 时间线视图 */
 .problem-detail-history-timeline-empty {
   margin: 1.5rem 1rem;
   font-size: 0.9rem;
@@ -1840,17 +1840,7 @@ body {
 .problem-detail-history-timeline {
   position: relative;
   padding: 0.5rem 0 1rem 0;
-}
-
-.problem-detail-history-timeline::before {
-  content: '';
-  position: absolute;
-  left: 6px;
-  top: 12px;
-  bottom: 12px;
-  width: 2px;
-  background: linear-gradient(to bottom, rgba(99, 179, 237, 0.4), rgba(99, 179, 237, 0.15));
-  border-radius: 1px;
+  overflow: hidden;
 }
 
 .problem-detail-history-timeline-node {
@@ -1864,16 +1854,39 @@ body {
   margin-bottom: 0;
 }
 
-.problem-detail-history-timeline-dot {
+/* 圆点容器：固定宽度，垂直线从圆心穿过 */
+.problem-detail-history-timeline-dot-wrap {
   flex-shrink: 0;
   width: 14px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 0.5rem;
+  position: relative;
+}
+
+.problem-detail-history-timeline-dot-wrap::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: -500px;
+  bottom: -500px;
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(99, 179, 237, 0.4), rgba(99, 179, 237, 0.15));
+  border-radius: 1px;
+  z-index: 0;
+}
+
+.problem-detail-history-timeline-dot {
+  width: 14px;
   height: 14px;
-  margin-top: 0.5rem;
   border-radius: 50%;
   background: var(--accent, #63b3ed);
   border: 2px solid rgba(26, 35, 50, 0.6);
   box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.2);
   z-index: 1;
+  position: relative;
 }
 
 .problem-detail-history-timeline-body {

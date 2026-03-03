@@ -2034,6 +2034,36 @@ if (el.problemDetailChatMessages) {
             }
           });
         }
+        if (extracted.intent === 'discussion') {
+          const item = currentProblemDetailItem;
+          const container = el.problemDetailChatMessages;
+          const userText = (intentBtn.dataset.userText || '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+          const parsingBlock = document.createElement('div');
+          parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+          parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在讨论…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+          container?.appendChild(parsingBlock);
+          container.scrollTop = container.scrollHeight;
+          requestAnimationFrame(async () => {
+            try {
+              const relatedTaskId = extracted.taskId || 'task1';
+              const { content, usage, model, durationMs } = await executeDiscussionIntent(extracted, item, userText);
+              parsingBlock.remove();
+              const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+              const resultBlock = document.createElement('div');
+              resultBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-with-delete';
+              resultBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
+              resultBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content markdown-body">${renderMarkdown(content)}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
+              container?.appendChild(resultBlock);
+              pushAndSaveProblemDetailChat({ role: 'system', content, timestamp: getTimeStr(), llmMeta: { usage, model, durationMs }, _taskId: relatedTaskId });
+              container.scrollTop = container.scrollHeight;
+              renderProblemDetailHistory();
+            } catch (err) {
+              parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
+              parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">讨论失败：${escapeHtml(err.message || String(err))}</div>`;
+              pushAndSaveProblemDetailChat({ role: 'system', content: '讨论失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+            }
+          });
+        }
         const isBasicInfoMod = extracted.intent === 'modification' && extracted.modificationTarget && (String(extracted.modificationTarget).includes('企业基本信息') || String(extracted.modificationTarget).includes('基本信息'));
         const isBasicInfoProvide = (extracted.intent === 'modification' || extracted.taskId === 'task1') && !problemDetailConfirmedBasicInfo;
         const isModificationWithLlm = extracted.intent === 'modification' && extracted.modificationClear === true && !isBasicInfoProvide;
@@ -2605,6 +2635,9 @@ function buildIntentExtractionContext(createdAt, item) {
         lines.push(`[${taskLabel}] 系统(已确认价值流): 阶段 ${stageNames.join('、')}；环节示例 ${stepNames.slice(0, 6).join('、')}${stepNames.length > 6 ? '...' : ''}`);
       } else if (msg.type === 'intentExtractionCard' && msg.confirmed && msg.data) {
         lines.push(`[${taskLabel}] 系统(意图已确认): ${(msg.data.summary || '').trim() || JSON.stringify(msg.data).slice(0, 80)}`);
+      } else if (msg.role === 'system' && msg.content && (msg._taskId || msg.llmMeta)) {
+        const snippet = (msg.content || '').trim().slice(0, 300);
+        lines.push(`[${taskLabel}] 系统大模型: ${snippet}${(msg.content || '').length > 300 ? '…' : ''}`);
       }
     }
   } else {
@@ -2665,6 +2698,20 @@ async function executeQueryIntent(extracted, item) {
   const queryReq = extracted.queryTarget || extracted.summary || '用户查询';
   const systemPrompt = `你是一位数字化问题跟进助手。用户有一个查询需求，请基于【当前问题的沟通历史】准确、简洁地回答。若沟通历史中无相关信息，请如实说明。`;
   const userContent = `【沟通历史】\n${commHistory}\n\n【查询需求】\n${queryReq}`;
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userContent },
+  ]);
+  return { content: (content || '').trim() || '（无返回内容）', usage, model, durationMs };
+}
+
+/** 执行请教讨论意图：将用户讨论问题及沟通历史上下文发往大模型，返回回答；讨论归入对应任务的沟通历史 */
+async function executeDiscussionIntent(extracted, item, userText) {
+  const createdAt = item?.createdAt;
+  const commHistory = buildCommunicationHistoryTextForQuery(createdAt);
+  const topic = extracted.discussionTopic || extracted.summary || userText || '用户讨论';
+  const systemPrompt = `你是一位数字化问题跟进顾问。用户针对当前数字化问题的某个专题进行延展性讨论或请教。请结合【沟通历史】的完整上下文，对用户的问题进行专业、深入的解答或讨论。可以结合行业经验、最佳实践给出建议，保持友好、专业的对话风格。`;
+  const userContent = `【沟通历史】\n${commHistory}\n\n【用户讨论/请教】\n${topic}`;
   const { content, usage, model, durationMs } = await fetchDeepSeekChat([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userContent },
@@ -3062,8 +3109,9 @@ ${tasksDesc}
   "taskId": "task1",
   "taskName": "企业背景洞察",
   "stage": "需求理解",
-  "intent": "query" | "modification" | "execute",
+  "intent": "query" | "modification" | "execute" | "discussion",
   "queryTarget": "用户想查询的具体内容，仅当 intent 为 query 时填写",
+  "discussionTopic": "用户想请教或讨论的具体话题，仅当 intent 为 discussion 时填写",
   "queryValueStreamLevel": "step" | "stage" | "card",
   "queryValueStreamTarget": "环节名或阶段名",
   "modificationTarget": "用户想修改的具体内容或目标，仅当 intent 为 modification 时填写",
@@ -3086,15 +3134,16 @@ ${tasksDesc}
 规则：
 1. 结合【沟通历史】理解对话脉络，从【当前页面内容结构】中搜索与用户输入最为匹配的内容单元（字段名、环节名、阶段名等）。
 2. taskId/taskName/stage：根据用户消息及沟通历史推断当前沟通涉及的任务及阶段，从上述任务列表中选择最相关的。
-3. intent：简单查询(query) / 反馈修改意见(modification) / 执行操作(execute)
-4. 若 intent=query，填写 queryTarget；若涉及价值流图，从【当前页面内容结构】中匹配环节名/阶段名，填写 queryValueStreamLevel 和 queryValueStreamTarget
-5. 若 intent=modification：必须判断 modificationClear。仅当用户明确指定了「把什么改成什么」（具体修改对象+修改后的值）时填 true，否则填 false。若用户只说「想修改」「改一下」等未明确具体内容，填 false。modificationNewValue 仅当 modificationClear 为 true 时填写用户希望修改成的具体内容。
-6. 若 intent=modification 且 modificationClear=true，填写 modificationTarget、modificationField 或 modificationValueStreamTarget；从【当前页面内容结构】中匹配最具体的字段名/环节名/阶段名。
-7. 若涉及价值流图：从【当前页面内容结构】的价值流阶段与环节中精确匹配，modificationValueStreamLevel 填 step/stage/card，modificationValueStreamTarget 填匹配到的环节名或阶段名（必须与结构中出现的名称一致）
-8. 若 intent=execute，填写 executeTaskId 和 executeTaskName。当用户说「重新进行需求逻辑构建」「重新构建需求逻辑」等时，intent=execute，executeTaskId=task3
-9. summary：用一句话概括用户意图
-10. 若无法明确推断，相关字段可填空字符串或合理默认值
-11. 只返回 JSON，不要有 markdown 代码块包裹`;
+3. intent：简单查询(query) / 反馈修改意见(modification) / 执行操作(execute) / 请教讨论(discussion)
+4. 若 intent=discussion：用户针对当前问题的各种专题进行延展性讨论或请教时填写。判断用户讨论话题与哪个任务最为相关，填写 taskId；填写 discussionTopic 概括讨论话题。
+5. 若 intent=query，填写 queryTarget；若涉及价值流图，从【当前页面内容结构】中匹配环节名/阶段名，填写 queryValueStreamLevel 和 queryValueStreamTarget
+6. 若 intent=modification：必须判断 modificationClear。仅当用户明确指定了「把什么改成什么」（具体修改对象+修改后的值）时填 true，否则填 false。若用户只说「想修改」「改一下」等未明确具体内容，填 false。modificationNewValue 仅当 modificationClear 为 true 时填写用户希望修改成的具体内容。
+7. 若 intent=modification 且 modificationClear=true，填写 modificationTarget、modificationField 或 modificationValueStreamTarget；从【当前页面内容结构】中匹配最具体的字段名/环节名/阶段名。
+8. 若涉及价值流图：从【当前页面内容结构】的价值流阶段与环节中精确匹配，modificationValueStreamLevel 填 step/stage/card，modificationValueStreamTarget 填匹配到的环节名或阶段名（必须与结构中出现的名称一致）
+9. 若 intent=execute，填写 executeTaskId 和 executeTaskName。当用户说「重新进行需求逻辑构建」「重新构建需求逻辑」等时，intent=execute，executeTaskId=task3
+10. summary：用一句话概括用户意图
+11. 若无法明确推断，相关字段可填空字符串或合理默认值
+12. 只返回 JSON，不要有 markdown 代码块包裹`;
 
   const ctx = context ? `\n${context}` : '';
   const { content, usage, model, durationMs } = await fetchDeepSeekChat([
@@ -3795,6 +3844,7 @@ function saveTaskTrackingData(createdAt, data) {
 /** 根据聊天消息类型推断所属任务 */
 function inferTaskIdFromMessage(msg) {
   if (!msg) return null;
+  if (msg._taskId) return msg._taskId;
   const type = msg.type;
   const role = msg.role;
   const content = msg.content || '';
@@ -3808,13 +3858,15 @@ function inferTaskIdFromMessage(msg) {
   return null;
 }
 
-/** 判断消息是否应纳入任务沟通历史：仅大模型返回内容或用户主动输入；未确认的意图卡片不纳入；查询意图的客户输入与系统返回均不纳入 */
+/** 判断消息是否应纳入任务沟通历史：仅大模型返回内容或用户主动输入；未确认的意图卡片不纳入；查询意图的客户输入与系统返回均不纳入；请教讨论纳入 */
 function shouldIncludeInCommunicationHistory(msg) {
   if (!msg) return false;
   if (msg.role === 'user') return true;
+  if (msg._taskId) return true; // 请教讨论的系统回复
   const type = msg.type;
   if (type === 'intentExtractionCard') {
     if (msg.data?.intent === 'query') return false; // 查询意图：系统返回内容不纳入
+    if (msg.data?.intent === 'discussion') return false; // 请教讨论：意图卡片本身不纳入，用户消息与系统回复已单独处理
     return !!msg.confirmed;
   }
   if (type === 'basicInfoCard' || type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard') return true;
@@ -3833,13 +3885,34 @@ function getCommunicationsByTask(createdAt) {
     const inferred = inferTaskIdFromMessage(msg);
     if (inferred) currentTask = inferred;
     const isQueryIntentCard = msg.type === 'intentExtractionCard' && msg.data?.intent === 'query';
+    const isDiscussionIntentCard = msg.type === 'intentExtractionCard' && msg.data?.intent === 'discussion';
     const isUnconfirmedIntentCard = msg.type === 'intentExtractionCard' && !msg.confirmed;
-    if (isQueryIntentCard || isUnconfirmedIntentCard) {
+    if (isQueryIntentCard || (isUnconfirmedIntentCard && !isDiscussionIntentCard)) {
       if (lastUserComm) {
         const comms = byTask[lastUserComm.task];
         if (comms.length > 0 && comms[comms.length - 1] === lastUserComm.entry) comms.pop();
         lastUserComm = null;
       }
+      continue;
+    }
+    if (isDiscussionIntentCard) {
+      if (msg.confirmed && lastUserComm) {
+        const targetTaskId = msg.data?.taskId || currentTask;
+        const commsFrom = byTask[lastUserComm.task];
+        const idx = commsFrom.indexOf(lastUserComm.entry);
+        if (idx >= 0) {
+          commsFrom.splice(idx, 1);
+          byTask[targetTaskId].push(lastUserComm.entry);
+        }
+        currentTask = targetTaskId;
+        const extractionPayload = { role: 'system', type: 'intentExtractionCard', content: '讨论请教', data: msg.data, userText: msg.userText, timestamp: msg.timestamp };
+        const extractionEntry = { speaker: '系统提炼', time: msg.timestamp || '', content: JSON.stringify(extractionPayload, null, 2) };
+        byTask[targetTaskId].push(extractionEntry);
+      } else if (lastUserComm) {
+        const comms = byTask[lastUserComm.task];
+        if (comms.length > 0 && comms[comms.length - 1] === lastUserComm.entry) comms.pop();
+      }
+      lastUserComm = null;
       continue;
     }
     if (!shouldIncludeInCommunicationHistory(msg)) continue;
@@ -3949,15 +4022,24 @@ function renderTaskTrackingDetail(task, item, taskData, communications) {
   const def = FOLLOW_TASKS.find((t) => t.id === task.id) || task;
   const objective = (taskData?.objective ?? def.objective) || '—';
   const evaluationCriteria = (taskData?.evaluationCriteria ?? def.evaluationCriteria) || '—';
+  const intentLabels = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
   const commsHtml = communications.length === 0
     ? '<p class="task-tracking-comm-empty">暂无沟通记录</p>'
     : communications.map((c) => {
         const timeStr = c.time ? formatChatTime(c.time) : '—';
         const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
+        let titleLabel = c.speaker;
+        try {
+          const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
+          if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent != null) {
+            const intentLabel = intentLabels[parsed.data.intent] || parsed.data.intent || '—';
+            titleLabel = `用户意图提炼：${intentLabel}`;
+          }
+        } catch (_) {}
         return `
         <div class="task-tracking-comm-item">
           <div class="task-tracking-comm-meta">
-            <span class="task-tracking-comm-speaker">${escapeHtml(c.speaker)}</span>
+            <span class="task-tracking-comm-speaker">${escapeHtml(titleLabel)}</span>
             <span class="task-tracking-comm-time">${escapeHtml(timeStr)}</span>
           </div>
           <pre class="task-tracking-comm-content">${escapeHtml(contentStr)}</pre>
@@ -3980,7 +4062,7 @@ function renderTaskTrackingDetail(task, item, taskData, communications) {
         <p>${escapeHtml(evaluationCriteria)}</p>
       </div>
       <div class="task-tracking-detail-section">
-        <h4>沟通过程记录</h4>
+        <h4>任务过程日志</h4>
         <div class="task-tracking-comm-list">${commsHtml}</div>
       </div>
     </div>`;
@@ -4089,23 +4171,34 @@ function renderProblemDetailHistory() {
       return ta - tb;
     });
     const commCount = comms.length;
+    const intentLabels = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
     const timelineHtml = comms.length === 0
       ? '<p class="problem-detail-history-comm-empty">暂无沟通记录</p>'
       : comms.map((c, i) => {
           const timeStr = c.time ? formatChatTime(c.time) : '—';
           const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
+          let titleLabel = c.speaker;
+          try {
+            const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
+            if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent != null) {
+              const intentLabel = intentLabels[parsed.data.intent] || parsed.data.intent || '—';
+              titleLabel = `用户意图提炼：${intentLabel}`;
+            }
+          } catch (_) {}
           return `
           <div class="problem-detail-history-timeline-node" data-index="${i}">
-            <div class="problem-detail-history-timeline-dot"></div>
+            <div class="problem-detail-history-timeline-dot-wrap">
+              <div class="problem-detail-history-timeline-dot"></div>
+            </div>
             <div class="problem-detail-history-timeline-body">
               <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
                 <span class="problem-detail-history-timeline-expand">▸</span>
                 <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
-                <span class="problem-detail-history-timeline-speaker">${escapeHtml(c.speaker)}</span>
+                <span class="problem-detail-history-timeline-speaker">${escapeHtml(titleLabel)}</span>
               </button>
               <div class="problem-detail-history-timeline-detail" hidden>
                 <div class="problem-detail-history-timeline-detail-meta">
-                  <span>${escapeHtml(c.speaker)}</span>
+                  <span>${escapeHtml(titleLabel)}</span>
                   <span>${escapeHtml(timeStr)}</span>
                 </div>
                 <pre class="problem-detail-history-timeline-detail-content">${escapeHtml(contentStr)}</pre>
@@ -4128,7 +4221,7 @@ function renderProblemDetailHistory() {
             <p>${escapeHtml(objective)}</p>
             <h5>评估标准</h5>
             <p>${escapeHtml(evaluationCriteria)}</p>
-            <h5>沟通过程记录</h5>
+            <h5>任务过程日志</h5>
           </div>
           <div class="problem-detail-history-timeline">${timelineHtml}</div>
         </div>
@@ -4945,7 +5038,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
       const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
-      const intentLabels = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作' };
+      const intentLabels = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
       const intentLabel = intentLabels[data.intent] || data.intent || '—';
       const rows = [
         { label: '当前任务', value: `${data.taskName || '—'}（${data.stage || '—'}）` },
@@ -4953,6 +5046,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
         { label: '意图概括', value: data.summary || '—' },
       ];
       if (data.intent === 'query' && data.queryTarget) rows.push({ label: '查询内容', value: data.queryTarget });
+      if (data.intent === 'discussion' && data.discussionTopic) rows.push({ label: '讨论话题', value: data.discussionTopic });
       if (data.intent === 'modification' && data.modificationTarget) {
         let modVal = data.modificationTarget;
         if (data.modificationField) modVal += ` → ${data.modificationField}`;
@@ -5231,7 +5325,7 @@ async function handleProblemDetailChatSend() {
     } else {
       const cardBlock = document.createElement('div');
       cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-intent-card';
-      const intentLabels = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作' };
+      const intentLabels = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
       const intentLabel = intentLabels[extracted.intent] || extracted.intent || '—';
       const rows = [
         { label: '当前任务', value: `${extracted.taskName || '—'}（${extracted.stage || '—'}）` },
@@ -5239,6 +5333,7 @@ async function handleProblemDetailChatSend() {
         { label: '意图概括', value: extracted.summary || '—' },
       ];
       if (extracted.intent === 'query' && extracted.queryTarget) rows.push({ label: '查询内容', value: extracted.queryTarget });
+      if (extracted.intent === 'discussion' && extracted.discussionTopic) rows.push({ label: '讨论话题', value: extracted.discussionTopic });
       if (extracted.intent === 'modification' && extracted.modificationTarget) {
         let modVal = extracted.modificationTarget;
         if (extracted.modificationField) modVal += ` → ${extracted.modificationField}`;

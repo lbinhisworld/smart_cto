@@ -2,6 +2,8 @@
 
 本文档整理了项目中所有涉及大模型（DeepSeek）的按钮操作所对应的提示词，便于维护与版本管理。
 
+> 意图类型定义、过程日志提取与显示逻辑详见 [对话模型管理.md](./对话模型管理.md)。
+
 ---
 
 ## 1. 解析数字化问题输入
@@ -318,6 +320,29 @@ ${bmcJson}
 
 # 输出格式
 请直接返回一个 JSON 代码块，结构与输入 value_stream 一致，但在每个 step 中增加 `itStatus` 字段：
+
+```json
+{
+  "stages": [
+    {
+      "name": "阶段名称",
+      "steps": [
+        {
+          "name": "环节名称",
+          "role": "执行角色",
+          "duration": "预估耗时",
+          "itStatus": { "type": "手工", "detail": "纸质" }
+        },
+        {
+          "name": "另一环节",
+          "itStatus": { "type": "系统", "detail": "ERP系统" }
+        }
+      ]
+    }
+  ]
+}
+```
+
 - itStatus.type 只能是 `手工` 或 `系统`
 - itStatus.detail：手工时为 `纸质` 或 `excel`；系统时为具体系统名称
 - 保持原有 stages、steps 结构及 name、role、duration 等字段不变，仅新增 itStatus
@@ -346,6 +371,23 @@ ${bmcJson}
 
 # 输出格式
 请直接返回一个 JSON 代码块，结构与输入 value_stream 一致，但在每个 step 中增加 `painPoint` 字段：
+
+```json
+{
+  "stages": [
+    {
+      "name": "阶段名称",
+      "steps": [
+        {
+          "name": "环节名称",
+          "painPoint": "该环节痛点的提炼概括"
+        }
+      ]
+    }
+  ]
+}
+```
+
 - painPoint 为字符串，提炼当前环节涉及到的痛点
 - 保持原有 stages、steps 结构及 name、role、duration、itStatus 等字段不变，仅新增 painPoint
 ```
@@ -360,7 +402,7 @@ ${bmcJson}
 
 **触发入口**：问题详情页聊天区，用户输入消息后点击发送  
 **函数**：`extractUserIntentFromChat(text, context)`  
-**用途**：提炼用户输入的意图类型（查询/修改/执行），结合沟通历史与页面内容结构定位到具体任务与字段。
+**用途**：提炼用户输入的意图类型（查询/修改/执行/讨论），结合沟通历史与页面内容结构定位到具体任务与字段。
 
 ### System Prompt
 
@@ -375,8 +417,9 @@ ${tasksDesc}
   "taskId": "task1",
   "taskName": "企业背景洞察",
   "stage": "需求理解",
-  "intent": "query" | "modification" | "execute",
+  "intent": "query" | "modification" | "execute" | "discussion",
   "queryTarget": "用户想查询的具体内容，仅当 intent 为 query 时填写",
+  "discussionTopic": "用户想请教或讨论的具体话题，仅当 intent 为 discussion 时填写",
   "queryValueStreamLevel": "step" | "stage" | "card",
   "queryValueStreamTarget": "环节名或阶段名",
   "modificationTarget": "用户想修改的具体内容或目标，仅当 intent 为 modification 时填写",
@@ -399,13 +442,16 @@ ${tasksDesc}
 规则：
 1. 结合【沟通历史】理解对话脉络，从【当前页面内容结构】中搜索与用户输入最为匹配的内容单元（字段名、环节名、阶段名等）。
 2. taskId/taskName/stage：根据用户消息及沟通历史推断当前沟通涉及的任务及阶段，从上述任务列表中选择最相关的。
-3. intent：简单查询(query) / 反馈修改意见(modification) / 执行操作(execute)
-4. 若 intent=query，填写 queryTarget；若涉及价值流图，从【当前页面内容结构】中匹配环节名/阶段名，填写 queryValueStreamLevel 和 queryValueStreamTarget
-5. 若 intent=modification：必须判断 modificationClear。仅当用户明确指定了「把什么改成什么」（具体修改对象+修改后的值）时填 true，否则填 false。
-6. 若 intent=modification 且 modificationClear=true，填写 modificationTarget、modificationField 或 modificationValueStreamTarget。
-7. 若 intent=execute，填写 executeTaskId 和 executeTaskName
-8. summary：用一句话概括用户意图
-9. 只返回 JSON，不要有 markdown 代码块包裹
+3. intent：简单查询(query) / 反馈修改意见(modification) / 执行操作(execute) / 请教讨论(discussion)
+4. 若 intent=discussion：用户针对当前问题的各种专题进行延展性讨论或请教时填写。判断用户讨论话题与哪个任务最为相关，填写 taskId；填写 discussionTopic 概括讨论话题。
+5. 若 intent=query，填写 queryTarget；若涉及价值流图，从【当前页面内容结构】中匹配环节名/阶段名，填写 queryValueStreamLevel 和 queryValueStreamTarget
+6. 若 intent=modification：必须判断 modificationClear。仅当用户明确指定了「把什么改成什么」（具体修改对象+修改后的值）时填 true，否则填 false。若用户只说「想修改」「改一下」等未明确具体内容，填 false。modificationNewValue 仅当 modificationClear 为 true 时填写用户希望修改成的具体内容。
+7. 若 intent=modification 且 modificationClear=true，填写 modificationTarget、modificationField 或 modificationValueStreamTarget；从【当前页面内容结构】中匹配最具体的字段名/环节名/阶段名。
+8. 若涉及价值流图：从【当前页面内容结构】的价值流阶段与环节中精确匹配，modificationValueStreamLevel 填 step/stage/card，modificationValueStreamTarget 填匹配到的环节名或阶段名（必须与结构中出现的名称一致）
+9. 若 intent=execute，填写 executeTaskId 和 executeTaskName。当用户说「重新进行需求逻辑构建」「重新构建需求逻辑」等时，intent=execute，executeTaskId=task3
+10. summary：用一句话概括用户意图
+11. 若无法明确推断，相关字段可填空字符串或合理默认值
+12. 只返回 JSON，不要有 markdown 代码块包裹
 ```
 
 ### User Message 模板
@@ -421,6 +467,7 @@ ${context}
 ### 业务规则
 
 - **查询意图不入沟通历史**：当 intent 为 query 时，客户的查询内容及系统返回的意图卡片均不纳入数字化问题的沟通历史。
+- **讨论意图不入沟通历史**：当 intent 为 discussion 时，意图卡片本身不纳入，用户消息与系统回复已单独处理。
 - **意图卡片元信息**：所有意图提炼内容块下方均展示模型、消耗 token、耗时。
 
 ---
@@ -455,6 +502,113 @@ ${queryReq}
 
 ---
 
+## 11. 讨论意图执行
+
+**触发入口**：问题详情页聊天区，用户对「讨论请教」意图卡片点击「确认」  
+**函数**：`executeDiscussionIntent(extracted, item, userText)`  
+**用途**：将用户讨论问题及沟通历史上下文发往大模型，返回专业解答；讨论归入对应任务的沟通历史。
+
+### System Prompt
+
+```
+你是一位数字化问题跟进顾问。用户针对当前数字化问题的某个专题进行延展性讨论或请教。请结合【沟通历史】的完整上下文，对用户的问题进行专业、深入的解答或讨论。可以结合行业经验、最佳实践给出建议，保持友好、专业的对话风格。
+```
+
+### User Message 模板
+
+```
+【沟通历史】
+${commHistory}
+
+【用户讨论/请教】
+${topic}
+```
+
+其中 `commHistory` 由 `buildCommunicationHistoryTextForQuery()` 构建，`topic` 取自 `extracted.discussionTopic` 或 `extracted.summary` 或 `userText`。
+
+### 展示规则
+
+- 讨论回复反馈到聊天区，下方备注：模型型号、消耗 token、耗时（ms）。
+- 讨论内容纳入对应任务的沟通历史。
+
+---
+
+## 12. 价值流图修改解析
+
+**触发入口**：问题详情页，用户确认「反馈修改意见」意图卡片且修改目标为价值流图（task4/task5/task6）时  
+**函数**：`parseValueStreamModificationIntent(extracted, vsStructure)`  
+**用途**：分析用户对价值流图的修改意图，拆分为多条独立更新（JSON 数组），每条对应一个具体位置。
+
+### System Prompt
+
+```
+你是一位数字化问题跟进助手。用户希望对价值流图进行修改。请分析修改意图，若涉及多个位置（如：订单合并与生产需求分析两个环节的 IT 现状和痛点都需修改），必须拆分为多条独立更新，每条更新对应一个具体位置，分别修改，不要将多个位置的修改合并到其中一处。
+
+【价值流当前结构】
+${vsStructure}
+
+【输出格式】只返回 JSON 数组，不要有其他内容。每个元素：
+{ "stageName": "阶段名称（必须与上面结构中的阶段名一致）", "stepName": "环节名称（必须与上面结构中的环节名一致）", "field": "itStatus"|"painPoint"|"name", "newContent": "该位置的新内容" }
+
+- field 为 itStatus 时，newContent 格式如「手工-excel」或「系统-ERP」
+- field 为 painPoint 时，newContent 为该环节的痛点描述文案
+- field 为 name 时，newContent 为环节名称
+- 若修改阶段名称，stepName 填空字符串，field 填 "stageName"，newContent 为新阶段名
+
+规则：每个需要修改的位置单独一条；同一环节的 itStatus 与 painPoint 若都需修改，分两条；不同环节的修改必须分条。
+```
+
+### User Message 模板
+
+```
+【修改意图】
+${modificationTarget}
+${modificationField ? '修改字段：' + modificationField : ''}
+${modificationNewValue ? '用户希望改为：' + modificationNewValue : ''}
+${summary ? '意图概括：' + summary : ''}
+
+请分析并返回需更新的位置列表（JSON 数组）。
+```
+
+---
+
+## 13. 工作区内容修改
+
+**触发入口**：问题详情页，用户确认「反馈修改意见」意图卡片且 modificationClear=true 时  
+**函数**：`executeModificationIntent(extracted, positionInfo)`  
+**用途**：根据修改意见与当前位置的现有内容，综合处理形成新的内容（基本信息、BMC、需求逻辑、价值流环节字段等）。
+
+### System Prompt
+
+```
+你是一位数字化问题跟进助手。用户希望对工作区某处内容进行修改。请根据【修改意见】和【当前位置的现有内容】，综合处理形成新的内容。
+
+要求：
+1. 新内容应满足用户的修改意图，同时保持与上下文一致；
+2. 若用户已明确给出修改后的值（modificationNewValue），可优先采纳，并做必要的润色或补充；
+3. 只返回修改后的新内容本身，不要包含解释、说明或 markdown 代码块；
+4. 若为 JSON 字段，返回合法的 JSON 字符串；若为普通文本，返回纯文本。
+```
+
+（当修改类型为价值流环节的 itStatus/painPoint/name 时，会动态追加：只返回该字段的新内容，如「手工-excel」「系统-ERP」或痛点文案等。）
+
+### User Message 模板
+
+```
+【修改位置】
+${positionDesc}
+
+【修改意见】
+修改目标：${modificationTarget}
+${modificationField ? '修改字段：' + modificationField : ''}
+${modificationNewValue ? '用户希望改为：' + modificationNewValue : ''}
+
+【当前位置的现有内容】
+${currentContent || '(空)'}
+```
+
+---
+
 ## 附录：API 配置与通用规则
 
 ### API 配置
@@ -464,5 +618,5 @@ ${queryReq}
 
 ### 通用规则
 
-- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、BMC 生成、IT 现状标注、痛点标注、价值流图生成等。
+- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、讨论回复、BMC 生成、IT 现状标注、痛点标注、价值流图生成、工作区内容修改等。
 - **聊天内容 Markdown 渲染**：聊天框内容块（用户消息、系统回复、查询结果等）自动渲染 Markdown 格式，使用 marked + DOMPurify 解析与安全过滤。
