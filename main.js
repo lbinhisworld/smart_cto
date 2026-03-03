@@ -9,6 +9,7 @@ const STORAGE_KEY = 'company_analyses';
 const DIGITAL_PROBLEMS_STORAGE_KEY = 'digital_problem_followups';
 const PROBLEM_DETAIL_CHATS_STORAGE_KEY = 'problem_detail_chats';
 const TASK_TRACKING_STORAGE_KEY = 'digital_problem_task_tracking';
+const ROUTE_STORAGE_KEY = 'app_route_state';
 
 /** 数字化问题跟进任务定义 */
 const FOLLOW_TASKS = [
@@ -19,6 +20,9 @@ const FOLLOW_TASKS = [
   { id: 'task5', name: 'IT 现状标注', stage: '工作流对齐', objective: '结合需求逻辑，在价值流图每个环节节点标注该环节的 IT 支撑方式（手工/系统），区分纸质、excel 或具体系统名称。', evaluationCriteria: '每个环节均标注 itStatus，用户确认后视为完成。' },
   { id: 'task6', name: '痛点标注', stage: '工作流对齐', objective: '结合需求逻辑，在价值流图每个环节节点提炼该环节涉及到的痛点，为后续 IT Gap 分析提供输入。', evaluationCriteria: '每个环节均标注 painPoint（无明显痛点的环节不展示卡片），用户确认后视为完成。' },
 ];
+
+/** 聊天区删除按钮图标（白色垃圾桶） */
+const DELETE_CHAT_MSG_ICON = '<svg class="icon-trash" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
 
 /** DeepSeek 大模型配置：请在 main.js 中设置你的 API Key，或通过环境变量/配置注入 */
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -979,6 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     console.warn('[DOMContentLoaded] btnValueStreamList 未找到，无法绑定点击事件');
   }
+  restoreRouteState();
 });
 
 function updateSearchSuggestions() {
@@ -1065,6 +1070,51 @@ function saveCurrent() {
   saveAnalysis(record);
   showError('');
   alert('已存储成功');
+}
+
+function saveRouteState(view, params) {
+  try {
+    sessionStorage.setItem(ROUTE_STORAGE_KEY, JSON.stringify({ view, params: params || {} }));
+  } catch (_) {}
+}
+
+function restoreRouteState() {
+  try {
+    const raw = sessionStorage.getItem(ROUTE_STORAGE_KEY);
+    if (!raw) return;
+    const { view, params } = JSON.parse(raw);
+    if (view === 'problemDetail' && params.createdAt) {
+      const list = getDigitalProblems();
+      const item = list.find((p) => String(p.createdAt) === String(params.createdAt));
+      if (item) {
+        openProblemDetail(item);
+        return;
+      }
+    }
+    if (view === 'taskTracking' && params.createdAt) {
+      const list = getDigitalProblems();
+      const item = list.find((p) => String(p.createdAt) === String(params.createdAt));
+      if (item) {
+        openTaskTracking(item);
+        return;
+      }
+    }
+    if (view === 'detail' && params.companyName) {
+      const list = getSavedAnalyses();
+      const record = list.find((r) => (r.companyName || '').trim() === (params.companyName || '').trim());
+      if (record) {
+        openDetail(record);
+        return;
+      }
+    }
+    if (view === 'canvas') {
+      switchView('canvas');
+    }
+    if (view === 'list') {
+      renderSavedList();
+      switchView('list');
+    }
+  } catch (_) {}
 }
 
 function switchView(view) {
@@ -1411,6 +1461,7 @@ function openDetail(record) {
   record.chatHistory = chatHistory;
   el.detailTitle.textContent = record.companyName || '客户详情';
   el.detailResult.innerHTML = buildDetailHTML(record);
+  saveRouteState('detail', { companyName: record.companyName });
   switchView('detail');
   setupDetailValueStreamEvents();
   renderChatMessagesFromHistory();
@@ -1580,12 +1631,14 @@ if (el.problemFollowListContent) {
 }
 if (el.btnProblemDetailBack) {
   el.btnProblemDetailBack.addEventListener('click', () => {
+    saveRouteState('home');
     switchView('home');
     renderProblemFollowList();
   });
 }
 if (el.btnTaskTrackingBack) {
   el.btnTaskTrackingBack.addEventListener('click', () => {
+    saveRouteState('home');
     switchView('home');
     renderProblemFollowList();
   });
@@ -1891,12 +1944,14 @@ if (el.problemDetailChatMessages) {
 }
 if (el.btnHome) el.btnHome.addEventListener('click', () => {
   saveChatToRecord();
+  saveRouteState('home');
   switchView('home');
   renderProblemFollowList();
   if (el.searchSuggestions) { el.searchSuggestions.hidden = true; el.searchSuggestions.innerHTML = ''; }
 });
 if (el.btnCanvas) el.btnCanvas.addEventListener('click', () => {
   saveChatToRecord();
+  saveRouteState('canvas');
   switchView('canvas');
   const record = currentDetailRecord;
   const queryData = lastQueryResult;
@@ -1929,6 +1984,7 @@ if (el.btnCanvas) el.btnCanvas.addEventListener('click', () => {
 });
 if (el.btnList) el.btnList.addEventListener('click', () => {
   saveChatToRecord();
+  saveRouteState('list');
   renderSavedList();
   switchView('list');
 });
@@ -3010,6 +3066,7 @@ function openTaskTracking(item) {
   if (el.taskTrackingDetail) {
     el.taskTrackingDetail.innerHTML = '<p class="task-tracking-detail-placeholder">请从左侧选择任务查看详情</p>';
   }
+  saveRouteState('taskTracking', { createdAt });
   switchView('taskTracking');
 }
 
@@ -3141,6 +3198,7 @@ function openProblemDetail(item) {
   renderProblemDetailContent();
   initProblemDetailChat();
   toggleProblemDetailHistory(false);
+  saveRouteState('problemDetail', { createdAt: item.createdAt });
   switchView('problemDetail');
 }
 
@@ -3459,7 +3517,7 @@ function maybeShowPainPointStartBlock() {
   block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-pain-point-start problem-detail-chat-msg-with-delete';
   block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
   block.innerHTML = `
-    <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
     <div class="problem-detail-chat-msg-content-wrap">
       <div class="problem-detail-chat-msg-content">即将开始价值流图环节节点痛点标注</div>
       <div class="problem-detail-chat-pain-point-start-actions">
@@ -3684,7 +3742,7 @@ async function runValueStreamGeneration() {
     cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
     const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
     cardBlock.innerHTML = `
-      <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+      <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
       <div class="problem-detail-chat-value-stream-card-wrap">
         <div class="problem-detail-chat-value-stream-card-header">价值流图设计 JSON</div>
         <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
@@ -3717,7 +3775,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       block.dataset.msgIndex = String(idx);
       const confirmed = !!msg.confirmed;
       block.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-msg-content-wrap">
           <div class="problem-detail-chat-msg-content">我即将开始提取需求逻辑</div>
           <div class="problem-detail-chat-requirement-logic-start-actions">
@@ -3771,7 +3829,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       block.dataset.msgIndex = String(idx);
       const confirmed = !!msg.confirmed;
       block.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-msg-content-wrap">
           <div class="problem-detail-chat-msg-content">即将开始价值流图环节节点痛点标注</div>
           <div class="problem-detail-chat-pain-point-start-actions">
@@ -3787,7 +3845,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       block.dataset.msgIndex = String(idx);
       const confirmed = !!msg.confirmed;
       block.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-msg-content-wrap">
           <div class="problem-detail-chat-msg-content">我即将开始需求相关核心价值流图绘制</div>
           <div class="problem-detail-chat-value-stream-start-actions">
@@ -3803,7 +3861,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       block.dataset.msgIndex = String(idx);
       const confirmed = !!msg.confirmed;
       block.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-msg-content-wrap">
           <div class="problem-detail-chat-msg-content">我将发起商业模式画布 BMC 生成</div>
           <div class="problem-detail-chat-bmc-start-actions">
@@ -3826,7 +3884,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       const industryInsight = (data.industry_insight || '').trim() || '—';
       const painPoints = (data.pain_points || '').trim() || '—';
       cardBlock.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-bmc-card" role="button" tabindex="0">
           <div class="problem-detail-bmc-card-body">
             ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
@@ -3856,7 +3914,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible problem-detail-chat-msg-with-delete problem-detail-chat-requirement-logic-card';
       cardBlock.dataset.msgIndex = String(idx);
       cardBlock.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-basic-info-card" role="button" tabindex="0">
           <div class="problem-detail-basic-info-card-body">${rows}</div>
           <div class="problem-detail-basic-info-card-actions">
@@ -3890,7 +3948,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       cardBlock.dataset.msgIndex = String(idx);
       const jsonStr = escapeHtml(JSON.stringify(data, null, 2));
       cardBlock.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-value-stream-card-wrap">
           <div class="problem-detail-chat-value-stream-card-header">价值流图设计 JSON</div>
           <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
@@ -3904,7 +3962,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       const jsonBlock = document.createElement('div');
       jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible problem-detail-chat-msg-with-delete';
       jsonBlock.dataset.msgIndex = String(idx);
-      jsonBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button><div class="problem-detail-chat-json-wrap" role="button" tabindex="0"><pre class="problem-detail-chat-json-pre">${escapeHtml(JSON.stringify(msg.json || {}, null, 2))}</pre></div><div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      jsonBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-chat-json-wrap" role="button" tabindex="0"><pre class="problem-detail-chat-json-pre">${escapeHtml(JSON.stringify(msg.json || {}, null, 2))}</pre></div><div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(jsonBlock);
       setupProblemDetailJsonBlockToggle(jsonBlock);
     } else if (msg.type === 'basicInfoCard') {
@@ -3930,7 +3988,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       }).join('');
       const confirmed = !!msg.confirmed;
       cardBlock.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-basic-info-card" role="button" tabindex="0">
           <div class="problem-detail-basic-info-card-body">${rows}</div>
           <div class="problem-detail-basic-info-card-actions">
@@ -3952,7 +4010,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
       block.className = `problem-detail-chat-msg problem-detail-chat-msg-${msg.role}${collapsibleClass} problem-detail-chat-msg-with-delete`;
       block.dataset.msgIndex = String(idx);
-      block.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">❌</button>${innerHtml}<div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
+      block.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>${innerHtml}<div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(block);
       if (msg.role === 'user') setupProblemDetailChatTextToggle(block);
     }
