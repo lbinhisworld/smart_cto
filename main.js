@@ -10,6 +10,7 @@ const DIGITAL_PROBLEMS_STORAGE_KEY = 'digital_problem_followups';
 const PROBLEM_DETAIL_CHATS_STORAGE_KEY = 'problem_detail_chats';
 const TASK_TRACKING_STORAGE_KEY = 'digital_problem_task_tracking';
 const ROUTE_STORAGE_KEY = 'app_route_state';
+const OPERATION_HISTORY_STORAGE_KEY = 'digital_problem_operation_history';
 
 /** 数字化问题跟进任务定义 */
 const FOLLOW_TASKS = [
@@ -100,6 +101,7 @@ const el = {
   problemDetailChatSend: document.getElementById('problemDetailChatSend'),
   btnProblemDetailBack: document.getElementById('btnProblemDetailBack'),
   problemDetailBody: document.getElementById('problemDetailBody'),
+  btnProblemDetailRollback: document.getElementById('btnProblemDetailRollback'),
   btnProblemDetailHistory: document.getElementById('btnProblemDetailHistory'),
   problemDetailHistoryPanel: document.getElementById('problemDetailHistoryPanel'),
   btnCloseProblemDetailHistory: document.getElementById('btnCloseProblemDetailHistory'),
@@ -1633,6 +1635,10 @@ if (el.problemFollowListContent) {
       e.stopPropagation();
       const index = parseInt(delBtn.getAttribute('data-index'), 10);
       if (!Number.isNaN(index)) {
+        const list = getDigitalProblems();
+        const item = list[index];
+        const name = (item?.customerName ?? item?.customer_name ?? '').trim() || '该客户';
+        if (!confirm(`确定要删除「${name}」的数字化问题档案吗？此操作不可恢复。`)) return;
         removeDigitalProblem(index);
         renderProblemFollowList();
       }
@@ -1694,6 +1700,45 @@ if (el.problemDetailView) {
 }
 if (el.btnProblemDetailHistory) {
   el.btnProblemDetailHistory.addEventListener('click', () => toggleProblemDetailHistory(true));
+}
+if (el.btnProblemDetailRollback) {
+  el.btnProblemDetailRollback.addEventListener('click', () => {
+    const item = currentProblemDetailItem;
+    if (!item?.createdAt) return;
+    const entry = popOperationFromHistory(item.createdAt);
+    if (!entry) {
+      alert('暂无可回退的操作');
+      return;
+    }
+    const { snapshot, chatLengthBefore } = entry;
+    restoreItemFromSnapshot(item.createdAt, snapshot);
+    problemDetailConfirmedBasicInfo = snapshot.basicInfo || null;
+    currentProblemDetailItem = { ...snapshot, createdAt: item.createdAt };
+    const chats = getProblemDetailChats();
+    const messages = chats[item.createdAt];
+    if (Array.isArray(messages) && chatLengthBefore >= 0 && chatLengthBefore < messages.length) {
+      const truncated = messages.slice(0, chatLengthBefore);
+      chats[item.createdAt] = truncated;
+      localStorage.setItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY, JSON.stringify(chats));
+      problemDetailChatMessages.length = 0;
+      truncated.forEach((m) => problemDetailChatMessages.push(m));
+    }
+    renderProblemDetailContent();
+    const container = el.problemDetailChatMessages;
+    if (container) {
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+    }
+    el.problemDetailContent?.querySelectorAll('.modify-target-highlight').forEach((node) => node.classList.remove('modify-target-highlight'));
+    requestAnimationFrame(() => {
+      maybeShowBmcStartBlock();
+      maybeShowRequirementLogicStartBlock();
+      maybeShowValueStreamStartBlock();
+      maybeShowItStatusStartBlock();
+      maybeShowPainPointStartBlock();
+    });
+  });
 }
 if (el.btnCloseProblemDetailHistory) {
   el.btnCloseProblemDetailHistory.addEventListener('click', () => toggleProblemDetailHistory(false));
@@ -1878,6 +1923,7 @@ if (el.problemDetailChatMessages) {
         const valueStream = JSON.parse(drawValueStreamBtn.dataset.json);
         const item = currentProblemDetailItem;
         if (item?.createdAt) {
+          pushOperationToHistory(item.createdAt, 'valueStreamDraw', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
           updateDigitalProblemValueStream(item.createdAt, valueStream);
           currentProblemDetailItem = { ...item, valueStream, workflowAlignCompletedStages: [...(item.workflowAlignCompletedStages || []).filter((x) => x !== 0), 0].sort((a, b) => a - b) };
         }
@@ -1990,9 +2036,82 @@ if (el.problemDetailChatMessages) {
         }
         const isBasicInfoMod = extracted.intent === 'modification' && extracted.modificationTarget && (String(extracted.modificationTarget).includes('企业基本信息') || String(extracted.modificationTarget).includes('基本信息'));
         const isBasicInfoProvide = (extracted.intent === 'modification' || extracted.taskId === 'task1') && !problemDetailConfirmedBasicInfo;
+        const isModificationWithLlm = extracted.intent === 'modification' && extracted.modificationClear === true && !isBasicInfoProvide;
+        if (isModificationWithLlm) {
+          const item = currentProblemDetailItem;
+          const container = el.problemDetailChatMessages;
+          const workspaceContainer = el.problemDetailContent;
+          const taskId = extracted.taskId || '';
+          const modTarget = String(extracted.modificationTarget || '');
+          const isValueStreamMod = ['task4', 'task5', 'task6'].includes(taskId) || modTarget.includes('价值流') || modTarget.includes('环节') || modTarget.includes('痛点') || modTarget.includes('IT现状');
+          const parsingBlock = document.createElement('div');
+          parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+          parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在综合修改…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+          container?.appendChild(parsingBlock);
+          container.scrollTop = container.scrollHeight;
+          requestAnimationFrame(async () => {
+            try {
+              let applied = false;
+              let usage = {};
+              let model = DEEPSEEK_MODEL;
+              let durationMs = 0;
+              let positionDesc = '';
+              if (isValueStreamMod && item?.valueStream && !item.valueStream.raw) {
+                const multiResult = await analyzeMultiModificationForValueStream(extracted, item);
+                if (multiResult && multiResult.updates.length > 0) {
+                  parsingBlock.remove();
+                  pushOperationToHistory(item.createdAt, 'modification', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
+                  applied = applyValueStreamUpdates(item, multiResult.updates);
+                  usage = multiResult.usage || {};
+                  model = multiResult.model || DEEPSEEK_MODEL;
+                  durationMs = multiResult.durationMs || 0;
+                  positionDesc = `价值流 ${multiResult.updates.length} 处已分别更新`;
+                }
+              }
+              if (!applied) {
+                const positionInfo = getCurrentContentAtModificationTarget(extracted, item);
+                if (positionInfo) {
+                  if (!parsingBlock.parentNode) container?.appendChild(parsingBlock);
+                  const singleResult = await executeModificationIntent(extracted, positionInfo);
+                  parsingBlock.remove();
+                  pushOperationToHistory(item.createdAt, 'modification', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
+                  applied = applyModificationToWorkspace(extracted, singleResult.newContent, positionInfo, item);
+                  usage = singleResult.usage || {};
+                  model = singleResult.model || DEEPSEEK_MODEL;
+                  durationMs = singleResult.durationMs || 0;
+                  positionDesc = positionInfo.positionDesc;
+                } else {
+                  parsingBlock.remove();
+                }
+              }
+              if (applied) {
+                renderProblemDetailContent();
+                workspaceContainer?.querySelectorAll('.modify-target-highlight').forEach((node) => node.classList.remove('modify-target-highlight'));
+                const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+                const doneBlock = document.createElement('div');
+                doneBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsed';
+                doneBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">修改已应用：${escapeHtml(positionDesc)}</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
+                container?.appendChild(doneBlock);
+                pushAndSaveProblemDetailChat({ role: 'system', content: '修改已应用：' + positionDesc, timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
+              } else {
+                const errBlock = document.createElement('div');
+                errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+                errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">修改应用失败：无法更新目标位置</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+                container?.appendChild(errBlock);
+                pushAndSaveProblemDetailChat({ role: 'system', content: '修改应用失败：无法更新目标位置', timestamp: getTimeStr() });
+              }
+              container.scrollTop = container.scrollHeight;
+            } catch (err) {
+                parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
+                parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">修改失败：${escapeHtml(err.message || String(err))}</div>`;
+                pushAndSaveProblemDetailChat({ role: 'system', content: '修改失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+              }
+            });
+        }
         const lastUserMsg = problemDetailChatMessages.filter((m) => m.role === 'user').pop();
         const textToParse = (userText || lastUserMsg?.content || '').trim();
-        if ((isBasicInfoMod || isBasicInfoProvide) && textToParse) {
+        const useBasicInfoParseFlow = (isBasicInfoMod || isBasicInfoProvide) && textToParse && (isBasicInfoProvide || extracted.modificationClear !== true);
+        if (useBasicInfoParseFlow) {
           const item = currentProblemDetailItem;
           requestAnimationFrame(async () => {
             try {
@@ -2553,6 +2672,383 @@ async function executeQueryIntent(extracted, item) {
   return { content: (content || '').trim() || '（无返回内容）', usage, model, durationMs };
 }
 
+/** 标签到初步需求字段的映射 */
+const PRELIMINARY_LABEL_TO_KEY = {
+  客户名称: 'customerName',
+  客户需求或挑战: 'customerNeedsOrChallenges',
+  客户IT现状: 'customerItStatus',
+  项目时间要求: 'projectTimeRequirement',
+};
+
+/** 标签到基本信息字段的映射 */
+const BASIC_INFO_LABEL_TO_KEY = {
+  公司名称: 'company_name',
+  信用代码: 'credit_code',
+  法人: 'legal_representative',
+  成立时间: 'established_date',
+  注册资本: 'registered_capital',
+  是否上市: 'is_listed',
+  上市地: 'listing_location',
+  经营范围: 'business_scope',
+  核心资质: 'core_qualifications',
+  官方网站: 'official_website',
+};
+
+/** 获取修改目标位置的当前内容，返回 { taskId, fieldKey, currentContent, positionDesc } 或 null */
+function getCurrentContentAtModificationTarget(extracted, item) {
+  const taskId = extracted.taskId || 'task1';
+  const modField = String(extracted.modificationField || '').trim();
+  const modTarget = String(extracted.modificationTarget || '').trim();
+  const vsLevel = String(extracted.modificationValueStreamLevel || '').toLowerCase();
+  const vsTarget = String(extracted.modificationValueStreamTarget || '').trim();
+
+  if (taskId === 'task1' || modTarget.includes('企业基本信息') || modTarget.includes('基本信息')) {
+    const basicInfo = problemDetailConfirmedBasicInfo || item?.basicInfo || {};
+    const fieldKey = modField ? (BASIC_INFO_LABEL_TO_KEY[modField] || modField) : null;
+    if (fieldKey && basicInfo[fieldKey] != null) {
+      return { taskId: 'task1', fieldKey, currentContent: String(basicInfo[fieldKey]).trim(), positionDesc: `客户基本信息 - ${modField || fieldKey}` };
+    }
+    return { taskId: 'task1', fieldKey: null, currentContent: JSON.stringify(basicInfo, null, 2), positionDesc: '客户基本信息（整块）' };
+  }
+
+  if (taskId === 'task2' || modTarget.includes('bmc') || modTarget.includes('商业画布') || modTarget.includes('商业模式')) {
+    const bmc = item?.bmc || {};
+    const bmcField = BMC_FIELDS.find((f) => f.label === modField);
+    const industryInsight = modField === '行业背景洞察';
+    const painPoints = modField === '业务痛点预判';
+    if (bmcField) {
+      const val = bmc[bmcField.key];
+      return { taskId: 'task2', fieldKey: bmcField.key, currentContent: val != null ? String(val).trim() : '', positionDesc: `BMC - ${modField}` };
+    }
+    if (industryInsight) return { taskId: 'task2', fieldKey: 'industry_insight', currentContent: (bmc.industry_insight || '').trim(), positionDesc: 'BMC - 行业背景洞察' };
+    if (painPoints) return { taskId: 'task2', fieldKey: 'pain_points', currentContent: (bmc.pain_points || '').trim(), positionDesc: 'BMC - 业务痛点预判' };
+    return { taskId: 'task2', fieldKey: null, currentContent: JSON.stringify(bmc, null, 2), positionDesc: 'BMC（整块）' };
+  }
+
+  if (taskId === 'task3' || modTarget.includes('需求逻辑')) {
+    const logic = item?.requirementLogic || '';
+    const parsed = typeof logic === 'string' ? parseRequirementLogicFromMarkdown(logic) : logic;
+    const section = REQUIREMENT_LOGIC_SECTIONS.find((s) => s.label === modField);
+    if (section) {
+      const val = (parsed[section.key] || '').trim();
+      return { taskId: 'task3', fieldKey: section.key, currentContent: val, positionDesc: `需求逻辑 - ${modField}` };
+    }
+    return { taskId: 'task3', fieldKey: null, currentContent: typeof logic === 'string' ? logic : JSON.stringify(logic, null, 2), positionDesc: '需求逻辑（整块）' };
+  }
+
+  if (['task4', 'task5', 'task6'].includes(taskId) && item?.valueStream && !item.valueStream.raw) {
+    const vs = item.valueStream;
+    const { stages } = parseValueStreamGraph(vs);
+    const targetName = vsTarget || modField;
+    const modTargetLower = modTarget.toLowerCase();
+    const isPainPointIntent = modTargetLower.includes('痛点') || modField.includes('痛点');
+    const isItStatusIntent = modTargetLower.includes('it现状') || modTargetLower.includes('it 现状') || modField.includes('IT现状');
+    if ((vsLevel === 'step' || (!vsLevel && targetName)) && targetName) {
+      for (let si = 0; si < stages.length; si++) {
+        const stage = stages[si];
+        for (let ji = 0; ji < (stage.steps || []).length; ji++) {
+          const step = stage.steps[ji];
+          const name = (step.name || '').trim();
+          if (name && (name === targetName || name.includes(targetName) || targetName.includes(name))) {
+            let vsStepField;
+            if (isPainPointIntent) vsStepField = 'painPoint';
+            else if (isItStatusIntent) vsStepField = 'itStatus';
+            else vsStepField = step.painPoint ? 'painPoint' : step.itStatusLabel ? 'itStatus' : 'name';
+            const itStatus = step.itStatusLabel || (step.itStatus && typeof step.itStatus === 'object' ? (step.itStatus.type === '手工' ? `手工-${step.itStatus.detail || ''}` : step.itStatus.type === '系统' ? `系统-${step.itStatus.detail || ''}` : '') : '');
+            const content = vsStepField === 'painPoint' ? (step.painPoint || '') : vsStepField === 'itStatus' ? itStatus : step.name || '';
+            const fieldLabel = vsStepField === 'painPoint' ? '痛点描述' : vsStepField === 'itStatus' ? 'IT现状' : '环节名称';
+            return { taskId: 'task4', fieldKey: 'valueStream', currentContent: content, positionDesc: `价值流 - 阶段「${stage.name}」- 环节「${step.name}」的${fieldLabel}`, vsStageIndex: si, vsStepIndex: ji, vsStepField };
+          }
+        }
+      }
+    }
+    if (vsLevel === 'stage' && targetName) {
+      for (let si = 0; si < stages.length; si++) {
+        const stage = stages[si];
+        const name = (stage.name || '').trim();
+        if (name && (name === targetName || name.includes(targetName) || targetName.includes(name))) {
+          return { taskId: 'task4', fieldKey: 'valueStream', currentContent: stage.name || '', positionDesc: `价值流 - 阶段「${stage.name}」的阶段名称`, vsStageIndex: si, vsStepIndex: -1, vsStepField: 'stageName' };
+        }
+      }
+    }
+    return { taskId: 'task4', fieldKey: 'valueStream', currentContent: JSON.stringify(vs, null, 2), positionDesc: '价值流图（整块）' };
+  }
+
+  if (taskId === 'preliminary' || modTarget.includes('初步需求')) {
+    const preKey = modField ? PRELIMINARY_LABEL_TO_KEY[modField] : null;
+    if (preKey && item && item[preKey] != null) {
+      return { taskId: 'preliminary', fieldKey: preKey, currentContent: String(item[preKey]).trim(), positionDesc: `初步需求 - ${modField || preKey}` };
+    }
+    const preContent = {
+      customerName: item?.customerName,
+      customerNeedsOrChallenges: item?.customerNeedsOrChallenges,
+      customerItStatus: item?.customerItStatus,
+      projectTimeRequirement: item?.projectTimeRequirement,
+    };
+    return { taskId: 'preliminary', fieldKey: null, currentContent: JSON.stringify(preContent, null, 2), positionDesc: '初步需求（整块）' };
+  }
+
+  return null;
+}
+
+/** 价值流修改类型对应的说明，用于提示词中明确告知大模型 */
+const VS_STEP_FIELD_LABELS = {
+  painPoint: '环节痛点描述',
+  itStatus: '环节IT现状',
+  name: '环节名称',
+  stageName: '阶段名称',
+};
+
+/** 构建价值流结构描述，供多目标修改分析使用 */
+function buildValueStreamStructureForMultiMod( vs) {
+  if (!vs || vs.raw) return '';
+  const { stages } = parseValueStreamGraph(vs);
+  const lines = stages.map((stage, si) => {
+    const stepLines = (stage.steps || []).map((step, ji) => {
+      const itStatus = step.itStatusLabel || (step.itStatus && typeof step.itStatus === 'object' ? (step.itStatus.type === '手工' ? `手工-${step.itStatus.detail || ''}` : step.itStatus.type === '系统' ? `系统-${step.itStatus.detail || ''}` : '') : '');
+      return `      - 环节「${step.name || ''}」: itStatus=${itStatus || '(空)'}, painPoint=${(step.painPoint || '').trim() || '(空)'}`;
+    }).join('\n');
+    return `  阶段「${stage.name || ''}」:\n${stepLines}`;
+  }).join('\n');
+  return lines;
+}
+
+/** 分析多目标修改意图：当修改涉及价值流多个环节/字段时，由大模型拆分为独立更新项，分别更新对应位置 */
+async function analyzeMultiModificationForValueStream(extracted, item) {
+  const vs = item?.valueStream;
+  if (!vs || vs.raw) return null;
+  const vsStructure = buildValueStreamStructureForMultiMod(vs);
+  const modTarget = extracted.modificationTarget || '';
+  const modField = extracted.modificationField || '';
+  const modNewValue = extracted.modificationNewValue || '';
+  const summary = extracted.summary || '';
+  const systemPrompt = `你是一位数字化问题跟进助手。用户希望对价值流图进行修改。请分析修改意图，若涉及多个位置（如：订单合并与生产需求分析两个环节的 IT 现状和痛点都需修改），必须拆分为多条独立更新，每条更新对应一个具体位置，分别修改，不要将多个位置的修改合并到其中一处。
+
+【价值流当前结构】
+${vsStructure}
+
+【输出格式】只返回 JSON 数组，不要有其他内容。每个元素：
+{ "stageName": "阶段名称（必须与上面结构中的阶段名一致）", "stepName": "环节名称（必须与上面结构中的环节名一致）", "field": "itStatus"|"painPoint"|"name", "newContent": "该位置的新内容" }
+
+- field 为 itStatus 时，newContent 格式如「手工-excel」或「系统-ERP」
+- field 为 painPoint 时，newContent 为该环节的痛点描述文案
+- field 为 name 时，newContent 为环节名称
+- 若修改阶段名称，stepName 填空字符串，field 填 "stageName"，newContent 为新阶段名
+
+规则：每个需要修改的位置单独一条；同一环节的 itStatus 与 painPoint 若都需修改，分两条；不同环节的修改必须分条。`;
+  const userContent = `【修改意图】\n${modTarget}
+${modField ? `修改字段：${modField}` : ''}
+${modNewValue ? `用户希望改为：${modNewValue}` : ''}
+${summary ? `意图概括：${summary}` : ''}
+
+请分析并返回需更新的位置列表（JSON 数组）。`;
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userContent },
+  ]);
+  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return null;
+  try {
+    const updates = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(updates) || updates.length === 0) return null;
+    return { updates, usage, model, durationMs };
+  } catch {
+    return null;
+  }
+}
+
+/** 根据 stageName、stepName 在价值流中查找步骤索引，返回 { vsStageIndex, vsStepIndex } 或 null；stepName 为空时匹配阶段 */
+function findValueStreamStepIndex(vs, stageName, stepName) {
+  const rawStages = vs.stages ?? vs.phases ?? vs.nodes ?? [];
+  for (let si = 0; si < rawStages.length; si++) {
+    const stage = rawStages[si];
+    const sName = (stage.name ?? stage.title ?? stage.stage_name ?? '').toString().trim();
+    if (sName !== stageName) continue;
+    if (!stepName || (typeof stepName === 'string' && !stepName.trim())) {
+      return { vsStageIndex: si, vsStepIndex: -1 };
+    }
+    const rawSteps = stage.steps ?? stage.tasks ?? stage.phases ?? stage.items ?? [];
+    for (let ji = 0; ji < rawSteps.length; ji++) {
+      const step = rawSteps[ji];
+      const stName = (step.name ?? step.title ?? '').toString().trim();
+      if (stName === stepName || (stName && stepName && (stName.includes(stepName) || stepName.includes(stName)))) {
+        return { vsStageIndex: si, vsStepIndex: ji };
+      }
+    }
+  }
+  return null;
+}
+
+/** 将多目标更新列表依次应用到价值流 */
+function applyValueStreamUpdates(item, updates) {
+  const vs = item?.valueStream;
+  if (!vs || vs.raw || !Array.isArray(updates) || updates.length === 0) return false;
+  const createdAt = item?.createdAt;
+  if (!createdAt) return false;
+  let currentVs = { ...vs, stages: JSON.parse(JSON.stringify(vs.stages ?? vs.phases ?? vs.nodes ?? [])) };
+  const rawStages = currentVs.stages;
+  for (const u of updates) {
+    const { stageName, stepName, field, newContent } = u;
+    if (!stageName || !field || newContent == null) continue;
+    const idx = findValueStreamStepIndex({ stages: rawStages }, stageName, (stepName || '').trim());
+    if (!idx) continue;
+    const { vsStageIndex: si, vsStepIndex: ji } = idx;
+    if (si < 0 || si >= rawStages.length) continue;
+    const stage = rawStages[si];
+    const rawSteps = stage.steps ?? stage.tasks ?? stage.phases ?? stage.items ?? [];
+    if (field === 'stageName') {
+      rawStages[si] = { ...stage, name: newContent, title: newContent, stage_name: newContent };
+    } else if (ji >= 0 && ji < rawSteps.length) {
+      const step = rawSteps[ji];
+      const nextStep = typeof step === 'object' && step !== null ? { ...step } : { name: String(step) };
+      if (field === 'painPoint') nextStep.painPoint = nextStep.pain_point = newContent;
+      else if (field === 'itStatus') {
+        const m = String(newContent).match(/^(手工|系统)[-：]?(.*)$/);
+        if (m) nextStep.itStatus = nextStep.it_status = { type: m[1], detail: (m[2] || '').trim() };
+        else nextStep.itStatus = nextStep.it_status = { type: '手工', detail: newContent };
+      } else nextStep.name = nextStep.title = newContent;
+      const newSteps = [...rawSteps];
+      newSteps[ji] = nextStep;
+      rawStages[si] = { ...stage, steps: newSteps };
+    }
+  }
+  updateDigitalProblemValueStream(createdAt, currentVs);
+  currentProblemDetailItem = { ...item, valueStream: currentVs };
+  return true;
+}
+
+/** 执行修改意图：将修改意见及当前位置内容发往大模型，返回新内容及元信息 */
+async function executeModificationIntent(extracted, positionInfo) {
+  const modTarget = extracted.modificationTarget || '';
+  const modField = extracted.modificationField || '';
+  const modNewValue = extracted.modificationNewValue || '';
+  const { currentContent, positionDesc } = positionInfo;
+  const vsStepField = positionInfo.vsStepField;
+  const fieldTypeLabel = vsStepField ? VS_STEP_FIELD_LABELS[vsStepField] : null;
+  const valueStreamFieldHint = fieldTypeLabel
+    ? `\n【重要】本次修改类型为：${fieldTypeLabel}。你只返回该字段的新内容，不要返回其他无关内容。若修改的是痛点描述，只返回痛点文案；若修改的是IT现状，只返回如「手工-excel」或「系统-ERP」格式；若修改的是环节名称，只返回环节名；若修改的是阶段名称，只返回阶段名。`
+    : '';
+  const systemPrompt = `你是一位数字化问题跟进助手。用户希望对工作区某处内容进行修改。请根据【修改意见】和【当前位置的现有内容】，综合处理形成新的内容。
+
+要求：
+1. 新内容应满足用户的修改意图，同时保持与上下文一致；
+2. 若用户已明确给出修改后的值（modificationNewValue），可优先采纳，并做必要的润色或补充；
+3. 只返回修改后的新内容本身，不要包含解释、说明或 markdown 代码块；
+4. 若为 JSON 字段，返回合法的 JSON 字符串；若为普通文本，返回纯文本。${valueStreamFieldHint}`;
+  const userContent = `【修改位置】\n${positionDesc}
+
+【修改意见】\n修改目标：${modTarget}
+${modField ? `修改字段：${modField}` : ''}
+${modNewValue ? `用户希望改为：${modNewValue}` : ''}
+
+【当前位置的现有内容】\n${currentContent || '(空)'}`;
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userContent },
+  ]);
+  return { newContent: (content || '').trim(), usage, model, durationMs };
+}
+
+/** 将修改结果应用到工作区并更新存储 */
+function applyModificationToWorkspace(extracted, newContent, positionInfo, item) {
+  const { taskId, fieldKey } = positionInfo;
+  const createdAt = item?.createdAt;
+  if (!createdAt) return false;
+
+  if (taskId === 'preliminary' && fieldKey) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return false;
+    list[idx] = { ...list[idx], [fieldKey]: newContent };
+    localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+    currentProblemDetailItem = { ...item, [fieldKey]: newContent };
+    return true;
+  }
+
+  if (taskId === 'task1') {
+    let basicInfo = { ...(problemDetailConfirmedBasicInfo || item?.basicInfo || {}) };
+    if (fieldKey) {
+      basicInfo[fieldKey] = newContent;
+    } else {
+      try {
+        const parsed = JSON.parse(newContent);
+        if (parsed && typeof parsed === 'object') basicInfo = { ...basicInfo, ...parsed };
+      } catch (_) {}
+    }
+    problemDetailConfirmedBasicInfo = basicInfo;
+    updateDigitalProblemBasicInfo(createdAt, basicInfo);
+    currentProblemDetailItem = { ...item, basicInfo };
+    return true;
+  }
+
+  if (taskId === 'task2') {
+    let bmc = { ...(item?.bmc || {}) };
+    if (fieldKey) {
+      bmc[fieldKey] = newContent;
+    } else {
+      try {
+        const parsed = JSON.parse(newContent);
+        if (parsed && typeof parsed === 'object') bmc = { ...bmc, ...parsed };
+      } catch (_) {}
+    }
+    updateDigitalProblemBmc(createdAt, bmc);
+    currentProblemDetailItem = { ...item, bmc };
+    return true;
+  }
+
+  if (taskId === 'task3') {
+    let logicStr = item?.requirementLogic || '';
+    const parsed = parseRequirementLogicFromMarkdown(logicStr);
+    if (fieldKey) {
+      parsed[fieldKey] = newContent;
+      logicStr = REQUIREMENT_LOGIC_SECTIONS.map((s) => `## ${s.label}\n\n${(parsed[s.key] || '').trim() || '—'}`).join('\n\n');
+    } else {
+      logicStr = newContent;
+    }
+    updateDigitalProblemRequirementLogic(createdAt, logicStr);
+    currentProblemDetailItem = { ...item, requirementLogic: logicStr };
+    return true;
+  }
+
+  if (taskId === 'task4' && positionInfo.vsStageIndex !== undefined) {
+    const vs = item?.valueStream;
+    if (!vs || vs.raw) return false;
+    const rawStages = vs.stages ?? vs.phases ?? vs.nodes ?? [];
+    const si = positionInfo.vsStageIndex;
+    const ji = positionInfo.vsStepIndex;
+    const field = positionInfo.vsStepField;
+    if (si < 0 || si >= rawStages.length) return false;
+    const stage = rawStages[si];
+    const rawSteps = stage.steps ?? stage.tasks ?? stage.phases ?? stage.items ?? [];
+    if (ji >= 0 && ji < rawSteps.length) {
+      const step = rawSteps[ji];
+      const nextStep = typeof step === 'object' && step !== null ? { ...step } : { name: String(step) };
+      if (field === 'painPoint') nextStep.painPoint = nextStep.pain_point = newContent;
+      else if (field === 'itStatus') {
+        const m = newContent.match(/^(手工|系统)[-：]?(.*)$/);
+        if (m) nextStep.itStatus = nextStep.it_status = { type: m[1], detail: (m[2] || '').trim() };
+        else nextStep.itStatus = nextStep.it_status = { type: '手工', detail: newContent };
+      } else nextStep.name = nextStep.title = newContent;
+      const newSteps = [...rawSteps];
+      newSteps[ji] = nextStep;
+      const newStages = [...rawStages];
+      newStages[si] = { ...stage, steps: newSteps };
+      const newVs = { ...vs, stages: newStages };
+      updateDigitalProblemValueStream(createdAt, newVs);
+      currentProblemDetailItem = { ...item, valueStream: newVs };
+    } else if (field === 'stageName') {
+      const newStages = [...rawStages];
+      newStages[si] = { ...stage, name: newContent, title: newContent, stage_name: newContent };
+      const newVs = { ...vs, stages: newStages };
+      updateDigitalProblemValueStream(createdAt, newVs);
+      currentProblemDetailItem = { ...item, valueStream: newVs };
+    } else return false;
+    return true;
+  }
+
+  return false;
+}
+
 /** 提炼客户聊天输入的意图：当前任务、阶段、意图类型及具体内容；结合沟通历史搜索最匹配的内容单元并协助定位 */
 async function extractUserIntentFromChat(text, context) {
   const tasksDesc = FOLLOW_TASKS.map((t) => `- ${t.id}: ${t.name}（${t.stage}）`).join('\n');
@@ -2595,7 +3091,7 @@ ${tasksDesc}
 5. 若 intent=modification：必须判断 modificationClear。仅当用户明确指定了「把什么改成什么」（具体修改对象+修改后的值）时填 true，否则填 false。若用户只说「想修改」「改一下」等未明确具体内容，填 false。modificationNewValue 仅当 modificationClear 为 true 时填写用户希望修改成的具体内容。
 6. 若 intent=modification 且 modificationClear=true，填写 modificationTarget、modificationField 或 modificationValueStreamTarget；从【当前页面内容结构】中匹配最具体的字段名/环节名/阶段名。
 7. 若涉及价值流图：从【当前页面内容结构】的价值流阶段与环节中精确匹配，modificationValueStreamLevel 填 step/stage/card，modificationValueStreamTarget 填匹配到的环节名或阶段名（必须与结构中出现的名称一致）
-8. 若 intent=execute，填写 executeTaskId 和 executeTaskName
+8. 若 intent=execute，填写 executeTaskId 和 executeTaskName。当用户说「重新进行需求逻辑构建」「重新构建需求逻辑」等时，intent=execute，executeTaskId=task3
 9. summary：用一句话概括用户意图
 10. 若无法明确推断，相关字段可填空字符串或合理默认值
 11. 只返回 JSON，不要有 markdown 代码块包裹`;
@@ -3246,6 +3742,41 @@ function saveProblemDetailChat(createdAt, messages) {
   localStorage.setItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY, JSON.stringify(chats));
 }
 
+function getOperationHistory() {
+  try {
+    const raw = localStorage.getItem(OPERATION_HISTORY_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function pushOperationToHistory(createdAt, type, snapshot, chatLengthBefore) {
+  const all = getOperationHistory();
+  if (!all[createdAt]) all[createdAt] = [];
+  all[createdAt].push({ type, timestamp: Date.now(), snapshot, chatLengthBefore });
+  localStorage.setItem(OPERATION_HISTORY_STORAGE_KEY, JSON.stringify(all));
+}
+
+function popOperationFromHistory(createdAt) {
+  const all = getOperationHistory();
+  const stack = all[createdAt];
+  if (!Array.isArray(stack) || stack.length === 0) return null;
+  const entry = stack.pop();
+  all[createdAt] = stack;
+  localStorage.setItem(OPERATION_HISTORY_STORAGE_KEY, JSON.stringify(all));
+  return entry;
+}
+
+/** 将快照还原到数字化问题列表 */
+function restoreItemFromSnapshot(createdAt, snapshot) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  list[idx] = { ...snapshot, createdAt };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
 function getTaskTrackingData() {
   try {
     const raw = localStorage.getItem(TASK_TRACKING_STORAGE_KEY);
@@ -3323,6 +3854,24 @@ function getCommunicationsByTask(createdAt) {
     lastUserComm = msg.role === 'user' ? { task: currentTask, entry } : null;
   }
   return byTask;
+}
+
+/** 将沟通记录扁平化为按时间排序的时间线数组，供时间线视图使用 */
+function getCommunicationsAsTimeline(createdAt) {
+  const byTask = getCommunicationsByTask(createdAt);
+  const flat = [];
+  FOLLOW_TASKS.forEach((task) => {
+    const comms = byTask[task.id] || [];
+    comms.forEach((c) => {
+      flat.push({ ...c, taskId: task.id, taskName: task.name });
+    });
+  });
+  flat.sort((a, b) => {
+    const ta = (a.time && new Date(a.time).getTime()) || 0;
+    const tb = (b.time && new Date(b.time).getTime()) || 0;
+    return ta - tb;
+  });
+  return flat;
 }
 
 /** 判断任务是否已完成（基于 problem 状态） */
@@ -3528,58 +4077,48 @@ function renderProblemDetailHistory() {
   if (!container) return;
   const item = currentProblemDetailItem;
   const createdAt = item?.createdAt;
-  const trackingData = createdAt ? (getTaskTrackingData()[createdAt] || {}) : {};
-  const communications = createdAt ? getCommunicationsByTask(createdAt) : {};
-  container.innerHTML = FOLLOW_TASKS.map((task) => {
-    const taskData = trackingData[task.id] || {};
-    const objective = (taskData.objective ?? task.objective) || '—';
-    const evaluationCriteria = (taskData.evaluationCriteria ?? task.evaluationCriteria) || '—';
-    const comms = communications[task.id] || [];
-    const commCount = comms.length;
-    const commsHtml = comms.length === 0
-      ? '<p class="problem-detail-history-comm-empty" style="margin:0.5rem 1rem;font-size:0.8rem;color:var(--text-muted)">暂无沟通记录</p>'
-      : comms.map((c) => {
-          const timeStr = c.time ? formatChatTime(c.time) : '—';
-          const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
-          return `
-            <div class="problem-detail-history-comm-item">
-              <div class="problem-detail-history-comm-meta">
+  const timeline = createdAt ? getCommunicationsAsTimeline(createdAt) : [];
+  if (timeline.length === 0) {
+    container.innerHTML = '<p class="problem-detail-history-timeline-empty">暂无沟通过程记录</p>';
+    return;
+  }
+  container.innerHTML = `
+    <div class="problem-detail-history-timeline">
+      ${timeline.map((c, i) => {
+        const timeStr = c.time ? formatChatTime(c.time) : '—';
+        const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
+        return `
+        <div class="problem-detail-history-timeline-node" data-index="${i}">
+          <div class="problem-detail-history-timeline-dot"></div>
+          <div class="problem-detail-history-timeline-body">
+            <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
+              <span class="problem-detail-history-timeline-expand">▸</span>
+              <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
+              <span class="problem-detail-history-timeline-speaker">${escapeHtml(c.speaker)}</span>
+              <span class="problem-detail-history-timeline-task">${escapeHtml(c.taskName || '')}</span>
+            </button>
+            <div class="problem-detail-history-timeline-detail" hidden>
+              <div class="problem-detail-history-timeline-detail-meta">
                 <span>${escapeHtml(c.speaker)}</span>
                 <span>${escapeHtml(timeStr)}</span>
+                <span>${escapeHtml(c.taskName || '')}</span>
               </div>
-              <pre class="problem-detail-history-comm-content">${escapeHtml(contentStr)}</pre>
-            </div>`;
-        }).join('');
-    return `
-      <div class="problem-detail-history-task-root" data-task-id="${task.id}">
-        <button type="button" class="problem-detail-history-task-node" data-task-id="${task.id}" role="button">
-          <span class="task-node-expand">▸</span>
-          <span class="task-node-name">${escapeHtml(task.id.charAt(0).toUpperCase() + task.id.slice(1) + '｜' + task.name)}</span>
-          ${commCount > 0 ? `<span class="task-node-badge">${commCount} 条</span>` : ''}
-        </button>
-        <div class="problem-detail-history-task-children" hidden>
-          <div class="problem-detail-history-task-info">
-            <h5>归属阶段</h5>
-            <p>${escapeHtml(task.stage)}</p>
-            <h5>任务目标</h5>
-            <p>${escapeHtml(objective)}</p>
-            <h5>评估标准</h5>
-            <p>${escapeHtml(evaluationCriteria)}</p>
-            <h5>沟通过程记录</h5>
+              <pre class="problem-detail-history-timeline-detail-content">${escapeHtml(contentStr)}</pre>
+            </div>
           </div>
-          <div class="problem-detail-history-comm-list">${commsHtml}</div>
-        </div>
-      </div>`;
-  }).join('');
-  container.querySelectorAll('.problem-detail-history-task-node').forEach((btn) => {
+        </div>`;
+      }).join('')}
+    </div>`;
+  container.querySelectorAll('.problem-detail-history-timeline-head').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const taskId = btn.dataset.taskId;
-      const root = btn.closest('.problem-detail-history-task-root');
-      const children = root?.querySelector('.problem-detail-history-task-children');
-      if (!children) return;
-      const expanded = !children.hidden;
-      children.hidden = expanded;
+      const body = btn.closest('.problem-detail-history-timeline-body');
+      const detail = body?.querySelector('.problem-detail-history-timeline-detail');
+      if (!detail) return;
+      const expanded = !detail.hidden;
+      detail.hidden = expanded;
       btn.classList.toggle('expanded', !expanded);
+      btn.setAttribute('aria-expanded', !expanded);
+      btn.querySelector('.problem-detail-history-timeline-expand')?.classList.toggle('expanded', !expanded);
     });
   });
 }
@@ -3672,6 +4211,87 @@ async function runBmcGeneration() {
     loading2.classList.remove('problem-detail-chat-msg-parsing');
     loading2.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">生成失败：${escapeHtml(err.message || String(err))}</div>`;
     pushAndSaveProblemDetailChat({ role: 'system', content: '生成失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+  }
+}
+
+async function runRequirementLogicConstruction() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt || !DEEPSEEK_API_KEY) return;
+  const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || {};
+  const bmc = item.bmc || {};
+  const preliminaryReq = {
+    customerName: item.customerName ?? item.customer_name ?? '',
+    customerNeedsOrChallenges: item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
+    customerItStatus: item.customerItStatus ?? item.customer_it_status ?? '',
+    projectTimeRequirement: item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+  };
+  if (!basicInfo || Object.keys(basicInfo).length === 0) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">需求逻辑构建需要客户基本信息，请先完成企业背景洞察。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '需求逻辑构建需要客户基本信息，请先完成企业背景洞察。', timestamp: getTimeStr() });
+    return;
+  }
+  if (!bmc || Object.keys(bmc).length === 0) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">需求逻辑构建需要商业模式画布 BMC，请先完成商业画布加载。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '需求逻辑构建需要商业模式画布 BMC，请先完成商业画布加载。', timestamp: getTimeStr() });
+    return;
+  }
+  const loadingBlock = document.createElement('div');
+  loadingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+  loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在基于最新客户初步需求、基本信息与 BMC 构建需求逻辑…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(loadingBlock);
+  container.scrollTop = container.scrollHeight;
+  try {
+    const { content, usage, model, durationMs } = await generateRequirementLogicFromInputs(preliminaryReq, basicInfo, bmc);
+    loadingBlock.remove();
+    const logicStr = (content || '').trim() || '（无返回内容）';
+    pushOperationToHistory(item.createdAt, 'requirementLogic', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
+    updateDigitalProblemRequirementLogic(item.createdAt, logicStr);
+    currentProblemDetailItem = { ...item, requirementLogic: logicStr, completedStages: [...new Set([...(item.completedStages || []), 2])].sort((a, b) => a - b) };
+    const parsed = parseRequirementLogicFromMarkdown(logicStr);
+    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+    const block = document.createElement('div');
+    block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-requirement-logic-start problem-detail-chat-msg-with-delete';
+    block.dataset.msgIndex = String(problemDetailChatMessages.length);
+    const hasAnyContent = REQUIREMENT_LOGIC_SECTIONS.some(({ key }) => (parsed[key] || '').trim());
+    const rows = hasAnyContent
+      ? REQUIREMENT_LOGIC_SECTIONS.map(({ key, label }) => {
+          const val = (parsed[key] || '').trim() || '—';
+          return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value markdown-body">${renderMarkdown(val)}</span></div>`;
+        }).join('')
+      : `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">原始输出</span><span class="problem-detail-basic-info-value markdown-body">${renderMarkdown(logicStr)}</span></div>`;
+    block.innerHTML = `
+      <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+      <div class="problem-detail-basic-info-card" role="button" tabindex="0">
+        <div class="problem-detail-basic-info-card-body">${rows}</div>
+        <div class="problem-detail-basic-info-card-actions">
+          <button type="button" class="btn-confirm-requirement-logic">确认</button>
+        </div>
+      </div>
+      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
+    container.appendChild(block);
+    setupProblemDetailRequirementLogicCardToggle(block);
+    pushAndSaveProblemDetailChat({ type: 'requirementLogicBlock', content: logicStr, parsed, timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
+    container.scrollTop = container.scrollHeight;
+    renderProblemDetailContent();
+    requestAnimationFrame(() => {
+      maybeShowValueStreamStartBlock();
+      maybeShowItStatusStartBlock();
+      maybeShowPainPointStartBlock();
+    });
+  } catch (err) {
+    loadingBlock.remove();
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">需求逻辑构建失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '需求逻辑构建失败：' + (err.message || String(err)), timestamp: getTimeStr() });
   }
 }
 
@@ -3880,6 +4500,7 @@ async function runItStatusAnnotation() {
       }
     }
     const mergedVs = annotatedVs ? mergeItStatusIntoValueStream(valueStream, annotatedVs) : valueStream;
+    pushOperationToHistory(item.createdAt, 'itStatus', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
     updateDigitalProblemValueStreamItStatus(item.createdAt, mergedVs);
     currentProblemDetailItem = { ...item, valueStream: mergedVs, workflowAlignCompletedStages: [...new Set([...(item.workflowAlignCompletedStages || []), 0, 1])].sort((a, b) => a - b) };
     renderProblemDetailContent();
@@ -3942,6 +4563,7 @@ async function runPainPointAnnotation(isRerun) {
       }
     }
     const mergedVs = annotatedVs ? mergePainPointIntoValueStream(valueStream, annotatedVs) : valueStream;
+    pushOperationToHistory(item.createdAt, 'painPoint', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
     updateDigitalProblemValueStreamPainPoint(item.createdAt, mergedVs);
     currentProblemDetailItem = { ...item, valueStream: mergedVs, workflowAlignCompletedStages: [...new Set([...(item.workflowAlignCompletedStages || []), 0, 1, 2])].sort((a, b) => a - b) };
     renderProblemDetailContent();
@@ -4047,6 +4669,7 @@ async function runValueStreamGeneration() {
       }
     }
     const valueStream = valueStreamJson || { raw: content };
+    pushOperationToHistory(item.createdAt, 'valueStreamDraw', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
     pushAndSaveProblemDetailChat({ type: 'valueStreamCard', data: valueStream, logicText: content.replace(/```[\s\S]*?```/g, '').trim(), timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     const cardBlock = document.createElement('div');

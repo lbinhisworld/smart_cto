@@ -804,6 +804,22 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.btn-problem-detail-rollback {
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-problem-detail-rollback:hover {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+
 .btn-problem-detail-history {
   flex-shrink: 0;
   padding: 0.35rem 0.75rem;
@@ -1801,8 +1817,141 @@ body {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* 沟通过程记录 - 时间线视图 */
+.problem-detail-history-timeline-empty {
+  margin: 1.5rem 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.problem-detail-history-timeline {
+  position: relative;
+  padding: 0.5rem 0 1rem 0;
+}
+
+.problem-detail-history-timeline::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(99, 179, 237, 0.4), rgba(99, 179, 237, 0.15));
+  border-radius: 1px;
+}
+
+.problem-detail-history-timeline-node {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  position: relative;
+}
+
+.problem-detail-history-timeline-node:last-child {
+  margin-bottom: 0;
+}
+
+.problem-detail-history-timeline-dot {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent, #63b3ed);
+  border: 2px solid rgba(26, 35, 50, 0.6);
+  box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.2);
+  z-index: 1;
+}
+
+.problem-detail-history-timeline-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.problem-detail-history-timeline-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(45, 58, 77, 0.5);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.problem-detail-history-timeline-head:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(99, 179, 237, 0.4);
+}
+
+.problem-detail-history-timeline-expand {
+  flex-shrink: 0;
   font-size: 0.7rem;
-  max-height: 120px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+
+.problem-detail-history-timeline-head.expanded .problem-detail-history-timeline-expand,
+.problem-detail-history-timeline-expand.expanded {
+  transform: rotate(90deg);
+}
+
+.problem-detail-history-timeline-time {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  min-width: 4.5em;
+}
+
+.problem-detail-history-timeline-speaker {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--accent, #63b3ed);
+}
+
+.problem-detail-history-timeline-task {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-detail-history-timeline-detail {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid rgba(45, 58, 77, 0.4);
+}
+
+.problem-detail-history-timeline-detail-meta {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.problem-detail-history-timeline-detail-content {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text);
+  max-height: 200px;
   overflow-y: auto;
 }
 
