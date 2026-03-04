@@ -457,7 +457,56 @@ ${bmcJson}
 
 ---
 
-## 10. 意图提炼
+## 10. 局部 ITGap 分析
+
+**触发入口**：ITGap 分析阶段，全局 ITGap 分析完成后，点击「即将生成每个环节的 ITGap 分析 session」→「确认」生成 session 列表；再点击 session 列表卡片的「确认」或「继续」  
+**函数**：`generateLocalItGapAnalysis(stepName, globalItGapJson, fullProcessVsm)`  
+**用途**：针对端到端流程的每个环节，基于全局 ITGap 分析 JSON 与全流程价值流图，产出该环节的局部 IT Gap 分析（现状透视、IT Gap 三维映射表、IT 转型建议、业务价值预测）。
+
+### System Prompt
+
+```
+# 角色设定
+你是一位资深的数字化转型顾问，擅长进行"As-Is（现状） vs To-Be（目标）"的差异分析。现在请基于当前问题的全局 ITGap 分析 json 数据，针对当前环节【替换环节名称】进行深度的局部 IT Gap 分析。
+
+# 任务要求
+请按以下结构输出该环节的 IT Gap 分析，确保分析结果能直接支撑 IT Gap 的闭环：
+
+1. **现状透视 (Status Quo)**：总结该环节目前的作业模式、IT 支持程度及最致命的瓶颈。
+2. **IT Gap 三维映射表**：
+   - 数据层 Gap：缺少哪些实时字段、哪些系统间的数据流是断开的？
+   - 功能层 Gap：现有系统缺失哪些核心算法、自动化逻辑或控制节点？
+   - 体验/效率层 Gap：哪些环节还依赖 Excel/线下沟通？
+3. **IT 转型建议 (Actionable Requirements)**：将上述 Gap 翻译为具体的 IT 功能点建议（如：开发 XX 接口、建立 XX 模型、引入 XX 规则引擎）。
+4. **业务价值预测**：填补此 Gap 后，能为企业带来哪些量化的业务提升（如：缩短换线时间 20% 等）。
+
+# 输出格式
+请仅返回一个 JSON 对象，必须包含以下四个字段（字段名不可更改，均支持 Markdown）：
+{
+  "statusQuo": "现状透视内容（该环节作业模式、IT支持程度、最致命瓶颈）",
+  "itGap3DMap": "IT Gap 三维映射表（数据层/功能层/体验效率层 Gap 分别描述）",
+  "actionableRequirements": "IT 转型建议（具体功能点，如开发XX接口、建立XX模型）",
+  "businessValuePrediction": "业务价值预测（量化提升，如缩短换线时间20%）"
+}
+重要：只返回上述 JSON，不要用 Markdown 标题分段，每个维度的内容必须放入对应字段中。
+```
+
+### User Message 模板
+
+由 `generateLocalItGapAnalysis` 构建，包含全局 ITGap 分析 json、端到端流程 json，以及当前环节名称。
+
+### 展示规则
+
+- **流程**：用户点击「即将生成每个环节的 ITGap 分析 session」→「确认」后，系统根据端到端流程生成各环节 session（不调用大模型）；再点击 session 列表的「确认」或「继续」，系统逐个调用大模型进行各环节分析。
+- **确认后直接开始**：用户点击 session 列表的「确认」后，直接开始逐环节分析，无需二次确认。
+- **继续按钮**：session 列表卡片在「确认」右侧有「继续」按钮，存在未完成分析时可用，点击后继续执行剩余环节的分析。
+- **每环节完成**：分析结果展示于聊天区（含 LLM 元信息：模型、token 消耗、耗时），同步更新工作区对应 session 卡片（待分析→已分析✅），并写入 Task9 任务过程日志。
+- **工作区展示**：session 子卡片仅展示分析结果，不展示提示词；一级栏目为现状透视、IT Gap 三维映射表、IT 转型建议，业务价值预测为二级缩进展示。
+- **LLM 元信息**：每个局部 ITGap 分析返回内容卡片均展示模型、消耗 token、耗时。
+
+---
+
+## 11. 意图提炼
 
 **触发入口**：问题详情页聊天区，用户输入消息后点击发送  
 **函数**：`extractUserIntentFromChat(text, context)`  
@@ -531,7 +580,7 @@ ${context}
 
 ---
 
-## 11. 查询意图执行
+## 12. 查询意图执行
 
 **触发入口**：问题详情页聊天区，用户对「简单查询」意图卡片点击「确认」  
 **函数**：`executeQueryIntent(extracted, item)`  
@@ -561,7 +610,7 @@ ${queryReq}
 
 ---
 
-## 12. 讨论意图执行
+## 13. 讨论意图执行
 
 **触发入口**：问题详情页聊天区，用户对「讨论请教」意图卡片点击「确认」  
 **函数**：`executeDiscussionIntent(extracted, item, userText)`  
@@ -592,7 +641,7 @@ ${topic}
 
 ---
 
-## 13. 价值流图修改解析
+## 14. 价值流图修改解析
 
 **触发入口**：问题详情页，用户确认「反馈修改意见」意图卡片且修改目标为价值流图（task4/task5/task6）时  
 **函数**：`parseValueStreamModificationIntent(extracted, vsStructure)`  
@@ -631,7 +680,7 @@ ${summary ? '意图概括：' + summary : ''}
 
 ---
 
-## 14. 工作区内容修改
+## 15. 工作区内容修改
 
 **触发入口**：问题详情页，用户确认「反馈修改意见」意图卡片且 modificationClear=true 时  
 **函数**：`executeModificationIntent(extracted, positionInfo)`  
@@ -677,5 +726,5 @@ ${currentContent || '(空)'}
 
 ### 通用规则
 
-- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、讨论回复、BMC 生成、IT 现状标注、痛点标注、价值流图生成、全局 ITGap 分析、工作区内容修改等。
+- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、讨论回复、BMC 生成、IT 现状标注、痛点标注、价值流图生成、全局 ITGap 分析、局部 ITGap 分析、工作区内容修改等。
 - **聊天内容 Markdown 渲染**：聊天框内容块（用户消息、系统回复、查询结果等）自动渲染 Markdown 格式，使用 marked + DOMPurify 解析与安全过滤。加粗小标题（`**文本**`）使用主题强调色（`var(--accent)`）突出显示。

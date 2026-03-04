@@ -921,7 +921,10 @@ body {
 .btn-confirm-start-global-itgap,
 .btn-confirm-global-itgap,
 .btn-confirm-global-itgap-json,
-.btn-confirm-global-itgap-structured {
+.btn-confirm-global-itgap-structured,
+.btn-confirm-start-local-itgap,
+.btn-confirm-local-itgap,
+.btn-confirm-local-itgap-sessions {
   padding: 0.35rem 0.75rem;
   font-size: 0.8125rem;
   font-family: inherit;
@@ -937,7 +940,10 @@ body {
 .btn-confirm-start-global-itgap:hover:not(:disabled),
 .btn-confirm-global-itgap:hover:not(:disabled),
 .btn-confirm-global-itgap-json:hover:not(:disabled),
-.btn-confirm-global-itgap-structured:hover:not(:disabled) {
+.btn-confirm-global-itgap-structured:hover:not(:disabled),
+.btn-confirm-start-local-itgap:hover:not(:disabled),
+.btn-confirm-local-itgap:hover:not(:disabled),
+.btn-confirm-local-itgap-sessions:hover:not(:disabled) {
   opacity: 0.9;
 }
 
@@ -945,7 +951,10 @@ body {
 .btn-confirm-start-global-itgap:disabled,
 .btn-confirm-global-itgap:disabled,
 .btn-confirm-global-itgap-json:disabled,
-.btn-confirm-global-itgap-structured:disabled {
+.btn-confirm-global-itgap-structured:disabled,
+.btn-confirm-start-local-itgap:disabled,
+.btn-confirm-local-itgap:disabled,
+.btn-confirm-local-itgap-sessions:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -972,11 +981,169 @@ body {
   cursor: default;
 }
 
+/* 局部 ITGap 已有 block 时的顶部粘性提醒条 */
+.problem-detail-chat-local-itgap-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: var(--text);
+}
+.problem-detail-chat-local-itgap-banner-text {
+  flex: 1;
+}
+.problem-detail-chat-local-itgap-banner .btn-scroll-to-local-itgap-banner {
+  flex-shrink: 0;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.problem-detail-chat-local-itgap-banner .btn-scroll-to-local-itgap-banner:hover {
+  background: var(--accent);
+  color: var(--text-on-accent, #fff);
+}
+
 .problem-detail-chat-global-itgap-start-actions,
-.problem-detail-chat-global-itgap-card-actions {
+.problem-detail-chat-global-itgap-card-actions,
+.problem-detail-chat-local-itgap-start-actions,
+.problem-detail-chat-local-itgap-card-actions,
+.problem-detail-chat-local-itgap-sessions-actions {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+.btn-continue-local-itgap-sessions {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.btn-continue-local-itgap-sessions:hover:not(:disabled) {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.btn-continue-local-itgap-sessions:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.problem-detail-chat-local-itgap-sessions-header {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.problem-detail-chat-local-itgap-sessions-list {
+  max-height: 10rem;
+  overflow-y: auto;
+  margin-bottom: 0.5rem;
+}
+
+.problem-detail-chat-local-itgap-session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8125rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.15);
+  margin-bottom: 0.25rem;
+}
+
+.problem-detail-chat-local-itgap-session-name {
+  font-weight: 500;
+}
+
+.problem-detail-chat-local-itgap-session-status {
+  font-size: 0.75rem;
+}
+
+.problem-detail-chat-local-itgap-session-status.session-pending {
+  color: var(--accent);
+}
+
+.problem-detail-chat-local-itgap-session-status.session-done {
+  color: var(--text-muted);
+}
+
+/* 局部 ITGap Session 结构化卡片 */
+.problem-detail-chat-local-itgap-sessions-card-wrap {
+  padding: 0.75rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.problem-detail-chat-local-itgap-sessions-card-header {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+}
+
+.problem-detail-chat-local-itgap-sessions-card-body {
+  padding: 0.25rem 0;
+}
+
+.problem-detail-chat-local-itgap-sessions-card-body .problem-detail-chat-local-itgap-sessions-header {
+  margin-bottom: 0.5rem;
+}
+
+.problem-detail-chat-local-itgap-sessions-card-body .problem-detail-chat-local-itgap-sessions-list {
+  margin-bottom: 0.75rem;
+}
+
+.problem-detail-local-itgap-trigger {
+  margin: 1rem;
+}
+
+.problem-detail-local-itgap-trigger-desc {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.btn-trigger-local-itgap-session {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-trigger-local-itgap-session:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-trigger-local-itgap-session:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .problem-detail-chat-e2e-json-block .problem-detail-chat-e2e-json-header {
@@ -1446,6 +1613,154 @@ body {
 /* 全局 ITGap 分析卡片：内容块背景与端到端流程保持一致 */
 .problem-detail-card-global-itgap {
   margin: 1rem;
+}
+
+/* 局部 ITGap 分析卡片：左边缘与全局 ITGap 分析卡片对齐 */
+.problem-detail-card-local-itgap {
+  margin: 1rem;
+}
+
+.problem-detail-local-itgap-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem 0 1rem;
+}
+
+/* 局部 ITGap 子卡片：与主卡片风格一致，宽度小于外部卡片且统一 */
+.problem-detail-local-itgap-subcard {
+  width: 100%;
+  max-width: calc(100% - 2rem);
+  min-width: 0;
+  margin-right: auto;
+  box-sizing: border-box;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.problem-detail-local-itgap-subcard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text);
+  background: rgba(88, 166, 255, 0.18);
+  border: none;
+  border-bottom: 1px solid rgba(88, 166, 255, 0.35);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s, color 0.2s;
+  text-align: left;
+}
+
+.problem-detail-local-itgap-subcard-header:hover {
+  background: rgba(88, 166, 255, 0.25);
+}
+
+.problem-detail-local-itgap-subcard-title {
+  flex: 1;
+}
+
+.problem-detail-local-itgap-subcard-status {
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-right: 0.5rem;
+}
+
+.problem-detail-local-itgap-subcard-status.session-pending {
+  color: var(--accent);
+}
+
+.problem-detail-local-itgap-subcard-status.session-done {
+  color: var(--text-muted);
+}
+
+.problem-detail-local-itgap-subcard-arrow {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  transition: transform 0.25s ease;
+}
+
+.problem-detail-local-itgap-subcard-body {
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border-top: none;
+}
+
+.problem-detail-local-itgap-subcard-body h5 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 0.5rem;
+}
+
+.problem-detail-local-itgap-session-prompt,
+.problem-detail-local-itgap-session-analysis {
+  margin-bottom: 1rem;
+}
+
+.problem-detail-local-itgap-session-analysis:last-child {
+  margin-bottom: 0;
+}
+
+.problem-detail-local-itgap-prompt-pre {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  font-size: 0.8125rem;
+  font-family: ui-monospace, monospace;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.problem-detail-local-itgap-section {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.problem-detail-local-itgap-section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.problem-detail-local-itgap-section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 0.35rem;
+}
+
+.problem-detail-local-itgap-section-secondary {
+  padding-left: 1.25rem;
+  margin-left: 0.5rem;
+  border-left: 2px solid var(--border);
+}
+
+.problem-detail-local-itgap-section-content {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.problem-detail-local-itgap-detail .problem-detail-local-itgap-section:last-child {
+  margin-bottom: 0;
+}
+
+.problem-detail-local-itgap-pending {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
 }
 
 .problem-detail-card-global-itgap .problem-detail-card-body-detail,
