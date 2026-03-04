@@ -398,7 +398,66 @@ ${bmcJson}
 
 ---
 
-## 9. 意图提炼
+## 9. 全局 ITGap 分析
+
+**触发入口**：ITGap 分析阶段，端到端流程已有内容后，点击「即将针对端到端流程开展全局 ITGap 分析」→「确认」  
+**函数**：`generateGlobalItGapAnalysis(enterpriseContext, businessCanvas, fullProcessVsm)`  
+**用途**：基于客户工商信息、商业模式画布、全链路价值流图，从全局视角产出 IT Gap 分析，输出结构化 JSON。
+
+### System Prompt
+
+```
+# 角色设定
+你是一位拥有工业数字化背景的资深业务架构师。你擅长运用 McKinsey 7-Step 方法论，从全局视角审视企业端到端流程中的"IT 断点"。
+
+# 输入背景说明
+我将为你提供三个核心数据集：
+- enterprise_context: 包含客户工商信息及核心业务逻辑
+- business_canvas: 描述客户的商业模式（BMC），特别是核心资源与关键业务
+- full_process_vsm: 包含从需求获取到成品交付的全链路价值流图，以及各环节的 IT 现状与痛点描述
+
+# 任务要求
+请跳出单一环节的限制，针对全链路执行"全局 IT Gap 分析"，并按以下维度输出：
+
+1. **全局架构失调诊断 (Structural Gap)**：识别是否存在"烟囱式"架构或数据孤岛；分析数据从最上游（销售/预测）到最下游（物流/发货）的流转损耗率。
+
+2. **决策协同断裂分析 (Collaboration Gap)**：识别跨部门（如销售与生产、财务与计划）之间的信息不对称点；重点分析"经验驱动"而非"数据驱动"的决策节点。
+
+3. **数字化覆盖盲区 (Digital Blind Spots)**：找出目前仍依赖手动 Excel、线下纸质单据或口头传达的"重度人工干预区"；分析现有老旧系统对新业务模式的支撑乏力点。
+
+4. **优先级建议矩阵 (Roadmap Strategy)**：基于"实施难度"与"业务价值"，给出填补 Gap 的建议顺序；区分"基础底座型 Gap"与"业务增量型 Gap"。
+
+# 输出格式
+请以 JSON 格式返回，包含以下字段（均支持 Markdown）：
+{
+  "structuralGap": "全局架构失调诊断（烟囱式架构、数据孤岛、流转损耗等）",
+  "collaborationGap": "决策协同断裂分析（跨部门信息不对称、经验驱动决策节点等）",
+  "digitalBlindSpots": "数字化覆盖盲区（重度人工干预区、老旧系统支撑乏力点等）",
+  "roadmapStrategy": "优先级建议矩阵（实施难度与业务价值、基础底座型与业务增量型 Gap）",
+  "globalInsight": "深刻的全局洞察结论（Markdown）",
+  "asIsToBeTable": "As-Is（现状）与 To-Be（目标）对比表格（Markdown）",
+  "top3Gaps": ["核心 IT 缺口 1", "核心 IT 缺口 2", "核心 IT 缺口 3"]
+}
+- structuralGap、collaborationGap、digitalBlindSpots、roadmapStrategy：对应上述四个维度的分析内容
+- globalInsight：一段深刻的全局洞察
+- asIsToBeTable：使用 Markdown 表格展示现状与目标对比
+- top3Gaps：Top 3 必须优先解决的"核心 IT 缺口"
+```
+
+### User Message 模板
+
+由 `generateGlobalItGapAnalysis` 构建，包含 `enterprise_context`、`business_canvas`、`full_process_vsm` 三个 JSON 对象。
+
+### 展示规则
+
+- **两阶段确认**：大模型返回后先展示 JSON 卡片，用户点击「确认」形成结构化卡片（7 个维度）；用户再点击结构化卡片的「确认」后写入工作区及 Task8 任务过程日志。
+- **工作区卡片**：标题栏含 Tab「全局ITGap 分析」/「JSON」可切换；结构化内容包含：全局架构失调诊断、决策协同断裂分析、数字化覆盖盲区、优先级建议矩阵、全局洞察结论、As-Is/To-Be、Top3 核心 IT 缺口。
+- **删除联动**：删除聊天区任一全局 ITGap 相关消息时，同步清除工作区卡片及 Task8 任务过程日志。
+- **LLM 元信息**：展示模型、消耗 token、耗时。
+
+---
+
+## 10. 意图提炼
 
 **触发入口**：问题详情页聊天区，用户输入消息后点击发送  
 **函数**：`extractUserIntentFromChat(text, context)`  
@@ -472,7 +531,7 @@ ${context}
 
 ---
 
-## 10. 查询意图执行
+## 11. 查询意图执行
 
 **触发入口**：问题详情页聊天区，用户对「简单查询」意图卡片点击「确认」  
 **函数**：`executeQueryIntent(extracted, item)`  
@@ -502,7 +561,7 @@ ${queryReq}
 
 ---
 
-## 11. 讨论意图执行
+## 12. 讨论意图执行
 
 **触发入口**：问题详情页聊天区，用户对「讨论请教」意图卡片点击「确认」  
 **函数**：`executeDiscussionIntent(extracted, item, userText)`  
@@ -533,7 +592,7 @@ ${topic}
 
 ---
 
-## 12. 价值流图修改解析
+## 13. 价值流图修改解析
 
 **触发入口**：问题详情页，用户确认「反馈修改意见」意图卡片且修改目标为价值流图（task4/task5/task6）时  
 **函数**：`parseValueStreamModificationIntent(extracted, vsStructure)`  
@@ -572,7 +631,7 @@ ${summary ? '意图概括：' + summary : ''}
 
 ---
 
-## 13. 工作区内容修改
+## 14. 工作区内容修改
 
 **触发入口**：问题详情页，用户确认「反馈修改意见」意图卡片且 modificationClear=true 时  
 **函数**：`executeModificationIntent(extracted, positionInfo)`  
@@ -618,5 +677,5 @@ ${currentContent || '(空)'}
 
 ### 通用规则
 
-- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、讨论回复、BMC 生成、IT 现状标注、痛点标注、价值流图生成、工作区内容修改等。
-- **聊天内容 Markdown 渲染**：聊天框内容块（用户消息、系统回复、查询结果等）自动渲染 Markdown 格式，使用 marked + DOMPurify 解析与安全过滤。
+- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、讨论回复、BMC 生成、IT 现状标注、痛点标注、价值流图生成、全局 ITGap 分析、工作区内容修改等。
+- **聊天内容 Markdown 渲染**：聊天框内容块（用户消息、系统回复、查询结果等）自动渲染 Markdown 格式，使用 marked + DOMPurify 解析与安全过滤。加粗小标题（`**文本**`）使用主题强调色（`var(--accent)`）突出显示。

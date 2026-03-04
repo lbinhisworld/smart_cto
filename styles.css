@@ -917,6 +917,68 @@ body {
   cursor: default;
 }
 
+.btn-confirm-primary,
+.btn-confirm-start-global-itgap,
+.btn-confirm-global-itgap,
+.btn-confirm-global-itgap-json,
+.btn-confirm-global-itgap-structured {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-confirm-primary:hover:not(:disabled),
+.btn-confirm-start-global-itgap:hover:not(:disabled),
+.btn-confirm-global-itgap:hover:not(:disabled),
+.btn-confirm-global-itgap-json:hover:not(:disabled),
+.btn-confirm-global-itgap-structured:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-confirm-primary:disabled,
+.btn-confirm-start-global-itgap:disabled,
+.btn-confirm-global-itgap:disabled,
+.btn-confirm-global-itgap-json:disabled,
+.btn-confirm-global-itgap-structured:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-redo-global-itgap {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-redo-global-itgap:hover:not(:disabled) {
+  opacity: 0.9;
+  border-color: var(--text-muted);
+}
+
+.btn-redo-global-itgap:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.problem-detail-chat-global-itgap-start-actions,
+.problem-detail-chat-global-itgap-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 .problem-detail-chat-e2e-json-block .problem-detail-chat-e2e-json-header {
   font-weight: 600;
   margin-bottom: 0.5rem;
@@ -983,7 +1045,7 @@ body {
 .markdown-body p { margin: 0.35em 0; }
 .markdown-body p:first-child { margin-top: 0; }
 .markdown-body p:last-child { margin-bottom: 0; }
-.markdown-body strong, .markdown-body b { font-weight: 600; }
+.markdown-body strong, .markdown-body b { font-weight: 600; color: var(--accent); }
 .markdown-body em, .markdown-body i { font-style: italic; }
 .markdown-body code {
   padding: 0.15em 0.35em;
@@ -1379,6 +1441,66 @@ body {
 
 .problem-detail-card-e2e-flow {
   margin: 1rem;
+}
+
+/* 全局 ITGap 分析卡片：内容块背景与端到端流程保持一致 */
+.problem-detail-card-global-itgap {
+  margin: 1rem;
+}
+
+.problem-detail-card-global-itgap .problem-detail-card-body-detail,
+.problem-detail-card-global-itgap .problem-detail-card-body-detail.markdown-body {
+  padding: 0 0.5rem;
+  background: transparent;
+  color: var(--text);
+}
+
+.problem-detail-card-global-itgap .markdown-body pre,
+.problem-detail-card-global-itgap .markdown-body code {
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+}
+
+.problem-detail-card-global-itgap .markdown-body pre code {
+  background: none;
+}
+
+.problem-detail-card-global-itgap .markdown-body table,
+.problem-detail-card-global-itgap .markdown-body th,
+.problem-detail-card-global-itgap .markdown-body td {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.problem-detail-global-itgap-detail,
+.problem-detail-chat-global-itgap-structured {
+  padding: 0.5rem 1rem;
+}
+
+.problem-detail-global-itgap-section {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.problem-detail-global-itgap-section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.problem-detail-global-itgap-section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 0.35rem;
+}
+
+.problem-detail-global-itgap-section-content {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text);
 }
 
 .problem-detail-value-stream-card {

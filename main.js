@@ -1808,6 +1808,21 @@ if (el.problemDetailChatMessages) {
         const idx = parseInt(msgBlock.dataset.msgIndex, 10);
         if (!isNaN(idx) && idx >= 0 && idx < problemDetailChatMessages.length) {
           const msg = problemDetailChatMessages[idx];
+          const isGlobalItGapMsg = msg?.type === 'globalItGapStartBlock' || msg?.type === 'globalItGapAnalysisCard' || msg?.type === 'globalItGapAnalysisLog';
+          if (isGlobalItGapMsg && currentProblemDetailItem?.createdAt) {
+            problemDetailChatMessages = problemDetailChatMessages.filter((m) => m.type !== 'globalItGapStartBlock' && m.type !== 'globalItGapAnalysisCard' && m.type !== 'globalItGapAnalysisLog');
+            saveProblemDetailChat(currentProblemDetailItem.createdAt, problemDetailChatMessages);
+            clearDigitalProblemGlobalItGapAnalysis(currentProblemDetailItem.createdAt);
+            currentProblemDetailItem = { ...currentProblemDetailItem, globalItGapAnalysisJson: undefined, itGapCompletedStages: (currentProblemDetailItem.itGapCompletedStages || []).filter((x) => x !== 1).sort((a, b) => a - b) };
+            const container = el.problemDetailChatMessages;
+            container.innerHTML = '';
+            renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+            container.scrollTop = container.scrollHeight;
+            renderProblemDetailContent();
+            renderProblemDetailHistory();
+            requestAnimationFrame(() => maybeShowGlobalItGapStartBlock());
+            return;
+          }
           const isPainPointStartBlock = msg?.type === 'painPointStartBlock';
           const isPainPointDoneMsg = msg?.role === 'system' && msg?.content === '痛点标注完成';
           const shouldRollbackPainPoint = (isPainPointStartBlock || isPainPointDoneMsg) && currentProblemDetailItem?.createdAt;
@@ -1945,6 +1960,65 @@ if (el.problemDetailChatMessages) {
         container.scrollTop = container.scrollHeight;
         renderProblemDetailHistory();
       } catch (_) {}
+      return;
+    }
+    const startGlobalItGapBtn = e.target.closest('.btn-confirm-start-global-itgap');
+    if (startGlobalItGapBtn && !startGlobalItGapBtn.disabled) {
+      startGlobalItGapBtn.disabled = true;
+      startGlobalItGapBtn.textContent = '已确认';
+      const item = currentProblemDetailItem;
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'globalItGapStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+      }
+      requestAnimationFrame(() => runGlobalItGapAnalysis(false));
+      return;
+    }
+    const confirmGlobalItGapJsonBtn = e.target.closest('.btn-confirm-global-itgap-json');
+    if (confirmGlobalItGapJsonBtn && confirmGlobalItGapJsonBtn.dataset.json && !confirmGlobalItGapJsonBtn.disabled) {
+      try {
+        const analysisJson = JSON.parse(confirmGlobalItGapJsonBtn.dataset.json);
+        const item = currentProblemDetailItem;
+        let idx = problemDetailChatMessages.findIndex((m) => m.type === 'globalItGapAnalysisCard');
+        if (idx >= 0) {
+          problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: analysisJson, structuredView: true };
+          saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+        }
+        const container = el.problemDetailChatMessages;
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+      } catch (_) {}
+      return;
+    }
+    const confirmGlobalItGapStructuredBtn = e.target.closest('.btn-confirm-global-itgap-structured');
+    if (confirmGlobalItGapStructuredBtn && confirmGlobalItGapStructuredBtn.dataset.json && !confirmGlobalItGapStructuredBtn.disabled) {
+      try {
+        const analysisJson = JSON.parse(confirmGlobalItGapStructuredBtn.dataset.json);
+        const item = currentProblemDetailItem;
+        let idx = problemDetailChatMessages.findIndex((m) => m.type === 'globalItGapAnalysisCard');
+        if (idx >= 0) {
+          problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: analysisJson, confirmed: true };
+          saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+        }
+        confirmGlobalItGapStructuredBtn.disabled = true;
+        confirmGlobalItGapStructuredBtn.textContent = '已确认';
+        updateDigitalProblemGlobalItGapAnalysis(item.createdAt, analysisJson);
+        currentProblemDetailItem = { ...item, globalItGapAnalysisJson: analysisJson };
+        pushAndSaveProblemDetailChat({ type: 'globalItGapAnalysisLog', content: '已生成全局 ITGap 分析', timestamp: getTimeStr(), taskLabel: '全局 ITGap 分析', analysisJson });
+        renderProblemDetailContent();
+        const container = el.problemDetailChatMessages;
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+      } catch (_) {}
+      return;
+    }
+    const redoGlobalItGapBtn = e.target.closest('.btn-redo-global-itgap');
+    if (redoGlobalItGapBtn && !redoGlobalItGapBtn.disabled) {
+      requestAnimationFrame(() => runGlobalItGapAnalysis(true));
       return;
     }
     const startItGapBtn = e.target.closest('.btn-confirm-start-it-gap');
@@ -3548,6 +3622,90 @@ const PAIN_POINT_ANNOTATION_PROMPT = `# 角色设定
 - painPoint 为字符串，提炼当前环节涉及到的痛点
 - 保持原有 stages、steps 结构及 name、role、duration、itStatus 等字段不变，仅新增 painPoint`;
 
+const GLOBAL_ITGAP_PROMPT = `# 角色设定
+你是一位拥有工业数字化背景的资深业务架构师。你擅长运用 McKinsey 7-Step 方法论，从全局视角审视企业端到端流程中的"IT 断点"。
+
+# 输入背景说明
+我将为你提供三个核心数据集：
+- enterprise_context: 包含客户工商信息及核心业务逻辑
+- business_canvas: 描述客户的商业模式（BMC），特别是核心资源与关键业务
+- full_process_vsm: 包含从需求获取到成品交付的全链路价值流图，以及各环节的 IT 现状与痛点描述
+
+# 任务要求
+请跳出单一环节的限制，针对全链路执行"全局 IT Gap 分析"，并按以下维度输出：
+
+1. **全局架构失调诊断 (Structural Gap)**：识别是否存在"烟囱式"架构或数据孤岛；分析数据从最上游（销售/预测）到最下游（物流/发货）的流转损耗率。
+
+2. **决策协同断裂分析 (Collaboration Gap)**：识别跨部门（如销售与生产、财务与计划）之间的信息不对称点；重点分析"经验驱动"而非"数据驱动"的决策节点。
+
+3. **数字化覆盖盲区 (Digital Blind Spots)**：找出目前仍依赖手动 Excel、线下纸质单据或口头传达的"重度人工干预区"；分析现有老旧系统对新业务模式的支撑乏力点。
+
+4. **优先级建议矩阵 (Roadmap Strategy)**：基于"实施难度"与"业务价值"，给出填补 Gap 的建议顺序；区分"基础底座型 Gap"与"业务增量型 Gap"。
+
+# 输出格式
+请以 JSON 格式返回，包含以下字段（均支持 Markdown）：
+\`\`\`json
+{
+  "structuralGap": "全局架构失调诊断（烟囱式架构、数据孤岛、流转损耗等）",
+  "collaborationGap": "决策协同断裂分析（跨部门信息不对称、经验驱动决策节点等）",
+  "digitalBlindSpots": "数字化覆盖盲区（重度人工干预区、老旧系统支撑乏力点等）",
+  "roadmapStrategy": "优先级建议矩阵（实施难度与业务价值、基础底座型与业务增量型 Gap）",
+  "globalInsight": "深刻的全局洞察结论（Markdown）",
+  "asIsToBeTable": "As-Is（现状）与 To-Be（目标）对比表格（Markdown）",
+  "top3Gaps": ["核心 IT 缺口 1", "核心 IT 缺口 2", "核心 IT 缺口 3"]
+}
+\`\`\`
+- structuralGap、collaborationGap、digitalBlindSpots、roadmapStrategy：对应上述四个维度的分析内容
+- globalInsight：一段深刻的全局洞察
+- asIsToBeTable：使用 Markdown 表格展示现状与目标对比
+- top3Gaps：Top 3 必须优先解决的"核心 IT 缺口"`;
+
+const GLOBAL_ITGAP_STRUCTURED_SECTIONS = [
+  { key: 'structuralGap', label: '全局架构失调诊断 (Structural Gap)' },
+  { key: 'collaborationGap', label: '决策协同断裂分析 (Collaboration Gap)' },
+  { key: 'digitalBlindSpots', label: '数字化覆盖盲区 (Digital Blind Spots)' },
+  { key: 'roadmapStrategy', label: '优先级建议矩阵 (Roadmap Strategy)' },
+  { key: 'globalInsight', label: '全局洞察结论' },
+  { key: 'asIsToBeTable', label: 'As-Is（现状）与 To-Be（目标）' },
+  { key: 'top3Gaps', label: 'Top3 核心 IT 缺口', isArray: true },
+];
+
+/** 去除内容开头与蓝色子标题重复的 markdown 小标题（如 ## 标题、**标题** 等） */
+function stripRedundantHeadingFromContent(content, label) {
+  if (!content || typeof content !== 'string') return content;
+  let text = content.trim();
+  const chinesePart = (label.match(/^([^（(]+)/) || [])[1]?.trim() || label;
+  const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [
+    new RegExp(`^#+\\s*[^\\n]*${esc(chinesePart)}[^\\n]*\\n?`),
+    new RegExp(`^\\*\\*[^\\n]*${esc(chinesePart)}[^\\n]*\\*\\*\\s*\\n?`),
+    new RegExp(`^${esc(chinesePart)}[\\s:：]*\\n?`),
+  ];
+  for (const re of patterns) {
+    const prev = text;
+    text = text.replace(re, '').trim();
+    if (prev !== text) break;
+  }
+  return text || content;
+}
+
+function buildGlobalItGapStructuredHtml(analysis) {
+  if (!analysis || typeof analysis !== 'object') return '<p>（暂无内容）</p>';
+  const parts = [];
+  for (const { key, label, isArray } of GLOBAL_ITGAP_STRUCTURED_SECTIONS) {
+    let val = analysis[key];
+    if (isArray && Array.isArray(val)) {
+      val = val.map((g, i) => `${i + 1}. ${g}`).join('\n');
+    } else if (isArray) {
+      val = '';
+    }
+    let content = (val != null ? String(val).trim() : '') || '—';
+    if (content !== '—') content = stripRedundantHeadingFromContent(content, label);
+    parts.push(`<div class="problem-detail-global-itgap-section"><h4 class="problem-detail-global-itgap-section-title">${escapeHtml(label)}</h4><div class="problem-detail-global-itgap-section-content markdown-body">${content === '—' ? '—' : renderMarkdown(content)}</div></div>`);
+  }
+  return parts.join('');
+}
+
 const BMC_LABEL_TO_KEY = {
   '客户细分': 'customer_segments',
   '价值主张': 'value_propositions',
@@ -3751,6 +3909,28 @@ ${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requi
   return { content, usage, model, durationMs };
 }
 
+async function generateGlobalItGapAnalysis(enterpriseContext, businessCanvas, fullProcessVsm) {
+  const userContent = `## enterprise_context（客户工商信息及核心业务逻辑）
+\`\`\`json
+${typeof enterpriseContext === 'string' ? enterpriseContext : JSON.stringify(enterpriseContext || {}, null, 2)}
+\`\`\`
+
+## business_canvas（商业模式 BMC）
+\`\`\`json
+${typeof businessCanvas === 'string' ? businessCanvas : JSON.stringify(businessCanvas || {}, null, 2)}
+\`\`\`
+
+## full_process_vsm（全链路价值流图，含 IT 现状与痛点）
+\`\`\`json
+${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProcessVsm || {}, null, 2)}
+\`\`\``;
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: GLOBAL_ITGAP_PROMPT },
+    { role: 'user', content: userContent },
+  ]);
+  return { content, usage, model, durationMs };
+}
+
 const PARSE_PREVIEW_FIELDS = [
   { key: 'customerName', label: '客户名称' },
   { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
@@ -3876,6 +4056,30 @@ function updateDigitalProblemItGapCompletedStages(createdAt, stages) {
   if (idx < 0) return;
   const item = list[idx];
   list[idx] = { ...item, itGapCompletedStages: stages };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+function updateDigitalProblemGlobalItGapAnalysis(createdAt, analysisJson) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const itGapCompleted = item.itGapCompletedStages || [];
+  if (!itGapCompleted.includes(1)) itGapCompleted.push(1);
+  itGapCompleted.sort((a, b) => a - b);
+  list[idx] = { ...item, globalItGapAnalysisJson: analysisJson, itGapCompletedStages: itGapCompleted };
+  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+}
+
+/** 清除全局 ITGap 分析（工作区卡片及任务过程日志） */
+function clearDigitalProblemGlobalItGapAnalysis(createdAt) {
+  const list = getDigitalProblems();
+  const idx = list.findIndex((it) => it.createdAt === createdAt);
+  if (idx < 0) return;
+  const item = list[idx];
+  const itGapCompleted = (item.itGapCompletedStages || []).filter((x) => x !== 1).sort((a, b) => a - b);
+  const { globalItGapAnalysisJson, ...rest } = item;
+  list[idx] = { ...rest, itGapCompletedStages: itGapCompleted };
   localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
 }
 
@@ -4036,6 +4240,7 @@ function inferTaskIdFromMessage(msg) {
   if (type === 'intentExtractionCard' && msg.data?.taskId) return msg.data.taskId;
   if (type === 'e2eFlowGeneratedLog') return 'task7';
   if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
+  if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog') return 'task8';
   return null;
 }
 
@@ -4057,6 +4262,9 @@ function shouldIncludeInCommunicationHistory(msg) {
   if (type === 'e2eFlowGeneratedLog') return true;
   if (type === 'e2eFlowExtractStartBlock') return !!msg.confirmed;
   if (type === 'e2eFlowJsonBlock') return !!msg.confirmed;
+  if (type === 'globalItGapStartBlock') return !!msg.confirmed;
+  if (type === 'globalItGapAnalysisCard') return !!msg.confirmed;
+  if (type === 'globalItGapAnalysisLog') return true;
   return false;
 }
 
@@ -4111,6 +4319,7 @@ function getCommunicationsByTask(createdAt) {
     if (msg.type === 'intentExtractionCard' && msg.userText) payload.userText = msg.userText;
     if (msg.type === 'e2eFlowGeneratedLog' && msg.valueStreamJson) payload.valueStreamJson = msg.valueStreamJson;
     if (msg.type === 'e2eFlowJsonBlock' && msg.valueStreamJson) payload.valueStreamJson = msg.valueStreamJson;
+    if ((msg.type === 'globalItGapAnalysisCard' && msg.data) || (msg.type === 'globalItGapAnalysisLog' && msg.analysisJson)) payload.analysisJson = msg.data || msg.analysisJson;
     const contentJson = JSON.stringify(payload, null, 2);
     const entry = { speaker, time: msg.timestamp || '', content: contentJson };
     byTask[currentTask].push(entry);
@@ -4385,6 +4594,18 @@ function renderProblemDetailHistory() {
               titleLabel = parsed.content || '已生成端到端流程 JSON 数据';
               if (parsed.valueStreamJson) {
                 contentStr = parsed.content + '\n\n【端到端流程 JSON 数据】\n' + JSON.stringify(parsed.valueStreamJson, null, 2);
+              }
+            } else if (parsed?.type === 'globalItGapStartBlock') {
+              titleLabel = parsed.content || '即将针对端到端流程开展全局 ITGap 分析';
+            } else if (parsed?.type === 'globalItGapAnalysisCard') {
+              titleLabel = '全局 ITGap 分析';
+              if (parsed.analysisJson) {
+                contentStr = '【全局 ITGap 分析 JSON】\n' + JSON.stringify(parsed.analysisJson, null, 2);
+              }
+            } else if (parsed?.type === 'globalItGapAnalysisLog') {
+              titleLabel = parsed.content || '已生成全局 ITGap 分析';
+              if (parsed.analysisJson) {
+                contentStr = (parsed.content || '') + '\n\n【全局 ITGap 分析 JSON】\n' + JSON.stringify(parsed.analysisJson, null, 2);
               }
             }
           } catch (_) {}
@@ -4820,6 +5041,139 @@ function maybeShowE2eFlowExtractBlock() {
     <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
   container.appendChild(block);
   container.scrollTop = container.scrollHeight;
+}
+
+function maybeShowGlobalItGapStartBlock() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  const valueStream = item.valueStream;
+  if (!valueStream || valueStream.raw) return;
+  const itGapCompleted = item.itGapCompletedStages || [];
+  const itGapCurrent = [0, 1, 2, 3, 4, 5, 6].find((i) => !itGapCompleted.includes(i)) ?? 7;
+  if (itGapCurrent !== 1) return;
+  const comms = getCommunicationsByTask(item.createdAt);
+  if ((comms.task7 || []).length === 0) return;
+  if (problemDetailChatMessages.some((m) => m.type === 'globalItGapStartBlock')) return;
+  if (item.globalItGapAnalysisJson) return;
+  pushAndSaveProblemDetailChat({ type: 'globalItGapStartBlock', content: '即将针对端到端流程开展全局 ITGap 分析', timestamp: getTimeStr(), confirmed: false });
+  const block = document.createElement('div');
+  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-global-itgap-start problem-detail-chat-msg-with-delete';
+  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+  block.innerHTML = `
+    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">即将针对端到端流程开展全局 ITGap 分析</div>
+      <div class="problem-detail-chat-global-itgap-start-actions">
+        <button type="button" class="btn-confirm-start-global-itgap">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function runGlobalItGapAnalysis(isRedo) {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!DEEPSEEK_API_KEY) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用全局 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用全局 ITGap 分析功能。', timestamp: getTimeStr() });
+    return;
+  }
+  const enterpriseContext = {
+    basicInfo: item.basicInfo || problemDetailConfirmedBasicInfo,
+    requirementLogic: item.requirementLogic,
+    preliminary: { customerName: item.customerName, customerNeedsOrChallenges: item.customerNeedsOrChallenges, customerItStatus: item.customerItStatus, projectTimeRequirement: item.projectTimeRequirement },
+  };
+  const businessCanvas = item.bmc || {};
+  const fullProcessVsm = item.valueStream;
+  let parsingBlock = null;
+  if (!isRedo) {
+    parsingBlock = document.createElement('div');
+    parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在开展全局 ITGap 分析…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(parsingBlock);
+    container.scrollTop = container.scrollHeight;
+  } else {
+    const lastCard = container.querySelector('.problem-detail-chat-global-itgap-card');
+    if (lastCard) {
+      const wrap = lastCard.querySelector('.problem-detail-chat-global-itgap-card-body');
+      if (wrap) {
+        wrap.innerHTML = `<div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在重新生成全局 ITGap 分析…</span></div>`;
+      }
+    }
+  }
+  try {
+    const { content, usage, model, durationMs } = await generateGlobalItGapAnalysis(enterpriseContext, businessCanvas, fullProcessVsm);
+    if (parsingBlock) parsingBlock.remove();
+    let analysisJson = null;
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        analysisJson = JSON.parse(jsonMatch[0]);
+      } catch (_) {}
+    }
+    if (!analysisJson) analysisJson = { structuralGap: '', collaborationGap: '', digitalBlindSpots: '', roadmapStrategy: '', globalInsight: content || '（解析失败）', asIsToBeTable: '', top3Gaps: [] };
+    const llmMeta = { usage, model, durationMs };
+    const llmMetaHtml = buildLlmMetaHtml(llmMeta);
+    const jsonStr = escapeHtml(JSON.stringify(analysisJson, null, 2));
+    const dataAttr = String(JSON.stringify(analysisJson)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    let cardBlock = container.querySelector('.problem-detail-chat-global-itgap-card');
+    if (isRedo && cardBlock) {
+      const wrap = cardBlock.querySelector('.problem-detail-chat-global-itgap-card-wrap');
+      if (wrap) {
+        wrap.innerHTML = `
+          <div class="problem-detail-chat-global-itgap-card-header">全局 ITGap 分析</div>
+          <div class="problem-detail-chat-global-itgap-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
+          <div class="problem-detail-chat-global-itgap-card-actions">
+            <button type="button" class="btn-confirm-global-itgap-json btn-confirm-primary" data-json="${dataAttr}">确认</button>
+            <button type="button" class="btn-redo-global-itgap">重做</button>
+          </div>`;
+      }
+      cardBlock.querySelector('.problem-detail-chat-global-itgap-card-meta')?.remove();
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'problem-detail-chat-global-itgap-card-meta';
+      metaDiv.innerHTML = llmMetaHtml;
+      cardBlock.appendChild(metaDiv);
+      const idx = parseInt(cardBlock.dataset.msgIndex, 10);
+      if (!isNaN(idx) && idx >= 0 && idx < problemDetailChatMessages.length) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: analysisJson, structuredView: false, llmMeta };
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      }
+    } else {
+      cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-global-itgap-card problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-global-itgap-card-wrap">
+          <div class="problem-detail-chat-global-itgap-card-header">全局 ITGap 分析</div>
+          <div class="problem-detail-chat-global-itgap-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
+          <div class="problem-detail-chat-global-itgap-card-actions">
+            <button type="button" class="btn-confirm-global-itgap-json btn-confirm-primary" data-json="${dataAttr}">确认</button>
+            <button type="button" class="btn-redo-global-itgap">重做</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>
+        <div class="problem-detail-chat-global-itgap-card-meta">${llmMetaHtml}</div>`;
+      container.appendChild(cardBlock);
+      pushAndSaveProblemDetailChat({ type: 'globalItGapAnalysisCard', data: analysisJson, structuredView: false, timestamp: getTimeStr(), confirmed: false, llmMeta });
+    }
+    container.scrollTop = container.scrollHeight;
+  } catch (err) {
+    if (parsingBlock) parsingBlock.remove();
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">全局 ITGap 分析失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '全局 ITGap 分析失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+    container.scrollTop = container.scrollHeight;
+  }
 }
 
 function maybeShowItGapStartBlock() {
@@ -5357,6 +5711,62 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
+    } else if (msg.type === 'globalItGapStartBlock') {
+      const confirmed = !!msg.confirmed;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-global-itgap-start problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">即将针对端到端流程开展全局 ITGap 分析</div>
+          <div class="problem-detail-chat-global-itgap-start-actions">
+            <button type="button" class="btn-confirm-start-global-itgap" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'globalItGapAnalysisCard') {
+      const data = msg.data || {};
+      const confirmed = !!msg.confirmed;
+      const structuredView = !!msg.structuredView;
+      const jsonStr = escapeHtml(JSON.stringify(data, null, 2));
+      const dataAttr = String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-global-itgap-card problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      const bodyContent = structuredView
+        ? `<div class="problem-detail-chat-global-itgap-structured">${buildGlobalItGapStructuredHtml(data)}</div>`
+        : `<pre class="problem-detail-chat-json-pre">${jsonStr}</pre>`;
+      const confirmBtn = structuredView
+        ? `<button type="button" class="btn-confirm-global-itgap-structured btn-confirm-primary" data-json="${dataAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>`
+        : `<button type="button" class="btn-confirm-global-itgap-json btn-confirm-primary" data-json="${dataAttr}">确认</button>`;
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-global-itgap-card-wrap">
+          <div class="problem-detail-chat-global-itgap-card-header">全局 ITGap 分析</div>
+          <div class="problem-detail-chat-global-itgap-card-body">${bodyContent}</div>
+          <div class="problem-detail-chat-global-itgap-card-actions">
+            ${confirmBtn}
+            <button type="button" class="btn-redo-global-itgap" ${confirmed ? 'disabled' : ''}>重做</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
+      container.appendChild(cardBlock);
+    } else if (msg.type === 'globalItGapAnalysisLog') {
+      const taskLabel = msg.taskLabel || '全局 ITGap 分析';
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-global-itgap-log problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-e2e-flow-log-task">${escapeHtml(taskLabel)}</div>
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '已生成全局 ITGap 分析')}</div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
     } else if (msg.type === 'intentExtractionCard') {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
@@ -5848,6 +6258,27 @@ function renderProblemDetailContent() {
     if (valueStream && !valueStream.raw) {
       const e2eHtml = renderEndToEndFlowHTML(valueStream);
       const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
+      let globalItGapCardHtml = '';
+      const analysis = item.globalItGapAnalysisJson;
+      if (analysis) {
+        const structuredHtml = buildGlobalItGapStructuredHtml(analysis);
+        const jsonStr = escapeHtml(JSON.stringify(analysis, null, 2));
+        globalItGapCardHtml = `
+      <div class="problem-detail-card problem-detail-card-global-itgap" data-task-id="global-itgap">
+        <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
+          <span class="problem-detail-card-header-title">全局ITGap 分析</span>
+          <div class="problem-detail-card-header-actions">
+            <button type="button" class="problem-detail-card-tab problem-detail-card-tab-active" data-tab="detail" aria-pressed="true">全局ITGap 分析</button>
+            <button type="button" class="problem-detail-card-tab" data-tab="json" aria-pressed="false">JSON</button>
+          </div>
+          <span class="problem-detail-card-header-arrow">▾</span>
+        </div>
+        <div class="problem-detail-card-body">
+          <div class="problem-detail-card-body-detail problem-detail-global-itgap-detail">${structuredHtml}</div>
+          <div class="problem-detail-card-body-json" hidden><pre class="problem-detail-card-json-pre">${jsonStr}</pre></div>
+        </div>
+      </div>`;
+      }
       workspaceContent = `
       <div class="problem-detail-card problem-detail-card-e2e-flow" data-task-id="e2e-flow">
         <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
@@ -5862,7 +6293,7 @@ function renderProblemDetailContent() {
           <div class="problem-detail-card-body-detail problem-detail-it-gap-e2e-wrap">${e2eHtml}</div>
           <div class="problem-detail-card-body-json" hidden><pre class="problem-detail-card-json-pre">${jsonStr}</pre></div>
         </div>
-      </div>`;
+      </div>${globalItGapCardHtml}`;
     } else {
       workspaceContent = `
         <div class="problem-detail-workflow-align-placeholder">
@@ -5878,7 +6309,10 @@ function renderProblemDetailContent() {
     if (valueStream && !valueStream.raw) {
       setupProblemDetailCardToggle();
     }
-    requestAnimationFrame(() => maybeShowE2eFlowExtractBlock());
+    requestAnimationFrame(() => {
+      maybeShowE2eFlowExtractBlock();
+      maybeShowGlobalItGapStartBlock();
+    });
     return;
   }
   if (problemDetailViewingMajorStage >= 1) {
