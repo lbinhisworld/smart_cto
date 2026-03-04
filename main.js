@@ -12,6 +12,13 @@ const TASK_TRACKING_STORAGE_KEY = 'digital_problem_task_tracking';
 const ROUTE_STORAGE_KEY = 'app_route_state';
 const OPERATION_HISTORY_STORAGE_KEY = 'digital_problem_operation_history';
 
+/** ITGap 阶段在沟通历史中展示的任务（端到端流程绘制等） */
+const ITGAP_HISTORY_TASKS = [
+  { id: 'task7', name: '端到端流程绘制', stage: 'ITGap分析' },
+  { id: 'task8', name: '全局 ITGap 分析', stage: 'ITGap分析' },
+  { id: 'task9', name: '局部 ITGap 分析', stage: 'ITGap分析' },
+];
+
 /** 数字化问题跟进任务定义 */
 const FOLLOW_TASKS = [
   { id: 'task1', name: '企业背景洞察', stage: '需求理解', objective: '基于客户输入的企业信息，提炼并结构化企业基本信息，为后续 BMC 与需求逻辑分析提供基础。', evaluationCriteria: '成功提取并确认包含公司名称、信用代码、法人、成立日期、注册资本、经营范围等核心字段的结构化 JSON。' },
@@ -1883,6 +1890,63 @@ if (el.problemDetailChatMessages) {
       runPainPointAnnotation();
       return;
     }
+    const confirmE2eExtractBtn = e.target.closest('.btn-confirm-e2e-extract');
+    if (confirmE2eExtractBtn && !confirmE2eExtractBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const valueStream = item?.valueStream;
+      if (!valueStream || valueStream.raw) return;
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'e2eFlowExtractStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+      }
+      confirmE2eExtractBtn.disabled = true;
+      confirmE2eExtractBtn.textContent = '已确认';
+      pushAndSaveProblemDetailChat({ role: 'user', content: '确认', timestamp: getTimeStr() });
+      const container = el.problemDetailChatMessages;
+      const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
+      const dataAttr = String(JSON.stringify(valueStream)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const jsonBlock = document.createElement('div');
+      jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-e2e-json-block problem-detail-chat-msg-with-delete';
+      jsonBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
+      jsonBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-e2e-json-wrap">
+          <div class="problem-detail-chat-e2e-json-header">端到端流程 JSON 数据</div>
+          <pre class="problem-detail-chat-json-pre">${jsonStr}</pre>
+          <div class="problem-detail-chat-e2e-json-actions">
+            <button type="button" class="btn-confirm-e2e-json" data-json="${dataAttr}">确认</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(jsonBlock);
+      pushAndSaveProblemDetailChat({ type: 'e2eFlowJsonBlock', valueStreamJson: valueStream, timestamp: getTimeStr(), confirmed: false });
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailHistory();
+      return;
+    }
+    const confirmE2eJsonBtn = e.target.closest('.btn-confirm-e2e-json');
+    if (confirmE2eJsonBtn && !confirmE2eJsonBtn.disabled) {
+      try {
+        const valueStream = JSON.parse(confirmE2eJsonBtn.dataset.json);
+        const item = currentProblemDetailItem;
+        let idx = problemDetailChatMessages.findIndex((m) => m.type === 'e2eFlowJsonBlock');
+        if (idx >= 0) {
+          problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], valueStreamJson: valueStream, confirmed: true };
+          saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+        }
+        confirmE2eJsonBtn.disabled = true;
+        confirmE2eJsonBtn.textContent = '已确认';
+        pushAndSaveProblemDetailChat({ role: 'user', content: '确认', timestamp: getTimeStr() });
+        pushAndSaveProblemDetailChat({ type: 'e2eFlowGeneratedLog', content: '已生成端到端流程 JSON 数据', timestamp: getTimeStr(), taskLabel: '端到端流程绘制', valueStreamJson: valueStream });
+        const container = el.problemDetailChatMessages;
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+      } catch (_) {}
+      return;
+    }
     const startItGapBtn = e.target.closest('.btn-confirm-start-it-gap');
     if (startItGapBtn && !startItGapBtn.disabled) {
       startItGapBtn.disabled = true;
@@ -2033,6 +2097,44 @@ if (el.problemDetailChatMessages) {
           maybeShowPainPointStartBlock();
         });
       } catch (_) {}
+      return;
+    }
+    const rejectBtn = e.target.closest('.btn-reject-intent-extraction');
+    if (rejectBtn) {
+      const cardBlock = rejectBtn.closest('.problem-detail-chat-intent-card');
+      if (cardBlock && cardBlock.dataset.msgIndex != null) {
+        const idx = parseInt(cardBlock.dataset.msgIndex, 10);
+        const userText = (rejectBtn.dataset.userText || '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        if (!isNaN(idx) && idx >= 0 && idx < problemDetailChatMessages.length && userText) {
+          const item = currentProblemDetailItem;
+          const createdAt = item?.createdAt;
+          const { context: contextStr } = buildIntentExtractionContext(createdAt, item);
+          const inner = cardBlock.querySelector('.problem-detail-intent-card-inner');
+          if (inner) {
+            inner.innerHTML = `<div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在全局重新匹配任务…</span></div>`;
+          }
+          (async () => {
+            try {
+              const result = await extractUserIntentFromChat(userText, contextStr, { globalScope: true });
+              const { _llmMeta, ...extracted } = result;
+              problemDetailChatMessages[idx] = { role: 'system', type: 'intentExtractionCard', data: extracted, userText, timestamp: getTimeStr(), confirmed: false, llmMeta: _llmMeta };
+              saveProblemDetailChat(createdAt, problemDetailChatMessages);
+              const container = el.problemDetailChatMessages;
+              container.innerHTML = '';
+              renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+              container.scrollTop = container.scrollHeight;
+              focusWorkspaceOnIntent(extracted);
+            } catch (err) {
+              problemDetailChatMessages[idx] = { role: 'system', content: '重新提炼失败：' + (err.message || String(err)), timestamp: getTimeStr() };
+              saveProblemDetailChat(createdAt, problemDetailChatMessages);
+              const container = el.problemDetailChatMessages;
+              container.innerHTML = '';
+              renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+              container.scrollTop = container.scrollHeight;
+            }
+          })();
+        }
+      }
       return;
     }
     const intentBtn = e.target.closest('.btn-confirm-intent-extraction');
@@ -2663,13 +2765,13 @@ async function parseDigitalProblemInput(text) {
   return JSON.parse(jsonStr);
 }
 
-/** 构建意图提炼的完整上下文：当前问题的沟通历史 + 页面内容结构，供大模型搜索匹配 */
+/** 构建意图提炼的完整上下文：当前问题的沟通历史 + 页面内容结构，供大模型搜索匹配；返回 { context, currentTask } */
 function buildIntentExtractionContext(createdAt, item) {
   const chats = getProblemDetailChats()[createdAt];
   const lines = [];
   lines.push('【沟通历史】');
+  let currentTask = 'task1';
   if (Array.isArray(chats) && chats.length > 0) {
-    let currentTask = 'task1';
     for (const msg of chats) {
       const inferred = inferTaskIdFromMessage(msg);
       if (inferred) currentTask = inferred;
@@ -2731,7 +2833,7 @@ function buildIntentExtractionContext(createdAt, item) {
       });
     }
   }
-  return lines.join('\n');
+  return { context: lines.join('\n'), currentTask };
 }
 
 /** 构建用于查询的沟通历史文本（排除查询类消息），供大模型回答查询时使用 */
@@ -3154,11 +3256,21 @@ function applyModificationToWorkspace(extracted, newContent, positionInfo, item)
   return false;
 }
 
-/** 提炼客户聊天输入的意图：当前任务、阶段、意图类型及具体内容；结合沟通历史搜索最匹配的内容单元并协助定位 */
-async function extractUserIntentFromChat(text, context) {
+/** 提炼客户聊天输入的意图：当前任务、阶段、意图类型及具体内容；结合沟通历史搜索最匹配的内容单元并协助定位
+ * @param {string} text - 用户输入
+ * @param {string} context - 沟通历史与页面结构
+ * @param {{ currentTaskHint?: string | null, globalScope?: boolean }} options - currentTaskHint: 当前任务提示，优先考虑；globalScope: 用户点击「不对」时传 true，全局匹配
+ */
+async function extractUserIntentFromChat(text, context, options = {}) {
+  const { currentTaskHint, globalScope } = options;
   const tasksDesc = FOLLOW_TASKS.map((t) => `- ${t.id}: ${t.name}（${t.stage}）`).join('\n');
+  const taskHintBlock = globalScope
+    ? `【当前任务】用户表示当前任务推断不对，请从【任务列表】中全局搜索，判断用户意图与哪个任务最为相关，不要受沟通历史中任务标签的局限。`
+    : currentTaskHint
+      ? `【当前任务】当前对话上下文最可能涉及的任务为 ${currentTaskHint}（${FOLLOW_TASKS.find((t) => t.id === currentTaskHint)?.name || currentTaskHint}）。请优先考虑用户意图与此任务的关联；若用户输入明显与其它任务更相关，则选择最相关的任务。`
+      : '';
   const systemPrompt = `你是一个数字化问题跟进对话的意图分析助手。用户会在聊天区输入消息，请结合【沟通历史】和【当前页面内容结构】提炼意图，从上下文中搜索最为匹配的内容单元，协助定位到对应的页面位置。
-
+${taskHintBlock ? `\n${taskHintBlock}\n` : ''}
 【任务列表】
 ${tasksDesc}
 
@@ -3922,13 +4034,18 @@ function inferTaskIdFromMessage(msg) {
   if (type === 'itStatusStartBlock' || (role === 'system' && (content === 'IT 现状标注完成' || content === 'IT 现状标注失败'))) return 'task5';
   if (type === 'painPointStartBlock' || (role === 'system' && (content === '痛点标注完成' || content === '痛点标注完毕' || content === '痛点标注失败'))) return 'task6';
   if (type === 'intentExtractionCard' && msg.data?.taskId) return msg.data.taskId;
+  if (type === 'e2eFlowGeneratedLog') return 'task7';
+  if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
   return null;
 }
 
-/** 判断消息是否应纳入任务沟通历史：仅大模型返回内容或用户主动输入；未确认的意图卡片不纳入；查询意图的客户输入与系统返回均不纳入；请教讨论纳入 */
+/** 判断消息是否应纳入任务沟通历史：仅大模型返回内容或用户主动输入；未确认的意图卡片不纳入；查询意图的客户输入与系统返回均不纳入；请教讨论纳入；用户纯「确认」不纳入 */
 function shouldIncludeInCommunicationHistory(msg) {
   if (!msg) return false;
-  if (msg.role === 'user') return true;
+  if (msg.role === 'user') {
+    if ((msg.content || '').trim() === '确认') return false;
+    return true;
+  }
   if (msg._taskId) return true; // 请教讨论的系统回复
   const type = msg.type;
   if (type === 'intentExtractionCard') {
@@ -3937,6 +4054,9 @@ function shouldIncludeInCommunicationHistory(msg) {
     return !!msg.confirmed;
   }
   if (type === 'basicInfoCard' || type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard') return true;
+  if (type === 'e2eFlowGeneratedLog') return true;
+  if (type === 'e2eFlowExtractStartBlock') return !!msg.confirmed;
+  if (type === 'e2eFlowJsonBlock') return !!msg.confirmed;
   return false;
 }
 
@@ -3947,6 +4067,7 @@ function getCommunicationsByTask(createdAt) {
   let currentTask = 'task1';
   const byTask = {};
   FOLLOW_TASKS.forEach((t) => { byTask[t.id] = []; });
+  ITGAP_HISTORY_TASKS.forEach((t) => { byTask[t.id] = []; });
   let lastUserComm = null;
   for (const msg of chats) {
     const inferred = inferTaskIdFromMessage(msg);
@@ -3988,6 +4109,8 @@ function getCommunicationsByTask(createdAt) {
     if (msg.data) payload.data = msg.data;
     if (msg.parsed) payload.parsed = msg.parsed;
     if (msg.type === 'intentExtractionCard' && msg.userText) payload.userText = msg.userText;
+    if (msg.type === 'e2eFlowGeneratedLog' && msg.valueStreamJson) payload.valueStreamJson = msg.valueStreamJson;
+    if (msg.type === 'e2eFlowJsonBlock' && msg.valueStreamJson) payload.valueStreamJson = msg.valueStreamJson;
     const contentJson = JSON.stringify(payload, null, 2);
     const entry = { speaker, time: msg.timestamp || '', content: contentJson };
     byTask[currentTask].push(entry);
@@ -4228,7 +4351,8 @@ function renderProblemDetailHistory() {
   const createdAt = item?.createdAt;
   const trackingData = createdAt ? (getTaskTrackingData()[createdAt] || {}) : {};
   const communications = createdAt ? getCommunicationsByTask(createdAt) : {};
-  container.innerHTML = FOLLOW_TASKS.map((task) => {
+  const allHistoryTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS];
+  container.innerHTML = allHistoryTasks.map((task) => {
     const taskData = trackingData[task.id] || {};
     const objective = (taskData.objective ?? task.objective) || '—';
     const evaluationCriteria = (taskData.evaluationCriteria ?? task.evaluationCriteria) || '—';
@@ -4243,13 +4367,25 @@ function renderProblemDetailHistory() {
       ? '<p class="problem-detail-history-comm-empty">暂无沟通记录</p>'
       : comms.map((c, i) => {
           const timeStr = c.time ? formatChatTime(c.time) : '—';
-          const contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
+          let contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
           let titleLabel = c.speaker;
           try {
             const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
             if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent != null) {
               const intentLabel = intentLabels[parsed.data.intent] || parsed.data.intent || '—';
               titleLabel = `用户意图提炼：${intentLabel}`;
+            } else if (parsed?.type === 'e2eFlowExtractStartBlock') {
+              titleLabel = parsed.content || '我先需要提取端到端流程绘制的 json 数据';
+            } else if (parsed?.type === 'e2eFlowJsonBlock') {
+              titleLabel = '端到端流程 JSON 数据';
+              if (parsed.valueStreamJson) {
+                contentStr = '【端到端流程 JSON 数据】\n' + JSON.stringify(parsed.valueStreamJson, null, 2);
+              }
+            } else if (parsed?.type === 'e2eFlowGeneratedLog') {
+              titleLabel = parsed.content || '已生成端到端流程 JSON 数据';
+              if (parsed.valueStreamJson) {
+                contentStr = parsed.content + '\n\n【端到端流程 JSON 数据】\n' + JSON.stringify(parsed.valueStreamJson, null, 2);
+              }
             }
           } catch (_) {}
           return `
@@ -4650,6 +4786,35 @@ function maybeShowPainPointStartBlock() {
       <div class="problem-detail-chat-msg-content">即将开始价值流图环节节点痛点标注</div>
       <div class="problem-detail-chat-pain-point-start-actions">
         <button type="button" class="btn-confirm-start-pain-point">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+}
+
+function maybeShowE2eFlowExtractBlock() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  const valueStream = item.valueStream;
+  if (!valueStream || valueStream.raw) return;
+  const itGapCompleted = item.itGapCompletedStages || [];
+  const itGapCurrent = [0, 1, 2, 3, 4, 5, 6].find((i) => !itGapCompleted.includes(i)) ?? 7;
+  if (itGapCurrent !== 1) return;
+  const comms = getCommunicationsByTask(item.createdAt);
+  if ((comms.task7 || []).length > 0) return;
+  if (problemDetailChatMessages.some((m) => m.type === 'e2eFlowExtractStartBlock')) return;
+  pushAndSaveProblemDetailChat({ type: 'e2eFlowExtractStartBlock', content: '我先需要提取端到端流程绘制的 json 数据', timestamp: getTimeStr(), confirmed: false });
+  const block = document.createElement('div');
+  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-e2e-extract-start problem-detail-chat-msg-with-delete';
+  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+  block.innerHTML = `
+    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">我先需要提取端到端流程绘制的 json 数据</div>
+      <div class="problem-detail-chat-e2e-extract-actions">
+        <button type="button" class="btn-confirm-e2e-extract">确认</button>
       </div>
     </div>
     <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -5145,6 +5310,53 @@ function renderProblemDetailChatFromStorage(container, messages) {
       block.dataset.msgIndex = String(idx);
       block.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content markdown-body">${renderMarkdown(msg.content || MODIFICATION_CLARIFICATION_TEXT)}</div></div><div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
+    } else if (msg.type === 'e2eFlowExtractStartBlock') {
+      const confirmed = !!msg.confirmed;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-e2e-extract-start problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">我先需要提取端到端流程绘制的 json 数据</div>
+          <div class="problem-detail-chat-e2e-extract-actions">
+            <button type="button" class="btn-confirm-e2e-extract" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'e2eFlowJsonBlock') {
+      const jsonBlock = document.createElement('div');
+      jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-e2e-json-block problem-detail-chat-msg-with-delete';
+      jsonBlock.dataset.msgIndex = String(idx);
+      const vs = msg.valueStreamJson || {};
+      const jsonStr = escapeHtml(JSON.stringify(vs, null, 2));
+      const dataAttr = String(JSON.stringify(vs)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const confirmed = !!msg.confirmed;
+      jsonBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-e2e-json-wrap">
+          <div class="problem-detail-chat-e2e-json-header">端到端流程 JSON 数据</div>
+          <pre class="problem-detail-chat-json-pre">${jsonStr}</pre>
+          <div class="problem-detail-chat-e2e-json-actions">
+            <button type="button" class="btn-confirm-e2e-json" data-json="${dataAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(jsonBlock);
+    } else if (msg.type === 'e2eFlowGeneratedLog') {
+      const taskLabel = msg.taskLabel || '端到端流程绘制';
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-e2e-flow-log problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-e2e-flow-log-task">${escapeHtml(taskLabel)}</div>
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '已生成端到端流程 JSON 数据')}</div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
     } else if (msg.type === 'intentExtractionCard') {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
@@ -5176,11 +5388,13 @@ function renderProblemDetailChatFromStorage(container, messages) {
       const cardBlock = document.createElement('div');
       cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-intent-card';
       cardBlock.dataset.msgIndex = String(idx);
+      const rejectBtnHtml = confirmed ? '' : `<button type="button" class="btn-reject-intent-extraction" data-user-text="${userTextAttr}">不对</button>`;
       cardBlock.innerHTML = `
         <div class="problem-detail-basic-info-card problem-detail-intent-card-inner">
           <div class="problem-detail-basic-info-card-body">${rowsHtml}</div>
           <div class="problem-detail-basic-info-card-actions">
             <button type="button" class="btn-confirm-intent-extraction" data-extracted="${dataAttr}" data-user-text="${userTextAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            ${rejectBtnHtml}
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
@@ -5406,7 +5620,7 @@ async function handleProblemDetailChatSend() {
     }
     const item = currentProblemDetailItem;
     const createdAt = item?.createdAt;
-    const context = buildIntentExtractionContext(createdAt, item);
+    const { context: contextStr, currentTask } = buildIntentExtractionContext(createdAt, item);
     let textForExtraction = text;
     if (lastModificationClarification && lastModificationClarification.createdAt === createdAt) {
       const userIdx = lastModificationClarification.userMessageIndex;
@@ -5422,7 +5636,7 @@ async function handleProblemDetailChatSend() {
       }
       lastModificationClarification = null;
     }
-    const result = await extractUserIntentFromChat(textForExtraction, context);
+    const result = await extractUserIntentFromChat(textForExtraction, contextStr, { currentTaskHint: currentTask });
     const { _llmMeta, ...extracted } = result;
     parsingBlock.remove();
     const isModificationUnclear = extracted.intent === 'modification' && extracted.modificationClear !== true;
@@ -5462,11 +5676,14 @@ async function handleProblemDetailChatSend() {
       const dataAttr = String(JSON.stringify(extracted)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const userTextAttr = (textForExtraction || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const llmMetaHtml = _llmMeta ? buildLlmMetaHtml(_llmMeta) : '';
+      const newMsgIndex = problemDetailChatMessages.length;
+      cardBlock.dataset.msgIndex = String(newMsgIndex);
       cardBlock.innerHTML = `
         <div class="problem-detail-basic-info-card problem-detail-intent-card-inner">
           <div class="problem-detail-basic-info-card-body">${rowsHtml}</div>
           <div class="problem-detail-basic-info-card-actions">
             <button type="button" class="btn-confirm-intent-extraction" data-extracted="${dataAttr}" data-user-text="${userTextAttr}">确认</button>
+            <button type="button" class="btn-reject-intent-extraction" data-user-text="${userTextAttr}">不对</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
@@ -5608,9 +5825,16 @@ function renderProblemDetailContent() {
   }
   const currentMajorStage = item.currentMajorStage ?? 0;
   if (problemDetailViewingMajorStage >= 2) {
-    const itGapSubsteps = ['端到端流程绘制', '流程节点生成', '交互节点设计', '集成节点设计', '逻辑节点设计'];
-    const itGapCompleted = item.itGapCompletedStages || [];
-    const itGapCurrent = [0, 1, 2, 3, 4].find((i) => !itGapCompleted.includes(i)) ?? 5;
+    const itGapSubsteps = ['端到端流程绘制', '全局 ITGap 分析', '局部 ITGap 分析', '流程节点生成', '交互节点设计', '集成节点设计', '逻辑节点设计'];
+    const valueStream = item.valueStream;
+    let itGapCompleted = item.itGapCompletedStages || [];
+    // 若已有价值流（端到端流程已绘制），自动将端到端流程绘制任务标为完成并持久化（任务过程日志由用户确认流程写入）
+    if (valueStream && !valueStream.raw && !itGapCompleted.includes(0)) {
+      itGapCompleted = [...itGapCompleted, 0].sort((a, b) => a - b);
+      updateDigitalProblemItGapCompletedStages(item.createdAt, itGapCompleted);
+      currentProblemDetailItem = { ...item, itGapCompletedStages: itGapCompleted };
+    }
+    const itGapCurrent = [0, 1, 2, 3, 4, 5, 6].find((i) => !itGapCompleted.includes(i)) ?? 7;
     const itGapSubstepsHtml = itGapSubsteps.map((name, i) => {
       const done = itGapCompleted.includes(i);
       const current = i === itGapCurrent;
@@ -5620,11 +5844,25 @@ function renderProblemDetailContent() {
       const icon = done ? ' <span class="problem-detail-substep-check">✅</span>' : '';
       return `<span class="${cls}">${escapeHtml(name)}${icon}</span>`;
     }).join('<span class="problem-detail-substep-sep">→</span>');
-    const valueStream = item.valueStream;
     let workspaceContent = '';
     if (valueStream && !valueStream.raw) {
       const e2eHtml = renderEndToEndFlowHTML(valueStream);
-      workspaceContent = `<div class="problem-detail-it-gap-e2e-wrap">${e2eHtml}</div>`;
+      const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
+      workspaceContent = `
+      <div class="problem-detail-card problem-detail-card-e2e-flow" data-task-id="e2e-flow">
+        <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
+          <span class="problem-detail-card-header-title">端到端全流程</span>
+          <div class="problem-detail-card-header-actions">
+            <button type="button" class="problem-detail-card-tab problem-detail-card-tab-active" data-tab="detail" aria-pressed="true">端到端流程</button>
+            <button type="button" class="problem-detail-card-tab" data-tab="json" aria-pressed="false">JSON</button>
+          </div>
+          <span class="problem-detail-card-header-arrow">▾</span>
+        </div>
+        <div class="problem-detail-card-body">
+          <div class="problem-detail-card-body-detail problem-detail-it-gap-e2e-wrap">${e2eHtml}</div>
+          <div class="problem-detail-card-body-json" hidden><pre class="problem-detail-card-json-pre">${jsonStr}</pre></div>
+        </div>
+      </div>`;
     } else {
       workspaceContent = `
         <div class="problem-detail-workflow-align-placeholder">
@@ -5637,6 +5875,10 @@ function renderProblemDetailContent() {
       <div class="problem-detail-workspace-scroll">
         ${workspaceContent}
       </div>`;
+    if (valueStream && !valueStream.raw) {
+      setupProblemDetailCardToggle();
+    }
+    requestAnimationFrame(() => maybeShowE2eFlowExtractBlock());
     return;
   }
   if (problemDetailViewingMajorStage >= 1) {

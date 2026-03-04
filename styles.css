@@ -875,6 +875,63 @@ body {
   border-color: rgba(255, 193, 7, 0.35);
 }
 
+.problem-detail-chat-e2e-flow-log {
+  background: rgba(88, 166, 255, 0.06);
+  border-color: rgba(88, 166, 255, 0.2);
+}
+
+.problem-detail-chat-e2e-flow-log .problem-detail-chat-e2e-flow-log-task {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.problem-detail-chat-e2e-extract-start .problem-detail-chat-e2e-extract-actions,
+.problem-detail-chat-e2e-json-block .problem-detail-chat-e2e-json-actions {
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.btn-confirm-e2e-extract,
+.btn-confirm-e2e-json {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-confirm-e2e-extract:hover:not(:disabled),
+.btn-confirm-e2e-json:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-confirm-e2e-extract:disabled,
+.btn-confirm-e2e-json:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.problem-detail-chat-e2e-json-block .problem-detail-chat-e2e-json-header {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.problem-detail-chat-e2e-json-block .problem-detail-chat-json-pre {
+  max-height: 12rem;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
 .problem-detail-chat-msg-user {
   align-self: flex-end;
   margin-left: auto;
@@ -1114,6 +1171,24 @@ body {
   cursor: default;
 }
 
+.problem-detail-basic-info-card-actions .btn-reject-intent-extraction {
+  margin-left: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.problem-detail-basic-info-card-actions .btn-reject-intent-extraction:hover {
+  color: var(--text);
+  opacity: 0.9;
+}
+
 .btn-confirm-basic-info {
   padding: 0.35rem 0.75rem;
   font-size: 0.8125rem;
@@ -1300,6 +1375,10 @@ body {
 .btn-confirm-draw-value-stream:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.problem-detail-card-e2e-flow {
+  margin: 1rem;
 }
 
 .problem-detail-value-stream-card {
