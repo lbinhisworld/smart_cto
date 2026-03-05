@@ -508,11 +508,12 @@ function renderToolsKnowledge() {
       entries.length === 0
         ? '<p class="tools-timeline-empty">暂未记录任何知识，可以通过左侧「话题讨论」添加。</p>'
         : `<ul class="tools-timeline">${entries
-            .map((e) => {
+            .map((e, index) => {
               const time = formatChatTime ? formatChatTime(e.createdAt) : e.createdAt;
-              return `<li class="tools-timeline-item"><div class="tools-timeline-time">${escapeHtml(
+              const contentHtml = escapeHtml(e.content || '');
+              return `<li class="tools-timeline-item" data-entry-index="${index}"><div class="tools-timeline-time"><span class="tools-timeline-time-text">${escapeHtml(
                 time || ''
-              )}</div><div class="tools-timeline-content">${escapeHtml(e.content || '')}</div></li>`;
+              )}</span><button type="button" class="tools-timeline-delete" data-tool-id="${tool.id}" data-entry-index="${index}" aria-label="删除时间线节点"><span class="tools-timeline-delete-icon">🗑</span></button></div><div class="tools-timeline-content">${contentHtml}</div></li>`;
             })
             .join('')}</ul>`;
     const activeCls = tool.id === currentToolKnowledgeId ? ' tools-card-active' : '';
@@ -2888,6 +2889,47 @@ if (el.toolsChatMessages) {
           }
         }
 
+        // 若意图为删除且命中话题，则删除对应话题及其时间线记录
+        if (target && intent === '删除') {
+          const targetId = target.id;
+          const name = target.name || topicName || '未知话题';
+
+          // 从话题列表中移除并持久化
+          const idx = TOOL_KNOWLEDGE_ITEMS.findIndex((t) => String(t.id) === String(targetId));
+          if (idx >= 0) {
+            TOOL_KNOWLEDGE_ITEMS.splice(idx, 1);
+            saveToolKnowledgeItemsToStorage();
+          }
+
+          // 删除对应时间线记录
+          const state = getToolKnowledgeState();
+          if (state && Object.prototype.hasOwnProperty.call(state, targetId)) {
+            delete state[targetId];
+            saveToolKnowledgeState(state);
+          }
+
+          // 调整当前选中话题
+          if (String(currentToolKnowledgeId) === String(targetId)) {
+            currentToolKnowledgeId = TOOL_KNOWLEDGE_ITEMS[0]?.id || '';
+          }
+
+          // 重新渲染话题列表
+          renderToolsKnowledge();
+
+          // 在聊天区记录删除结果
+          if (el.toolsChatMessages) {
+            const sysBlock = document.createElement('div');
+            sysBlock.className = 'tools-chat-msg tools-chat-msg-system';
+            sysBlock.innerHTML = `<div class="tools-chat-msg-content">已删除话题「${escapeHtml(
+              name
+            )}」及其时间线记录。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+            el.toolsChatMessages.appendChild(sysBlock);
+            el.toolsChatMessages.scrollTop = el.toolsChatMessages.scrollHeight;
+            saveToolsChatMessagesToStorage();
+          }
+          return;
+        }
+
         if (target && note) {
           currentToolKnowledgeId = target.id;
           appendToolKnowledge(target.id, note);
@@ -2921,6 +2963,36 @@ if (el.toolsChatMessages) {
         }
       } catch (_) {}
     }
+  });
+}
+
+if (el.toolsList) {
+  el.toolsList.addEventListener('click', (e) => {
+    const btn = e.target.closest('.tools-timeline-delete');
+    if (!btn) return;
+    const toolId =
+      btn.getAttribute('data-tool-id') ||
+      btn.closest('.tools-card')?.dataset.toolId ||
+      currentToolKnowledgeId;
+    const indexAttr =
+      btn.getAttribute('data-entry-index') ||
+      btn.closest('.tools-timeline-item')?.getAttribute('data-entry-index') ||
+      '-1';
+    const entryIndex = parseInt(indexAttr, 10);
+    if (!toolId || isNaN(entryIndex) || entryIndex < 0) return;
+
+    const state = getToolKnowledgeState();
+    const list = Array.isArray(state[toolId]) ? state[toolId] : [];
+    if (!list.length || entryIndex >= list.length) return;
+
+    list.splice(entryIndex, 1);
+    if (list.length > 0) {
+      state[toolId] = list;
+    } else {
+      delete state[toolId];
+    }
+    saveToolKnowledgeState(state);
+    renderToolsKnowledge();
   });
 }
 
