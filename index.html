@@ -13,6 +13,7 @@
   <div class="app">
     <nav id="topNav" class="top-nav">
       <button type="button" id="btnHome" class="btn-nav">首页</button>
+      <button type="button" id="btnTools" class="btn-nav">知识库</button>
       <span id="navDetailLabel" class="btn-nav btn-nav-active" hidden>企业详情</span>
     </nav>
 
@@ -91,6 +92,25 @@
           </div>
           <div id="problemDetailHistoryContent" class="problem-detail-history-body"></div>
         </aside>
+      </div>
+    </div>
+
+    <div id="toolsView" class="view tools-view" hidden>
+      <div class="tools-header">
+        <button type="button" id="btnToolsBack" class="btn-problem-detail-back">← 返回</button>
+      </div>
+      <div class="tools-body">
+        <aside class="tools-chat">
+          <div class="tools-chat-header">话题讨论</div>
+          <div id="toolsChatMessages" class="tools-chat-body"></div>
+          <div class="tools-chat-input-wrap">
+            <div class="tools-chat-input-main">
+              <textarea id="toolsChatInput" class="tools-chat-input" placeholder="记录或讨论某个工具的使用经验、注意事项、最佳实践…" rows="3"></textarea>
+              <button type="button" id="toolsChatSend" class="tools-chat-send" aria-label="发送">↑</button>
+            </div>
+          </div>
+        </aside>
+        <main id="toolsList" class="tools-list"></main>
       </div>
     </div>
 

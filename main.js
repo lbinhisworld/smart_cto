@@ -11,6 +11,9 @@ const PROBLEM_DETAIL_CHATS_STORAGE_KEY = 'problem_detail_chats';
 const TASK_TRACKING_STORAGE_KEY = 'digital_problem_task_tracking';
 const ROUTE_STORAGE_KEY = 'app_route_state';
 const OPERATION_HISTORY_STORAGE_KEY = 'digital_problem_operation_history';
+const TOOL_KNOWLEDGE_STORAGE_KEY = 'tool_knowledge_notes';
+const TOOL_KNOWLEDGE_ITEMS_STORAGE_KEY = 'tool_knowledge_topics';
+const TOOL_KNOWLEDGE_CHAT_STORAGE_KEY = 'tool_knowledge_chat_html';
 
 /** ITGap 阶段在沟通历史中展示的任务（端到端流程绘制等） */
 const ITGAP_HISTORY_TASKS = [
@@ -25,6 +28,99 @@ const IT_STRATEGY_TASKS = [
   { id: 'task11', name: '环节专项设计', stage: 'IT策略规划' },
   { id: 'task12', name: '链条串联与闭环', stage: 'IT策略规划' },
 ];
+
+/** 工具知识：工具清单（右侧长卡片列表） */
+const TOOL_KNOWLEDGE_ITEMS = [
+  {
+    id: 'bmc',
+    name: '商业模式画布（BMC）',
+    description: '用于从客户细分、价值主张、渠道通路等九大模块系统性分析企业商业模式，是需求理解阶段的重要工具。',
+  },
+  {
+    id: 'value_stream',
+    name: '价值流图（Value Stream）',
+    description: '用于从端到端流程视角梳理业务阶段与关键环节，识别价值创造路径和浪费点，是工作流对齐与 ITGap 分析的基础。',
+  },
+  {
+    id: 'it_gap',
+    name: 'ITGap 分析',
+    description: '用于从数据、功能、体验/效率三维度分析 IT 能力与业务需求的差距，输出全球和局部 ITGap 分析结论，为 IT 策略规划提供输入。',
+  },
+];
+
+/** 工具知识：当前选中的工具 ID（用于左侧聊天关联到某个工具卡片） */
+let currentToolKnowledgeId = TOOL_KNOWLEDGE_ITEMS[0]?.id || '';
+
+/** 工具知识：从本地存储加载自定义话题列表，覆盖默认列表 */
+function loadToolKnowledgeItemsFromStorage() {
+  try {
+    const raw = localStorage.getItem(TOOL_KNOWLEDGE_ITEMS_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    TOOL_KNOWLEDGE_ITEMS.length = 0;
+    parsed.forEach((item) => {
+      if (!item || !item.id || !item.name) return;
+      TOOL_KNOWLEDGE_ITEMS.push({
+        id: String(item.id),
+        name: String(item.name),
+        description: typeof item.description === 'string' ? item.description : '',
+      });
+    });
+  } catch {
+    // ignore
+  }
+}
+
+/** 工具知识：将当前话题列表写入本地存储 */
+function saveToolKnowledgeItemsToStorage() {
+  try {
+    localStorage.setItem(TOOL_KNOWLEDGE_ITEMS_STORAGE_KEY, JSON.stringify(TOOL_KNOWLEDGE_ITEMS));
+  } catch {
+    // ignore
+  }
+}
+
+// 尝试从本地存储恢复工具知识话题（无记录时保留默认内置话题）
+loadToolKnowledgeItemsFromStorage();
+
+/** 工具/话题讨论意图管理：调用大模型分析用户对话题的意图与对象 */
+async function analyzeToolDiscussionIntent(text) {
+  const systemPrompt = `你是一个「工具/话题讨论意图分析助手」。用户会在聊天框中输入一段关于某个软件工具、平台、方法论或抽象话题（如企业微信、飞书、BMC 商业模式画布分析等）的讨论内容。
+
+【你的任务】
+1. 判断用户这段话的「沟通意图」是哪一类（只能从下面五个中选一类）：
+   - 增加：提出新增功能、补充知识点、增加用法、增加配置项等；
+   - 删除：希望删除某个配置、去掉某条规则、废弃某个用法/工具等；
+   - 修改：希望修改现有配置、规则、流程、使用方式等；
+   - 查询：在询问某个工具是什么、怎么用、有没有某功能等；
+   - 讨论：非明确增删改查，而是泛化的经验交流、优缺点讨论、踩坑分享等。
+
+2. 识别本段讨论主要涉及的「讨论话题」：
+   - 可以是软件产品/平台（如：企业微信、飞书、钉钉、Jira）；
+   - 也可以是方法论/分析工具（如：BMC 商业模式画布、价值流图、ITGap 分析等）；
+   - 若无法确定具体工具，请尽量从语义中推断一个最接近的工具名称，推断失败则填 ""。
+
+3. 沟通内容（content）直接返回用户原始输入文本（不做改写），用于在卡片中展示。
+
+【输出格式】
+请严格返回一个 JSON 对象，不要包含多余说明或 Markdown 代码块，例如：
+{
+  "intent": "增加|删除|修改|查询|讨论",
+  "tool": "讨论话题（例如具体工具/平台/方法论名称，如 企业微信 或 BMC 商业模式画布）",
+  "newTopic": "当 intent 为 增加 时，代表用户希望新增的话题名称；否则可为 \"\"",
+  "content": "用户的原始输入文本"
+}`;
+
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: text },
+  ]);
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  const jsonStr = jsonMatch ? jsonMatch[0] : content;
+  const parsed = JSON.parse(jsonStr);
+  return { ...parsed, _llmMeta: { usage, model, durationMs } };
+}
 
 /** 数字化问题跟进任务定义 */
 const FOLLOW_TASKS = [
@@ -81,8 +177,7 @@ const el = {
   btnQuery: document.getElementById('btnQuery'),
   btnSave: document.getElementById('btnSave'),
   btnHome: document.getElementById('btnHome'),
-  btnCanvas: document.getElementById('btnCanvas'),
-  btnList: document.getElementById('btnList'),
+  btnTools: document.getElementById('btnTools'),
   navDetailLabel: document.getElementById('navDetailLabel'),
   chatPanel: document.getElementById('chatPanel'),
   btnChat: document.getElementById('btnChat'),
@@ -105,8 +200,8 @@ const el = {
   valueStreamContent: document.getElementById('valueStreamContent'),
   metadataList: document.getElementById('metadataList'),
   homeView: document.getElementById('homeView'),
-  canvasView: document.getElementById('canvasView'),
-  listView: document.getElementById('listView'),
+  toolsView: document.getElementById('toolsView'),
+  btnToolsBack: document.getElementById('btnToolsBack'),
   detailView: document.getElementById('detailView'),
   problemDetailView: document.getElementById('problemDetailView'),
   problemDetailContent: document.getElementById('problemDetailContent'),
@@ -147,6 +242,10 @@ const el = {
   bmcJsonContent: document.getElementById('bmcJsonContent'),
   btnCloseBmcJson: document.getElementById('btnCloseBmcJson'),
   btnCopyBmcJson: document.getElementById('btnCopyBmcJson'),
+  toolsChatMessages: document.getElementById('toolsChatMessages'),
+  toolsChatInput: document.getElementById('toolsChatInput'),
+  toolsChatSend: document.getElementById('toolsChatSend'),
+  toolsList: document.getElementById('toolsList'),
 };
 
 let lastQueriedCompanyName = '';
@@ -310,6 +409,161 @@ function showResult(show) {
   el.result.hidden = !show;
   if (el.valueStreamSection) el.valueStreamSection.hidden = true;
   if (show) debugValueStreamButton?.();
+}
+
+/** 工具知识：读取本地存储的工具知识时间线，返回 { [toolId]: Array<{ content, createdAt }> } */
+function getToolKnowledgeState() {
+  try {
+    const raw = localStorage.getItem(TOOL_KNOWLEDGE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveToolKnowledgeState(state) {
+  try {
+    localStorage.setItem(TOOL_KNOWLEDGE_STORAGE_KEY, JSON.stringify(state || {}));
+  } catch {
+    // ignore
+  }
+}
+
+/** 工具知识：保存左侧话题聊天记录（HTML 结构）到本地 */
+function saveToolsChatMessagesToStorage() {
+  try {
+    const container = el.toolsChatMessages;
+    if (!container) return;
+    localStorage.setItem(TOOL_KNOWLEDGE_CHAT_STORAGE_KEY, container.innerHTML || '');
+  } catch {
+    // ignore
+  }
+}
+
+/** 工具知识：从本地恢复左侧话题聊天记录 */
+function restoreToolsChatMessagesFromStorage() {
+  try {
+    const container = el.toolsChatMessages;
+    if (!container) return;
+    const raw = localStorage.getItem(TOOL_KNOWLEDGE_CHAT_STORAGE_KEY);
+    if (!raw) return;
+    container.innerHTML = raw;
+  } catch {
+    // ignore
+  }
+}
+
+function appendToolKnowledge(toolId, content) {
+  if (!toolId || !content) return;
+  const state = getToolKnowledgeState();
+  const list = Array.isArray(state[toolId]) ? state[toolId] : [];
+  list.push({ content, createdAt: new Date().toISOString() });
+  state[toolId] = list;
+  saveToolKnowledgeState(state);
+}
+
+function slugifyTopicName(name) {
+  const base = String(name || '')
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9\-]/g, '')
+    .slice(0, 50);
+  return base || `topic_${Date.now()}`;
+}
+
+/** 将讨论内容整理成可存入知识库的话题说明（简要总结/提炼） */
+async function summarizeToolDiscussionContent(text) {
+  const systemPrompt = `你是一个知识库整理助手。现在有一段关于某个工具或话题的讨论内容，请帮我将这段内容整理成一条适合放入「知识库话题时间线」的精炼说明：
+
+要求：
+1. 使用简洁的中文表述，一到三句话即可；
+2. 不要重复用户的语气词，只保留对工具/话题有价值的信息；
+3. 可以是经验总结、注意事项、最佳实践中的一条；
+4. 只返回整理后的内容本身，不要有额外说明或 Markdown 代码块。`;
+
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: text },
+  ]);
+  const summary = (content || '').trim();
+  return { summary, _llmMeta: { usage, model, durationMs } };
+}
+
+function renderToolsKnowledge() {
+  const listEl = el.toolsList;
+  const chatEl = el.toolsChatMessages;
+  if (!listEl) return;
+  const state = getToolKnowledgeState();
+  if (!currentToolKnowledgeId && TOOL_KNOWLEDGE_ITEMS[0]) {
+    currentToolKnowledgeId = TOOL_KNOWLEDGE_ITEMS[0].id;
+  }
+
+  // 渲染工具卡片 + 时间线
+  listEl.innerHTML = TOOL_KNOWLEDGE_ITEMS.map((tool) => {
+    const entries = Array.isArray(state[tool.id]) ? state[tool.id] : [];
+    const timeline =
+      entries.length === 0
+        ? '<p class="tools-timeline-empty">暂未记录任何知识，可以通过左侧「话题讨论」添加。</p>'
+        : `<ul class="tools-timeline">${entries
+            .map((e) => {
+              const time = formatChatTime ? formatChatTime(e.createdAt) : e.createdAt;
+              return `<li class="tools-timeline-item"><div class="tools-timeline-time">${escapeHtml(
+                time || ''
+              )}</div><div class="tools-timeline-content">${escapeHtml(e.content || '')}</div></li>`;
+            })
+            .join('')}</ul>`;
+    const activeCls = tool.id === currentToolKnowledgeId ? ' tools-card-active' : '';
+    return `
+    <article class="tools-card${activeCls}" data-tool-id="${tool.id}">
+      <button type="button" class="tools-card-header" aria-expanded="true">
+        <div class="tools-card-header-main">
+          <span class="tools-card-title">${escapeHtml(tool.name)}</span>
+          <span class="tools-card-desc">${escapeHtml(tool.description || '')}</span>
+        </div>
+        <span class="tools-card-arrow">▾</span>
+      </button>
+      <div class="tools-card-body">
+        <div class="tools-card-timeline">
+          ${timeline}
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+
+  // 绑定折叠切换
+  listEl.querySelectorAll('.tools-card-header').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.tools-card');
+      const body = card && card.querySelector('.tools-card-body');
+      if (!body) return;
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', String(!expanded));
+      body.hidden = expanded;
+      btn.querySelector('.tools-card-arrow').textContent = expanded ? '▸' : '▾';
+
+      // 切换当前选中工具（用于左侧聊天关联）
+      const toolId = card?.dataset.toolId;
+      if (toolId) {
+        currentToolKnowledgeId = toolId;
+        listEl.querySelectorAll('.tools-card').forEach((c) => {
+          c.classList.toggle('tools-card-active', c === card);
+        });
+      }
+    });
+  });
+
+  // 初始展开所有卡片
+  listEl.querySelectorAll('.tools-card-body').forEach((body) => {
+    body.hidden = false;
+  });
+
+  // 初始聊天区域为空，仅保留之前记录
+  if (chatEl && !chatEl.dataset.initialized) {
+    chatEl.dataset.initialized = 'true';
+    restoreToolsChatMessagesFromStorage();
+  }
 }
 
 function formatValue(value) {
@@ -1181,16 +1435,18 @@ function restoreRouteState() {
         return;
       }
     }
-    if (view === 'canvas' || view === 'list') {
-      switchView('home');
+    if (view === 'tools') {
+      renderToolsKnowledge();
+      switchView('tools');
+      return;
     }
+    switchView('home');
   } catch (_) {}
 }
 
 function switchView(view) {
   el.homeView.hidden = view !== 'home';
-  if (el.canvasView) el.canvasView.hidden = view !== 'canvas';
-  if (el.listView) el.listView.hidden = view !== 'list';
+  if (el.toolsView) el.toolsView.hidden = view !== 'tools';
   el.detailView.hidden = view !== 'detail';
   if (el.problemDetailView) el.problemDetailView.hidden = view !== 'problemDetail';
   if (el.taskTrackingView) el.taskTrackingView.hidden = view !== 'taskTracking';
@@ -1816,6 +2072,15 @@ if (el.problemDetailChatInput) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleProblemDetailChatSend();
+    }
+  });
+}
+if (el.toolsChatSend) el.toolsChatSend.addEventListener('click', handleToolsChatSend);
+if (el.toolsChatInput) {
+  el.toolsChatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleToolsChatSend();
     }
   });
 }
@@ -2571,12 +2836,208 @@ if (el.problemDetailChatMessages) {
     }
   });
 }
+if (el.toolsChatMessages) {
+  el.toolsChatMessages.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-confirm-tool-intent');
+    if (btn && !btn.disabled) {
+      btn.textContent = '已确认';
+      btn.disabled = true;
+      const dataStr = btn.getAttribute('data-extracted') || '';
+      try {
+        const extracted = JSON.parse(dataStr);
+        let intent = extracted.intent || '';
+        let topicName = (extracted.newTopic || extracted.tool || '').trim();
+        const note = (extracted.rawText || extracted.content || '').trim();
+        if (!topicName) topicName = '自定义话题';
+
+        // 允许用户在卡片顶部通过下拉框二次选择沟通意图
+        const card = btn.closest('.tools-intent-card');
+        const selectEl = card && card.querySelector('.tools-intent-select');
+        if (selectEl && selectEl.value) {
+          intent = selectEl.value;
+        }
+
+        // 先尝试按名称命中已存在的话题
+        let target = TOOL_KNOWLEDGE_ITEMS.find(
+          (t) => t.name && t.name.toLowerCase() === topicName.toLowerCase()
+        );
+
+        // 若不存在且原意图为「讨论」，则视为「新增」话题
+        if (!target && intent === '讨论') {
+          intent = '增加';
+        }
+
+        // 若不存在且意图为增加，则新增话题卡片；否则回退到当前选中话题
+        if (!target) {
+          if (intent === '增加') {
+            const topicId = slugifyTopicName(topicName);
+            target =
+              TOOL_KNOWLEDGE_ITEMS.find((t) => String(t.id) === topicId) ||
+              { id: topicId, name: topicName, description: '用户新增话题' };
+            if (!TOOL_KNOWLEDGE_ITEMS.some((t) => String(t.id) === String(target.id))) {
+              TOOL_KNOWLEDGE_ITEMS.push(target);
+              saveToolKnowledgeItemsToStorage();
+            }
+          } else if (currentToolKnowledgeId) {
+            target = TOOL_KNOWLEDGE_ITEMS.find((t) => String(t.id) === String(currentToolKnowledgeId)) || null;
+          }
+        }
+
+        if (target && note) {
+          currentToolKnowledgeId = target.id;
+          appendToolKnowledge(target.id, note);
+          renderToolsKnowledge();
+          saveToolsChatMessagesToStorage();
+
+          // 若是从「讨论」自动转为新增话题，则将讨论内容再发给大模型整理，并将返回内容写入聊天区及时间线
+          if (intent === '增加' && extracted.intent === '讨论') {
+            (async () => {
+              try {
+                if (!DEEPSEEK_API_KEY) return;
+                const { summary, _llmMeta } = await summarizeToolDiscussionContent(note);
+                const finalSummary = (summary || '').trim();
+                if (!finalSummary) return;
+                appendToolKnowledge(target.id, finalSummary);
+                renderToolsKnowledge();
+                const sysBlock = document.createElement('div');
+                sysBlock.className = 'tools-chat-msg tools-chat-msg-system';
+                const llmMetaHtml = _llmMeta ? buildLlmMetaHtml(_llmMeta) : '';
+                sysBlock.innerHTML = `<div class="tools-chat-msg-content">${escapeHtml(
+                  finalSummary
+                )}</div><div class="tools-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
+                el.toolsChatMessages?.appendChild(sysBlock);
+                if (el.toolsChatMessages) {
+                  el.toolsChatMessages.scrollTop = el.toolsChatMessages.scrollHeight;
+                }
+                saveToolsChatMessagesToStorage();
+              } catch (_) {}
+            })();
+          }
+        }
+      } catch (_) {}
+    }
+  });
+}
+
+async function handleToolsChatSend() {
+  const input = el.toolsChatInput;
+  const container = el.toolsChatMessages;
+  if (!input || !container) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+
+  const msgBlock = document.createElement('div');
+  msgBlock.className = 'tools-chat-msg tools-chat-msg-user';
+  msgBlock.innerHTML = `<div class="tools-chat-msg-content">${escapeHtml(text)}</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(msgBlock);
+  container.scrollTop = container.scrollHeight;
+  saveToolsChatMessagesToStorage();
+
+  // 然后调用大模型进行「工具/话题讨论意图管理」分析，生成结构化卡片
+  const parsingBlock = document.createElement('div');
+  parsingBlock.className = 'tools-chat-msg tools-chat-msg-system';
+  parsingBlock.innerHTML = `<div class="tools-chat-msg-content">正在分析本次工具讨论的意图与对象…</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(parsingBlock);
+  container.scrollTop = container.scrollHeight;
+
+  try {
+    if (!DEEPSEEK_API_KEY) {
+      throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用工具/话题讨论意图管理功能。');
+    }
+    const { intent, tool, newTopic, content, _llmMeta } = await analyzeToolDiscussionIntent(text);
+    parsingBlock.remove();
+
+    const intentLabel = intent || '—';
+    const toolLabel = tool || '—';
+    const extraTopic = newTopic || '';
+    const rows = [
+      { label: '沟通意图', value: intentLabel },
+      { label: '讨论话题', value: toolLabel },
+      { label: '沟通内容', value: content || text },
+    ];
+    if (intentLabel === '增加') {
+      rows.splice(2, 0, { label: '新增话题', value: extraTopic || toolLabel || content || text });
+    }
+    const intentOptions = ['增加', '删除', '修改', '查询', '讨论'];
+    const rowsHtml = rows
+      .map((r) => {
+        if (r.label === '沟通意图') {
+          const selectHtml = `
+        <select class="tools-intent-select">
+          ${intentOptions
+            .map(
+              (opt) =>
+                `<option value="${opt}"${opt === intentLabel ? ' selected' : ''}>${opt}</option>`
+            )
+            .join('')}
+        </select>`;
+          return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(
+            r.label
+          )}</span><span class="problem-detail-basic-info-value">${selectHtml}</span></div>`;
+        }
+        return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(
+          r.label
+        )}</span><span class="problem-detail-basic-info-value">${escapeHtml(r.value || '')}</span></div>`;
+      })
+      .join('');
+    const cardBlock = document.createElement('div');
+    cardBlock.className = 'tools-chat-msg tools-chat-msg-system tools-intent-card';
+    const llmMetaHtml = _llmMeta ? buildLlmMetaHtml(_llmMeta) : '';
+    const dataAttr = String(
+      JSON.stringify({
+        intent: intentLabel,
+        tool: toolLabel,
+        newTopic: extraTopic,
+        content: content || '',
+        rawText: text,
+      })
+    )
+      .replace(
+      /&/g,
+      '&amp;'
+    )
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    cardBlock.innerHTML = `<div class="problem-detail-basic-info-card problem-detail-intent-card-inner">
+  <div class="problem-detail-basic-info-card-body">${rowsHtml}</div>
+  <div class="problem-detail-basic-info-card-actions">
+    <button type="button" class="btn-confirm-tool-intent btn-confirm-primary" data-extracted="${dataAttr}">确认</button>
+  </div>
+</div><div class="tools-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
+    container.appendChild(cardBlock);
+    container.scrollTop = container.scrollHeight;
+  saveToolsChatMessagesToStorage();
+  } catch (err) {
+    parsingBlock.remove();
+    const errBlock = document.createElement('div');
+    errBlock.className = 'tools-chat-msg tools-chat-msg-system';
+    errBlock.innerHTML = `<div class="tools-chat-msg-content">工具/话题讨论意图分析失败：${escapeHtml(
+      err.message || String(err)
+    )}</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    container.scrollTop = container.scrollHeight;
+    saveToolsChatMessagesToStorage();
+  }
+}
 if (el.btnHome) el.btnHome.addEventListener('click', () => {
   saveChatToRecord();
   saveRouteState('home');
   switchView('home');
   renderProblemFollowList();
   if (el.searchSuggestions) { el.searchSuggestions.hidden = true; el.searchSuggestions.innerHTML = ''; }
+});
+if (el.btnTools) el.btnTools.addEventListener('click', () => {
+  saveChatToRecord();
+  saveRouteState('tools');
+  renderToolsKnowledge();
+  switchView('tools');
+});
+if (el.btnToolsBack) el.btnToolsBack.addEventListener('click', () => {
+  saveRouteState('home');
+  switchView('home');
 });
 if (el.btnChat) el.btnChat.addEventListener('click', () => toggleChatPanel(true));
 if (el.btnCloseChat) el.btnCloseChat.addEventListener('click', () => toggleChatPanel(false));
@@ -3526,7 +3987,31 @@ ${tasksDesc}
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch ? jsonMatch[0] : content;
   const parsed = JSON.parse(jsonStr);
-  return { ...parsed, _llmMeta: { usage, model, durationMs } };
+  const result = { ...parsed, _llmMeta: { usage, model, durationMs } };
+
+  // 简单查询意图下，进一步判断是全局/宏观查询还是特定任务查询：
+  // 若是全局/宏观查询，则在解析卡片中将「当前任务」显示为「整个任务」，stage 为「整体」。
+  if (result.intent === 'query') {
+    const fullText = String(text || '').toLowerCase();
+    const qTarget = String(result.queryTarget || '').toLowerCase();
+    const summary = String(result.summary || '').toLowerCase();
+    const combined = `${fullText} ${qTarget} ${summary}`;
+    const isMacroQuery = /整体|全局|全盘|总体|全貌|整体情况|全局情况|整个项目|整个任务|整个流程|当前阶段|现在什么阶段|目前什么阶段|目前处于什么阶段|现在处于什么阶段|进度|做到哪一步|进行到哪/.test(
+      combined
+    );
+    const taskNames = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...(typeof IT_STRATEGY_TASKS !== 'undefined' ? IT_STRATEGY_TASKS : [])].map(
+      (t) => String(t.name || '').toLowerCase()
+    );
+    const mentionsSpecificTask = taskNames.some((name) => name && combined.includes(name));
+    const mentionsValueStreamDetail = /价值流|环节|节点|阶段任务/.test(combined);
+    if (isMacroQuery && !mentionsSpecificTask && !mentionsValueStreamDetail) {
+      result.taskId = result.taskId || 'all';
+      result.taskName = '整个任务';
+      result.stage = result.stage || '整体';
+    }
+  }
+
+  return result;
 }
 
 /** 解析用户输入的客户基本信息，提取结构化字段 */
@@ -6766,6 +7251,34 @@ async function handleProblemDetailChatSend() {
   if (!text) return;
   input.value = '';
   appendProblemDetailChatMessage(container, 'user', text);
+
+  // 特殊处理：用户询问「当前处于什么阶段 / 现在做到哪一步」等全局阶段/进度问题时，
+  // 直接基于当前问题的阶段状态给出回答，不再走意图提炼与任务归属流程。
+  const stageQueryPattern =
+    /当前.*阶段|现在.*阶段|目前.*阶段|目前处于.*阶段|现在处于.*阶段|项目.*进度|进度.*如何|做到哪一步|进行到哪/;
+  if (stageQueryPattern.test(text)) {
+    const item = currentProblemDetailItem;
+    const majorStageIndex = item?.currentMajorStage ?? 0;
+    const majorStageLabel = PROBLEM_DETAIL_MAJOR_STAGE_LABELS[majorStageIndex] ?? String(majorStageIndex);
+    let msg = `当前任务阶段为：${majorStageLabel}（索引 ${majorStageIndex}）。`;
+    if (majorStageIndex === 3 && Array.isArray(IT_STRATEGY_TASKS) && IT_STRATEGY_TASKS.length > 0) {
+      const subIdx = typeof itStrategyPlanViewingSubstep === 'number' ? itStrategyPlanViewingSubstep : 0;
+      const itStrategyTask = IT_STRATEGY_TASKS[subIdx] || IT_STRATEGY_TASKS[0];
+      if (itStrategyTask?.name) {
+        msg += ` 当前 IT 策略规划任务为：${itStrategyTask.name}（${itStrategyTask.id}）。`;
+      }
+    }
+    const replyBlock = document.createElement('div');
+    replyBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    replyBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(
+      msg
+    )}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(replyBlock);
+    container.scrollTop = container.scrollHeight;
+    pushAndSaveProblemDetailChat({ role: 'system', content: msg, timestamp: getTimeStr() });
+    return;
+  }
+
   const parsingBlock = document.createElement('div');
   parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
   parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在提炼意图</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -6864,6 +7377,8 @@ function focusWorkspaceOnIntent(extracted) {
   if (!container) return;
   const item = currentProblemDetailItem;
   if (!item) return;
+  // 对于全局/宏观查询（当前任务为「整个任务」），不需要跳转或高亮具体工作区
+  if (extracted.intent === 'query' && (extracted.taskName === '整个任务' || extracted.taskId === 'all')) return;
   const taskId = extracted.taskId || extracted.executeTaskId;
   if (!taskId) return;
   let cardTaskId = taskId;
