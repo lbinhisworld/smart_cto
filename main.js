@@ -295,24 +295,21 @@ function buildPageStructureForLLM(record) {
 }
 
 function showLoading(show) {
-  el.loading.hidden = !show;
-  el.btnQuery.disabled = show;
+  if (el.loading) el.loading.hidden = !show;
+  if (el.btnQuery) el.btnQuery.disabled = show;
 }
 
 function showError(message) {
+  if (!el.error) return;
   el.error.textContent = message;
   el.error.hidden = !message;
 }
 
 function showResult(show) {
+  if (!el.result) return;
   el.result.hidden = !show;
-  if (!show) {
-    el.valueStreamSection.hidden = true;
-  }
-  if (show) {
-    console.log('[showResult] 结果已显示，调试按钮状态:');
-    debugValueStreamButton();
-  }
+  if (el.valueStreamSection) el.valueStreamSection.hidden = true;
+  if (show) debugValueStreamButton?.();
 }
 
 function formatValue(value) {
@@ -322,7 +319,7 @@ function formatValue(value) {
 }
 
 function renderBasicInfo(data) {
-  if (!data) return;
+  if (!data || !el.basicInfoList) return;
   el.basicInfoList.innerHTML = BASIC_INFO_FIELDS.map(({ key, label }) => {
     const raw = data[key];
     const value = formatValue(raw);
@@ -992,6 +989,7 @@ function renderMetadata(data) {
 }
 
 async function query() {
+  if (!el.companyName) return;
   const companyName = (el.companyName.value || '').trim();
   if (!companyName) {
     showError('请输入企业名称');
@@ -1183,20 +1181,16 @@ function restoreRouteState() {
         return;
       }
     }
-    if (view === 'canvas') {
-      switchView('canvas');
-    }
-    if (view === 'list') {
-      renderSavedList();
-      switchView('list');
+    if (view === 'canvas' || view === 'list') {
+      switchView('home');
     }
   } catch (_) {}
 }
 
 function switchView(view) {
   el.homeView.hidden = view !== 'home';
-  el.canvasView.hidden = view !== 'canvas';
-  el.listView.hidden = view !== 'list';
+  if (el.canvasView) el.canvasView.hidden = view !== 'canvas';
+  if (el.listView) el.listView.hidden = view !== 'list';
   el.detailView.hidden = view !== 'detail';
   if (el.problemDetailView) el.problemDetailView.hidden = view !== 'problemDetail';
   if (el.taskTrackingView) el.taskTrackingView.hidden = view !== 'taskTracking';
@@ -1205,6 +1199,7 @@ function switchView(view) {
 }
 
 function renderSavedList() {
+  if (!el.savedListContent) return;
   const list = getSavedAnalyses();
   if (!list.length) {
     el.savedListContent.innerHTML = '<p class="vs-empty">暂无已存储数据</p>';
@@ -1669,17 +1664,19 @@ function buildDetailHTML(record) {
   `;
 }
 
-el.btnQuery.addEventListener('click', query);
-el.companyName.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') query();
-});
-el.companyName.addEventListener('input', updateSearchSuggestions);
-el.companyName.addEventListener('focus', updateSearchSuggestions);
-el.companyName.addEventListener('blur', () => {
-  setTimeout(() => {
-    if (el.searchSuggestions) el.searchSuggestions.hidden = true;
-  }, 150);
-});
+if (el.btnQuery) el.btnQuery.addEventListener('click', query);
+if (el.companyName) {
+  el.companyName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') query();
+  });
+  el.companyName.addEventListener('input', updateSearchSuggestions);
+  el.companyName.addEventListener('focus', updateSearchSuggestions);
+  el.companyName.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (el.searchSuggestions) el.searchSuggestions.hidden = true;
+    }, 150);
+  });
+}
 if (el.btnSave) el.btnSave.addEventListener('click', saveCurrent);
 if (el.btnParse) el.btnParse.addEventListener('click', handleParseClick);
 if (el.btnStartFollow) el.btnStartFollow.addEventListener('click', handleStartFollowClick);
@@ -2579,45 +2576,6 @@ if (el.btnHome) el.btnHome.addEventListener('click', () => {
   switchView('home');
   renderProblemFollowList();
   if (el.searchSuggestions) { el.searchSuggestions.hidden = true; el.searchSuggestions.innerHTML = ''; }
-});
-if (el.btnCanvas) el.btnCanvas.addEventListener('click', () => {
-  saveChatToRecord();
-  saveRouteState('canvas');
-  switchView('canvas');
-  const record = currentDetailRecord;
-  const queryData = lastQueryResult;
-  let basicInfo, bmc, metadata;
-  if (record) {
-    basicInfo = record.basicInfo;
-    bmc = record.bmc;
-    metadata = record.metadata;
-    lastQueriedCompanyName = (record.companyName || '').trim();
-    lastQueryResult = { basic_info: basicInfo, business_model_canvas: bmc, metadata };
-    currentValueStreamList = record.valueStreams || [];
-  } else if (queryData) {
-    basicInfo = queryData.basic_info;
-    bmc = queryData.business_model_canvas;
-    metadata = queryData.metadata;
-  }
-  if (basicInfo || bmc || metadata) {
-    if (el.companyName) el.companyName.value = lastQueriedCompanyName || '';
-    renderBasicInfo(basicInfo);
-    renderBMC(bmc);
-    renderMetadata(metadata);
-    el.valueStreamSection.hidden = true;
-    el.valueStreamContent.innerHTML = '';
-    showError('');
-    showResult(true);
-  } else {
-    showError('请先查询企业或从列表选择企业，再查看画布');
-    showResult(false);
-  }
-});
-if (el.btnList) el.btnList.addEventListener('click', () => {
-  saveChatToRecord();
-  saveRouteState('list');
-  renderSavedList();
-  switchView('list');
 });
 if (el.btnChat) el.btnChat.addEventListener('click', () => toggleChatPanel(true));
 if (el.btnCloseChat) el.btnCloseChat.addEventListener('click', () => toggleChatPanel(false));
