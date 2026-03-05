@@ -110,7 +110,27 @@
             </div>
           </div>
         </aside>
-        <main id="toolsList" class="tools-list"></main>
+        <main class="tools-main">
+          <aside id="toolsList" class="tools-topic-list"></aside>
+          <section id="toolsDetail" class="tools-topic-detail">
+            <div class="tools-topic-detail-header">
+              <div class="tools-topic-detail-title-wrap">
+                <h3 id="toolsDetailTitle" class="tools-topic-detail-title">请选择右侧话题</h3>
+                <p id="toolsDetailDesc" class="tools-topic-detail-desc"></p>
+              </div>
+              <div class="tools-topic-detail-tabs">
+                <button type="button" class="tools-topic-tab tools-topic-tab-active" data-tab="timeline">时间线</button>
+                <button type="button" class="tools-topic-tab" data-tab="tree">内容树</button>
+              </div>
+            </div>
+            <div class="tools-topic-detail-body">
+              <div id="toolsDetailTimeline" class="tools-topic-panel tools-topic-panel-timeline"></div>
+              <div id="toolsDetailTree" class="tools-topic-panel tools-topic-panel-tree" hidden>
+                <p class="tools-topic-tree-placeholder">内容树视图待设计，当前仅提供时间线视图。</p>
+              </div>
+            </div>
+          </section>
+        </main>
       </div>
     </div>
 

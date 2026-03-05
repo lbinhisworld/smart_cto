@@ -252,6 +252,11 @@ const el = {
   toolsChatInput: document.getElementById('toolsChatInput'),
   toolsChatSend: document.getElementById('toolsChatSend'),
   toolsList: document.getElementById('toolsList'),
+  toolsDetail: document.getElementById('toolsDetail'),
+  toolsDetailTitle: document.getElementById('toolsDetailTitle'),
+  toolsDetailDesc: document.getElementById('toolsDetailDesc'),
+  toolsDetailTimeline: document.getElementById('toolsDetailTimeline'),
+  toolsDetailTree: document.getElementById('toolsDetailTree'),
 };
 
 let lastQueriedCompanyName = '';
@@ -501,6 +506,57 @@ async function summarizeToolDiscussionContent(text) {
   return { summary, _llmMeta: { usage, model, durationMs } };
 }
 
+function renderToolsTopicDetail(toolId, stateOverride) {
+  const detailWrap = el.toolsDetail;
+  const titleEl = el.toolsDetailTitle;
+  const descEl = el.toolsDetailDesc;
+  const timelineEl = el.toolsDetailTimeline;
+  if (!detailWrap || !titleEl || !descEl || !timelineEl) return;
+  const state = stateOverride || getToolKnowledgeState();
+  const tool = TOOL_KNOWLEDGE_ITEMS.find((t) => String(t.id) === String(toolId));
+  if (!tool) {
+    titleEl.textContent = '请选择右侧话题';
+    descEl.textContent = '';
+    timelineEl.innerHTML =
+      '<p class="tools-timeline-empty">尚未选择话题。请从左侧列表中选择一个话题查看时间线。</p>';
+    return;
+  }
+
+  titleEl.textContent = tool.name || '未命名话题';
+  descEl.textContent = tool.description || '';
+
+  const entries = Array.isArray(state[tool.id]) ? state[tool.id] : [];
+  if (!entries.length) {
+    timelineEl.innerHTML =
+      '<p class="tools-timeline-empty">该话题暂未记录任何知识，可以通过左侧「话题讨论」添加。</p>';
+    return;
+  }
+  const timelineHtml = `<ul class="tools-timeline">${entries
+    .map((e, index) => {
+      const time = formatChatTime ? formatChatTime(e.createdAt) : e.createdAt;
+      const contentHtml = escapeHtml(e.content || '');
+      const hasJson = e && e.contentJson && typeof e.contentJson === 'object';
+      const jsonStr = hasJson ? JSON.stringify(e.contentJson, null, 2) : '';
+      const jsonHtml = hasJson ? escapeHtml(jsonStr) : '';
+      const tabsHtml = hasJson
+        ? `<div class="tools-timeline-content-tabs">
+      <button type="button" class="tools-timeline-tab tools-timeline-tab-active" data-tab="text">内容</button>
+      <button type="button" class="tools-timeline-tab" data-tab="json">JSON</button>
+    </div>`
+        : '';
+      const panelsHtml = hasJson
+        ? `<div class="tools-timeline-panel tools-timeline-panel-text">${contentHtml}</div><pre class="tools-timeline-panel tools-timeline-panel-json" hidden>${jsonHtml}</pre>`
+        : `<div class="tools-timeline-panel tools-timeline-panel-text">${contentHtml}</div>`;
+      return `<li class="tools-timeline-item" data-entry-index="${index}"><div class="tools-timeline-time"><span class="tools-timeline-time-text">${escapeHtml(
+        time || ''
+      )}</span><button type="button" class="tools-timeline-delete" data-tool-id="${
+        tool.id
+      }" data-entry-index="${index}" aria-label="删除时间线节点"><span class="tools-timeline-delete-icon">🗑</span></button></div><div class="tools-timeline-content">${tabsHtml}${panelsHtml}</div></li>`;
+    })
+    .join('')}</ul>`;
+  timelineEl.innerHTML = timelineHtml;
+}
+
 function renderToolsKnowledge() {
   const listEl = el.toolsList;
   const chatEl = el.toolsChatMessages;
@@ -510,79 +566,22 @@ function renderToolsKnowledge() {
     currentToolKnowledgeId = TOOL_KNOWLEDGE_ITEMS[0].id;
   }
 
-  // 渲染工具卡片 + 时间线
+  // 渲染左侧话题列表
   listEl.innerHTML = TOOL_KNOWLEDGE_ITEMS.map((tool) => {
-    const entries = Array.isArray(state[tool.id]) ? state[tool.id] : [];
-    const timeline =
-      entries.length === 0
-        ? '<p class="tools-timeline-empty">暂未记录任何知识，可以通过左侧「话题讨论」添加。</p>'
-        : `<ul class="tools-timeline">${entries
-            .map((e, index) => {
-              const time = formatChatTime ? formatChatTime(e.createdAt) : e.createdAt;
-              const contentHtml = escapeHtml(e.content || '');
-              const hasJson = e && e.contentJson && typeof e.contentJson === 'object';
-              const jsonStr = hasJson ? JSON.stringify(e.contentJson, null, 2) : '';
-              const jsonHtml = hasJson ? escapeHtml(jsonStr) : '';
-              const tabsHtml = hasJson
-                ? `<div class="tools-timeline-content-tabs">
-      <button type="button" class="tools-timeline-tab tools-timeline-tab-active" data-tab="text">内容</button>
-      <button type="button" class="tools-timeline-tab" data-tab="json">JSON</button>
-    </div>`
-                : '';
-              const panelsHtml = hasJson
-                ? `<div class="tools-timeline-panel tools-timeline-panel-text">${contentHtml}</div><pre class="tools-timeline-panel tools-timeline-panel-json" hidden>${jsonHtml}</pre>`
-                : `<div class="tools-timeline-panel tools-timeline-panel-text">${contentHtml}</div>`;
-              return `<li class="tools-timeline-item" data-entry-index="${index}"><div class="tools-timeline-time"><span class="tools-timeline-time-text">${escapeHtml(
-                time || ''
-              )}</span><button type="button" class="tools-timeline-delete" data-tool-id="${
-                tool.id
-              }" data-entry-index="${index}" aria-label="删除时间线节点"><span class="tools-timeline-delete-icon">🗑</span></button></div><div class="tools-timeline-content">${tabsHtml}${panelsHtml}</div></li>`;
-            })
-            .join('')}</ul>`;
-    const activeCls = tool.id === currentToolKnowledgeId ? ' tools-card-active' : '';
-    return `
-    <article class="tools-card${activeCls}" data-tool-id="${tool.id}">
-      <button type="button" class="tools-card-header" aria-expanded="true">
-        <div class="tools-card-header-main">
-          <span class="tools-card-title">${escapeHtml(tool.name)}</span>
-          <span class="tools-card-desc">${escapeHtml(tool.description || '')}</span>
-        </div>
-        <span class="tools-card-arrow">▾</span>
-      </button>
-      <div class="tools-card-body">
-        <div class="tools-card-timeline">
-          ${timeline}
-        </div>
-      </div>
-    </article>`;
+    const isActive = String(tool.id) === String(currentToolKnowledgeId);
+    const activeCls = isActive ? ' tools-topic-item-active' : '';
+    return `<button type="button" class="tools-topic-item${activeCls}" data-tool-id="${tool.id}">
+  <div class="tools-topic-item-name">${escapeHtml(tool.name || '')}</div>
+  <div class="tools-topic-item-desc">${escapeHtml(tool.description || '')}</div>
+</button>`;
   }).join('');
 
-  // 绑定折叠切换
-  listEl.querySelectorAll('.tools-card-header').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const card = btn.closest('.tools-card');
-      const body = card && card.querySelector('.tools-card-body');
-      if (!body) return;
-      const expanded = btn.getAttribute('aria-expanded') === 'true';
-      btn.setAttribute('aria-expanded', String(!expanded));
-      body.hidden = expanded;
-      btn.querySelector('.tools-card-arrow').textContent = expanded ? '▸' : '▾';
-
-      // 切换当前选中工具（用于左侧聊天关联）
-      const toolId = card?.dataset.toolId;
-      if (toolId) {
-        currentToolKnowledgeId = toolId;
-        listEl.querySelectorAll('.tools-card').forEach((c) => {
-          c.classList.toggle('tools-card-active', c === card);
-        });
-      }
-    });
-  });
-
-  // 初始展开所有卡片
-  listEl.querySelectorAll('.tools-card-body').forEach((body) => {
-    body.hidden = false;
-  });
+  // 渲染右侧详情（时间线视图）
+  if (currentToolKnowledgeId) {
+    renderToolsTopicDetail(currentToolKnowledgeId, state);
+  } else {
+    renderToolsTopicDetail(null, state);
+  }
 
   // 初始聊天区域为空，仅保留之前记录
   if (chatEl && !chatEl.dataset.initialized) {
@@ -2993,8 +2992,8 @@ if (el.toolsChatMessages) {
   });
 }
 
-if (el.toolsList) {
-  el.toolsList.addEventListener('click', (e) => {
+if (el.toolsDetailTimeline) {
+  el.toolsDetailTimeline.addEventListener('click', (e) => {
     const tabBtn = e.target.closest('.tools-timeline-tab');
     if (tabBtn) {
       const container = tabBtn.closest('.tools-timeline-content');
@@ -3035,6 +3034,36 @@ if (el.toolsList) {
     }
     saveToolKnowledgeState(state);
     renderToolsKnowledge();
+  });
+}
+
+if (el.toolsDetail) {
+  el.toolsDetail.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('.tools-topic-tab');
+    if (!tabBtn) return;
+    const tab = tabBtn.dataset.tab;
+    if (!tab) return;
+    const timelinePanel = el.toolsDetailTimeline;
+    const treePanel = el.toolsDetailTree;
+    el.toolsDetail.querySelectorAll('.tools-topic-tab').forEach((btn) => {
+      btn.classList.toggle('tools-topic-tab-active', btn === tabBtn);
+    });
+    if (timelinePanel) timelinePanel.hidden = tab !== 'timeline';
+    if (treePanel) treePanel.hidden = tab !== 'tree';
+  });
+}
+
+if (el.toolsList) {
+  el.toolsList.addEventListener('click', (e) => {
+    const itemBtn = e.target.closest('.tools-topic-item');
+    if (!itemBtn) return;
+    const toolId = itemBtn.dataset.toolId;
+    if (!toolId) return;
+    currentToolKnowledgeId = toolId;
+    el.toolsList.querySelectorAll('.tools-topic-item').forEach((btn) => {
+      btn.classList.toggle('tools-topic-item-active', btn === itemBtn);
+    });
+    renderToolsTopicDetail(toolId);
   });
 }
 

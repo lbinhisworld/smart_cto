@@ -2626,14 +2626,150 @@ body {
   align-items: stretch;
 }
 
+.tools-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  gap: 1rem;
+  padding: 0 0 0 1rem;
+}
+
+.tools-topic-list {
+  flex: 0 0 260px;
+  max-width: 320px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.75rem 0.75rem 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+.tools-topic-item {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  background: rgba(88, 28, 135, 0.25); /* 淡紫色底色 */
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.tools-topic-item-active {
+  border-color: rgba(167, 139, 250, 0.9);
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.7);
+  background: rgba(124, 58, 237, 0.4);
+}
+
+.tools-topic-item-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.tools-topic-item-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.tools-topic-detail {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0.75rem 0.75rem 0.75rem;
+  background: rgba(76, 29, 149, 0.5); /* 显示区淡紫色底色 */
+  border-radius: var(--radius);
+  border: 1px solid rgba(139, 92, 246, 0.6);
+}
+
+.tools-topic-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.tools-topic-detail-title-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.tools-topic-detail-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.tools-topic-detail-desc {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.tools-topic-detail-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.tools-topic-tab {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tools-topic-tab-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.18);
+}
+
+.tools-topic-detail-body {
+  flex: 1;
+  min-height: 0;
+  margin-top: 0.5rem;
+  overflow: hidden;
+}
+
+.tools-topic-panel {
+  width: 100%;
+  height: 100%;
+}
+
+.tools-topic-panel[hidden] {
+  display: none !important;
+}
+
+.tools-topic-panel-timeline {
+  overflow-y: auto;
+}
+
+.tools-topic-panel-tree {
+  overflow-y: auto;
+}
+
+.tools-topic-tree-placeholder {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* 旧的 .tools-list 样式不再使用，保留以兼容历史代码（当前 id=toolsList 使用 .tools-topic-list 样式） */
 .tools-list {
   flex: 1;
   min-width: 0;
-  padding: 1rem 1.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  overflow-y: auto;
 }
 
 .tools-card {
