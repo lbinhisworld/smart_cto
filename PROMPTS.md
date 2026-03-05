@@ -509,8 +509,10 @@ ${bmcJson}
 ## 11. 意图提炼
 
 **触发入口**：问题详情页聊天区，用户输入消息后点击发送  
-**函数**：`extractUserIntentFromChat(text, context)`  
+**函数**：`extractUserIntentFromChat(text, context, options)`  
 **用途**：提炼用户输入的意图类型（查询/修改/执行/讨论），结合沟通历史与页面内容结构定位到具体任务与字段。
+
+**当前任务与「不对」按钮**：系统会根据沟通历史推断「当前任务」，并在 prompt 中传入 `currentTaskHint`，大模型优先考虑该任务与用户意图的关联。意图卡片除「确认」外还有「不对」按钮；用户点击「不对」时，会重新调用并传入 `globalScope: true`，大模型在【任务列表】中全局搜索，不受当前任务预设限制。详见 [对话模型管理.md](./对话模型管理.md)。
 
 ### System Prompt
 
@@ -721,8 +723,9 @@ ${currentContent || '(空)'}
 
 ### API 配置
 
-- **API**：DeepSeek
+- **大模型**：DeepSeek，用于解析、BMC、需求逻辑、价值流、IT 现状/痛点、ITGap 分析及聊天意图提炼与回复。
 - **配置位置**：`main.js` 中的 `DEEPSEEK_API_URL`、`DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`
+- **企业数据**：企业基本信息与 BMC 查询、价值流列表由 `main.js` 中的 `API_URL`、`VALUE_STREAM_API_URL` 配置（Base44 等），与 DeepSeek 独立。
 
 ### 通用规则
 

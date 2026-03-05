@@ -1020,6 +1020,7 @@ body {
 .problem-detail-chat-global-itgap-start-actions,
 .problem-detail-chat-global-itgap-card-actions,
 .problem-detail-chat-local-itgap-start-actions,
+.problem-detail-chat-it-strategy-plan-start-actions,
 .problem-detail-chat-local-itgap-card-actions,
 .problem-detail-chat-local-itgap-sessions-actions {
   display: flex;
@@ -2178,7 +2179,7 @@ body {
   margin-left: 1rem;
 }
 
-/* 问题详情页 - 历史侧滑面板（悬浮 overlay，半透明磨砂） */
+/* 问题详情页 - 历史侧滑面板（悬浮 overlay，半透明磨砂，背景色与首页区分） */
 .problem-detail-history-panel {
   position: absolute;
   top: 0;
@@ -2192,10 +2193,10 @@ body {
   z-index: 100;
   transform: translateX(100%);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
-  background: rgba(26, 35, 50, 0.78);
+  background: rgba(55, 48, 72, 0.88);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border-left: 1px solid rgba(45, 58, 77, 0.5);
+  border-left: 1px solid rgba(85, 75, 110, 0.55);
   border-radius: 8px 0 0 8px;
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.25);
 }
@@ -2215,7 +2216,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.6rem 1rem;
-  border-bottom: 1px solid rgba(45, 58, 77, 0.5);
+  border-bottom: 1px solid rgba(85, 75, 110, 0.55);
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text);
