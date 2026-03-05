@@ -103,6 +103,10 @@ async function analyzeToolDiscussionIntent(text) {
    - 若无法确定具体工具，请尽量从语义中推断一个最接近的工具名称，推断失败则填 ""。
 
 3. 沟通内容（content）直接返回用户原始输入文本（不做改写），用于在卡片中展示。
+4. 同时，你需要根据这段沟通内容，尽量推断出一个结构化的 JSON（contentJson）：
+   - 当内容本身已经是 JSON 或接近 JSON 时，直接解析或轻微修正为合法 JSON；
+   - 当内容是「键: 值」/「字段：说明」/ 列表项等结构化文本时，请根据字段含义生成一个尽量合理的 JSON；
+   - 若确实无法抽取出有意义的结构化信息，请将 contentJson 设为 null。
 
 【输出格式】
 请严格返回一个 JSON 对象，不要包含多余说明或 Markdown 代码块，例如：
@@ -110,7 +114,8 @@ async function analyzeToolDiscussionIntent(text) {
   "intent": "增加|补充|删除|修改|查询|讨论",
   "tool": "讨论话题（例如具体工具/平台/方法论名称，如 企业微信 或 BMC 商业模式画布）",
   "newTopic": "当 intent 为 增加 时，代表用户希望新增的话题名称；否则可为 \"\"",
-  "content": "用户的原始输入文本"
+  "content": "用户的原始输入文本",
+  "contentJson": null 或 { ...基于内容推断出来的结构化 JSON... }
 }`;
 
   const { content, usage, model, durationMs } = await fetchDeepSeekChat([
@@ -456,11 +461,15 @@ function restoreToolsChatMessagesFromStorage() {
   }
 }
 
-function appendToolKnowledge(toolId, content) {
+function appendToolKnowledge(toolId, content, contentJson) {
   if (!toolId || !content) return;
   const state = getToolKnowledgeState();
   const list = Array.isArray(state[toolId]) ? state[toolId] : [];
-  list.push({ content, createdAt: new Date().toISOString() });
+  const entry = { content, createdAt: new Date().toISOString() };
+  if (contentJson && typeof contentJson === 'object') {
+    entry.contentJson = contentJson;
+  }
+  list.push(entry);
   state[toolId] = list;
   saveToolKnowledgeState(state);
 }
@@ -511,9 +520,23 @@ function renderToolsKnowledge() {
             .map((e, index) => {
               const time = formatChatTime ? formatChatTime(e.createdAt) : e.createdAt;
               const contentHtml = escapeHtml(e.content || '');
+              const hasJson = e && e.contentJson && typeof e.contentJson === 'object';
+              const jsonStr = hasJson ? JSON.stringify(e.contentJson, null, 2) : '';
+              const jsonHtml = hasJson ? escapeHtml(jsonStr) : '';
+              const tabsHtml = hasJson
+                ? `<div class="tools-timeline-content-tabs">
+      <button type="button" class="tools-timeline-tab tools-timeline-tab-active" data-tab="text">内容</button>
+      <button type="button" class="tools-timeline-tab" data-tab="json">JSON</button>
+    </div>`
+                : '';
+              const panelsHtml = hasJson
+                ? `<div class="tools-timeline-panel tools-timeline-panel-text">${contentHtml}</div><pre class="tools-timeline-panel tools-timeline-panel-json" hidden>${jsonHtml}</pre>`
+                : `<div class="tools-timeline-panel tools-timeline-panel-text">${contentHtml}</div>`;
               return `<li class="tools-timeline-item" data-entry-index="${index}"><div class="tools-timeline-time"><span class="tools-timeline-time-text">${escapeHtml(
                 time || ''
-              )}</span><button type="button" class="tools-timeline-delete" data-tool-id="${tool.id}" data-entry-index="${index}" aria-label="删除时间线节点"><span class="tools-timeline-delete-icon">🗑</span></button></div><div class="tools-timeline-content">${contentHtml}</div></li>`;
+              )}</span><button type="button" class="tools-timeline-delete" data-tool-id="${
+                tool.id
+              }" data-entry-index="${index}" aria-label="删除时间线节点"><span class="tools-timeline-delete-icon">🗑</span></button></div><div class="tools-timeline-content">${tabsHtml}${panelsHtml}</div></li>`;
             })
             .join('')}</ul>`;
     const activeCls = tool.id === currentToolKnowledgeId ? ' tools-card-active' : '';
@@ -2850,6 +2873,10 @@ if (el.toolsChatMessages) {
         let intent = extracted.intent || '';
         let topicName = (extracted.newTopic || extracted.tool || '').trim();
         const note = (extracted.rawText || extracted.content || '').trim();
+        const noteJson =
+          extracted.contentJson && typeof extracted.contentJson === 'object'
+            ? extracted.contentJson
+            : null;
 
         // 允许用户在卡片顶部通过下拉框二次选择沟通意图 & 编辑讨论话题
         const card = btn.closest('.tools-intent-card');
@@ -2932,7 +2959,7 @@ if (el.toolsChatMessages) {
 
         if (target && note) {
           currentToolKnowledgeId = target.id;
-          appendToolKnowledge(target.id, note);
+          appendToolKnowledge(target.id, note, noteJson);
           renderToolsKnowledge();
           saveToolsChatMessagesToStorage();
 
@@ -2968,6 +2995,21 @@ if (el.toolsChatMessages) {
 
 if (el.toolsList) {
   el.toolsList.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('.tools-timeline-tab');
+    if (tabBtn) {
+      const container = tabBtn.closest('.tools-timeline-content');
+      if (!container) return;
+      const isJsonTab = tabBtn.dataset.tab === 'json';
+      container.querySelectorAll('.tools-timeline-tab').forEach((btn) => {
+        btn.classList.toggle('tools-timeline-tab-active', btn === tabBtn);
+      });
+      const textPanel = container.querySelector('.tools-timeline-panel-text');
+      const jsonPanel = container.querySelector('.tools-timeline-panel-json');
+      if (textPanel) textPanel.hidden = isJsonTab && !!jsonPanel;
+      if (jsonPanel) jsonPanel.hidden = !isJsonTab;
+      return;
+    }
+
     const btn = e.target.closest('.tools-timeline-delete');
     if (!btn) return;
     const toolId =
@@ -3022,7 +3064,7 @@ async function handleToolsChatSend() {
     if (!DEEPSEEK_API_KEY) {
       throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用工具/话题讨论意图管理功能。');
     }
-    const { intent, tool, newTopic, content, _llmMeta } = await analyzeToolDiscussionIntent(text);
+    const { intent, tool, newTopic, content, contentJson, _llmMeta } = await analyzeToolDiscussionIntent(text);
     parsingBlock.remove();
 
     const intentLabel = intent || '—';
@@ -3033,6 +3075,14 @@ async function handleToolsChatSend() {
       { label: '讨论话题', value: toolLabel },
       { label: '沟通内容', value: content || text },
     ];
+    const normalizedContentJson =
+      contentJson && typeof contentJson === 'object' ? contentJson : null;
+    if (normalizedContentJson) {
+      rows.push({
+        label: '沟通内容 JSON',
+        value: JSON.stringify(normalizedContentJson, null, 2),
+      });
+    }
     if (intentLabel === '增加') {
       rows.splice(2, 0, { label: '新增话题', value: extraTopic || toolLabel || content || text });
     }
@@ -3062,6 +3112,13 @@ async function handleToolsChatSend() {
             r.value || ''
           )}" placeholder="${escapeHtml(placeholder)}" /></span></div>`;
         }
+        if (r.label === '沟通内容 JSON') {
+          return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(
+            r.label
+          )}</span><span class="problem-detail-basic-info-value"><pre class="tools-intent-json-pre">${escapeHtml(
+            r.value || ''
+          )}</pre></span></div>`;
+        }
         return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(
           r.label
         )}</span><span class="problem-detail-basic-info-value">${escapeHtml(r.value || '')}</span></div>`;
@@ -3076,6 +3133,7 @@ async function handleToolsChatSend() {
         tool: toolLabel,
         newTopic: extraTopic,
         content: content || '',
+        contentJson: normalizedContentJson || null,
         rawText: text,
       })
     )

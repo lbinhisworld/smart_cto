@@ -111,6 +111,10 @@
   - 从上述 6 类中选择 1 个意图。
   - 识别清晰的「讨论话题」名称（工具 / 平台 / 方法论等）。
   - `content` 字段直接回传用户原始输入，**不做改写**。
+  - **尝试抽取结构化 JSON**：根据沟通内容的文本结构，生成尽量合理的 `contentJson`：
+    - 当内容本身已经是 JSON 或接近 JSON 时，直接解析或轻微修正为合法 JSON；
+    - 当内容是「键: 值」/「字段：说明」/ 列表项等结构化文本时，根据字段含义生成 JSON；
+    - 若确实无法抽取出有意义的结构化信息，则返回 `null`。
 - 约定的 JSON 输出结构：
 
 ```json
@@ -118,7 +122,8 @@
   "intent": "增加|补充|删除|修改|查询|讨论",
   "tool": "讨论话题名称",
   "newTopic": "当 intent 为 增加 时的新增话题名称；否则为 \"\"",
-  "content": "用户的原始输入文本"
+  "content": "用户的原始输入文本",
+  "contentJson": null 或 { ...基于内容推断出的结构化 JSON... }
 }
 ```
 
@@ -141,8 +146,9 @@
   - `讨论话题`：渲染为可编辑文本框 `<input class="tools-topic-input">`
   - `新增话题`（仅在 `intentLabel === '增加'` 时插入）：同样是 `<input class="tools-topic-input">`
   - `沟通内容`：展示 `content || 原始用户输入` 的纯文本说明。
+  - `沟通内容 JSON`：当 `contentJson` 非空时，展示为只读的 JSON 预览块 `<pre class="tools-intent-json-pre">`，内部采用截断展示（固定高度、内部省略号），防止撑出聊天框。
 - 底部操作区：
-  - 「确认」按钮：`.btn-confirm-tool-intent`，带 `data-extracted` 属性存储原始 JSON。
+  - 「确认」按钮：`.btn-confirm-tool-intent`，带 `data-extracted` 属性存储原始 JSON（包括 `contentJson`）。
 
 #### 5.3 确认时的业务逻辑
 
@@ -175,12 +181,14 @@
 
 ##### 5.3.3 处理时间线追加
 
-- 准备追加内容 `note = extracted.rawText || extracted.content`。
+- 准备追加内容：
+  - 文本部分：`note = extracted.rawText || extracted.content`。
+  - JSON 部分：`noteJson = extracted.contentJson || null`。
 - 若 `target` 存在且 `note` 非空：
   - 将 `currentToolKnowledgeId` 切换为 `target.id`。
-  - 调用 `appendToolKnowledge(target.id, note)`：
+  - 调用 `appendToolKnowledge(target.id, note, noteJson)`：
     - 读取 `TOOL_KNOWLEDGE_STORAGE_KEY` 当前状态。
-    - 向对应 `toolId` 的数组追加 `{ content: note, createdAt: new Date().toISOString() }`。
+    - 向对应 `toolId` 的数组追加 `{ content, createdAt, contentJson? }` 条目；
     - 写回本地存储。
   - 调用 `renderToolsKnowledge()` 刷新右侧话题列表。
   - 调用 `saveToolsChatMessagesToStorage()` 保存左侧聊天 HTML。
@@ -229,10 +237,18 @@
 
 ---
 
-### 7. 后续可扩展方向（TODO）
+### 7. 时间线节点 JSON 视图与后续扩展
 
-- 为时间线条目增加「标签 / 类型」字段（如「踩坑」「最佳实践」「注意事项」）。
-- 支持在话题卡片中对时间线条目进行**编辑**（当前已支持删除单个条目）。
-- 增加搜索与过滤能力（按话题名、内容关键字、时间范围等）。
-- 将知识库导出为 Markdown / JSON，方便在外部文档中复用。
+- 每条时间线节点在 `tools-card-timeline` 中渲染为：
+  - 上方时间行（含时间与删除按钮）。
+  - 下方内容卡片 `tools-timeline-content`：
+    - 若无 JSON：仅展示文本内容。
+    - 若有 JSON：内部包含「内容 / JSON」两个 Tab：
+      - `内容` Tab：显示原始文本；
+      - `JSON` Tab：显示 `contentJson` 的格式化结果，使用 `pre.tools-timeline-panel-json`，支持滚动但不会撑出卡片。
+- 后续可扩展方向（TODO）：
+  - 为时间线条目增加「标签 / 类型」字段（如「踩坑」「最佳实践」「注意事项」）。
+  - 支持在话题卡片中对时间线条目进行**编辑**（当前已支持删除单个条目）。
+  - 增加搜索与过滤能力（按话题名、内容关键字、时间范围等）。
+  - 将知识库导出为 Markdown / JSON，方便在外部文档中复用。
 

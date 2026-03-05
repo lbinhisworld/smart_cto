@@ -2652,7 +2652,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  background: rgba(88, 166, 255, 0.12);
+  /* 标题栏使用更明亮的高亮色，强化话题层级感 */
+  background: linear-gradient(90deg, rgba(88, 166, 255, 0.32), rgba(56, 189, 248, 0.32));
   border: none;
   color: var(--text);
   cursor: pointer;
@@ -2790,6 +2791,46 @@ body {
   overflow-y: auto;
 }
 
+.tools-timeline-content-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.tools-timeline-tab {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.tools-timeline-tab-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.tools-timeline-panel {
+  margin: 0;
+}
+
+.tools-timeline-panel[hidden] {
+  display: none !important;
+}
+
+.tools-timeline-panel-json {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 0.75rem;
+  white-space: pre;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
 .tools-timeline-empty {
   margin: 0;
   font-size: 0.8rem;
@@ -2812,6 +2853,34 @@ body {
   background: var(--surface);
   color: var(--text);
   font-size: 0.8rem;
+}
+
+.tools-intent-json-pre {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  max-height: 140px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  position: relative;
+}
+
+.tools-intent-json-pre::after {
+  content: '...';
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.25rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.6));
+  padding-left: 0.5rem;
 }
 
 .tools-topic-input {
