@@ -19,6 +19,13 @@ const ITGAP_HISTORY_TASKS = [
   { id: 'task9', name: '局部 ITGap 分析', stage: 'ITGap分析' },
 ];
 
+/** IT 策略规划阶段任务 */
+const IT_STRATEGY_TASKS = [
+  { id: 'task10', name: '全局架构设计', stage: 'IT策略规划' },
+  { id: 'task11', name: '环节专项设计', stage: 'IT策略规划' },
+  { id: 'task12', name: '链条串联与闭环', stage: 'IT策略规划' },
+];
+
 /** 数字化问题跟进任务定义 */
 const FOLLOW_TASKS = [
   { id: 'task1', name: '企业背景洞察', stage: '需求理解', objective: '基于客户输入的企业信息，提炼并结构化企业基本信息，为后续 BMC 与需求逻辑分析提供基础。', evaluationCriteria: '成功提取并确认包含公司名称、信用代码、法人、成立日期、注册资本、经营范围等核心字段的结构化 JSON。' },
@@ -156,6 +163,9 @@ let lastModificationClarification = null;
 
 /** 当前正在浏览的大节段（可点击切换，用于回看需求理解等） */
 let problemDetailViewingMajorStage = 0;
+
+/** IT 策略规划阶段当前选中的任务索引：0=全局架构设计 1=环节专项设计 2=链条串联与闭环 */
+let itStrategyPlanViewingSubstep = 0;
 
 /** 问题详情页已确认的客户基本信息（解析后点击确认） */
 let problemDetailConfirmedBasicInfo = null;
@@ -3044,7 +3054,7 @@ const COMM_HISTORY_CONTENT_MAX_LEN = 3500;
 function buildCommunicationHistoryTextForQuery(createdAt) {
   const communications = getCommunicationsByTask(createdAt);
   const lines = [];
-  const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS];
+  const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   for (const task of allTasks) {
     const comms = communications[task.id] || [];
     const taskLabel = task.name;
@@ -4612,6 +4622,7 @@ function getCommunicationsByTask(createdAt) {
   const byTask = {};
   FOLLOW_TASKS.forEach((t) => { byTask[t.id] = []; });
   ITGAP_HISTORY_TASKS.forEach((t) => { byTask[t.id] = []; });
+  IT_STRATEGY_TASKS.forEach((t) => { byTask[t.id] = []; });
   let lastUserComm = null;
   for (const msg of chats) {
     const inferred = inferTaskIdFromMessage(msg);
@@ -4913,7 +4924,7 @@ function renderProblemDetailHistory() {
   const createdAt = item?.createdAt;
   const trackingData = createdAt ? (getTaskTrackingData()[createdAt] || {}) : {};
   const communications = createdAt ? getCommunicationsByTask(createdAt) : {};
-  const allHistoryTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS];
+  const allHistoryTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   container.innerHTML = allHistoryTasks.map((task) => {
     const taskData = trackingData[task.id] || {};
     const objective = (taskData.objective ?? task.objective) || '—';
@@ -6875,12 +6886,18 @@ function focusWorkspaceOnIntent(extracted) {
   else if (taskId === 'task7') cardTaskId = 'e2e-flow';
   else if (taskId === 'task8') cardTaskId = 'global-itgap';
   else if (taskId === 'task9') cardTaskId = 'local-itgap';
+  else if (['task10', 'task11', 'task12'].includes(taskId)) cardTaskId = taskId;
   const currentMajorStage = item.currentMajorStage ?? 0;
   let targetMajorStage = 0;
   if (['task1', 'task2', 'task3'].includes(taskId)) targetMajorStage = 0;
   else if (['task4', 'task5', 'task6'].includes(taskId)) targetMajorStage = 1;
   else if (['task7', 'task8', 'task9'].includes(taskId)) targetMajorStage = 2;
+  else if (['task10', 'task11', 'task12'].includes(taskId)) targetMajorStage = 3;
   else targetMajorStage = 1;
+  if (['task10', 'task11', 'task12'].includes(taskId)) {
+    const substepMap = { task10: 0, task11: 1, task12: 2 };
+    itStrategyPlanViewingSubstep = substepMap[taskId];
+  }
   if (problemDetailViewingMajorStage !== targetMajorStage) {
     problemDetailViewingMajorStage = Math.min(targetMajorStage, currentMajorStage);
     updateProblemDetailProgressStages(currentMajorStage, problemDetailViewingMajorStage);
@@ -7019,14 +7036,31 @@ function renderProblemDetailContent() {
   }
   const currentMajorStage = item.currentMajorStage ?? 0;
   if (problemDetailViewingMajorStage === 3) {
+    const itStrategyTasks = ['全局架构设计', '环节专项设计', '链条串联与闭环'];
+    const itStrategyTaskIds = ['task10', 'task11', 'task12'];
+    const itStrategyTaskBarHtml = itStrategyTasks.map((name, i) => {
+      const current = i === itStrategyPlanViewingSubstep;
+      const cls = 'problem-detail-substep' + (current ? ' problem-detail-substep-current' : '');
+      return `<button type="button" class="${cls}" data-it-strategy-substep="${i}" data-task-id="${itStrategyTaskIds[i]}">${escapeHtml(name)}</button>`;
+    }).join('<span class="problem-detail-substep-sep" aria-hidden="true">→</span>');
+    const contentPlaceholders = [
+      { title: '全局架构设计', desc: '基于全局 ITGap 分析，设计整体 IT 架构与系统边界，明确各模块职责与集成关系。' },
+      { title: '环节专项设计', desc: '针对各业务环节的局部 ITGap，进行专项方案设计，输出可落地的功能与接口需求。' },
+      { title: '链条串联与闭环', desc: '串联端到端流程各环节方案，形成闭环实施路径与优先级，输出 IT 策略规划结论。' },
+    ];
+    const currentPlaceholder = contentPlaceholders[itStrategyPlanViewingSubstep];
     container.innerHTML = `
-      <div class="problem-detail-substeps"><span class="problem-detail-substep problem-detail-substep-done">IT 策略规划</span></div>
+      <div class="problem-detail-substeps">${itStrategyTaskBarHtml}</div>
       <div class="problem-detail-workspace-scroll">
-        <div class="problem-detail-workflow-align-placeholder">
-          <h3 class="problem-detail-workflow-align-title">IT 策略规划</h3>
-          <p class="problem-detail-workflow-align-desc">基于 ITGap 分析结果，制定 IT 转型策略与实施路径。此阶段功能开发中。</p>
+        <div class="problem-detail-it-strategy-content">
+          <div class="problem-detail-workflow-align-placeholder">
+            <h3 class="problem-detail-workflow-align-title">${escapeHtml(currentPlaceholder.title)}</h3>
+            <p class="problem-detail-workflow-align-desc">${escapeHtml(currentPlaceholder.desc)}</p>
+            <p class="problem-detail-workflow-align-desc problem-detail-workflow-align-note">此任务内容展示区，后续可接入大模型生成与编辑。</p>
+          </div>
         </div>
       </div>`;
+    setupItStrategyPlanTaskButtons(container);
     return;
   }
   if (problemDetailViewingMajorStage >= 2) {
@@ -7350,6 +7384,19 @@ function renderProblemDetailContent() {
     <div class="problem-detail-workspace-cards">${cardsHtml}</div>
   </div>`;
   setupProblemDetailCardToggle();
+}
+
+/** IT 策略规划页：任务按钮栏点击切换当前任务并刷新工作区内容 */
+function setupItStrategyPlanTaskButtons(container) {
+  if (!container) return;
+  container.querySelectorAll('button[data-it-strategy-substep]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-it-strategy-substep'), 10);
+      if (Number.isNaN(idx) || idx < 0 || idx > 2) return;
+      itStrategyPlanViewingSubstep = idx;
+      renderProblemDetailContent();
+    });
+  });
 }
 
 function setupProblemDetailCardToggle() {
