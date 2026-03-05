@@ -2143,6 +2143,7 @@ if (el.problemDetailChatMessages) {
         updateDigitalProblemMajorStage(item.createdAt, 3);
         currentProblemDetailItem = { ...item, currentMajorStage: 3 };
         problemDetailViewingMajorStage = 3;
+        itStrategyPlanViewingSubstep = 0;
         updateProblemDetailProgressStages(3, 3);
         renderProblemDetailContent();
       }
@@ -3032,8 +3033,34 @@ async function executeQueryIntent(extracted, item) {
   const createdAt = item?.createdAt;
   const commHistory = buildCommunicationHistoryTextForQuery(createdAt);
   const queryReq = extracted.queryTarget || extracted.summary || '用户查询';
-  const systemPrompt = `你是一位数字化问题跟进助手。用户有一个查询需求，请基于【当前问题的沟通历史】准确、简洁地回答。若沟通历史中无相关信息，请如实说明。`;
-  const userContent = `【沟通历史】\n${commHistory}\n\n【查询需求】\n${queryReq}`;
+  const systemPrompt = `你是一位数字化问题跟进助手。用户有一个查询需求，请优先依据【当前问题的阶段状态】来判断当前处于哪个阶段或任务，再结合【沟通历史】补充细节。若两者不一致，以【当前问题的阶段状态】为准。若仍无相关信息，请如实说明。`;
+
+  const majorStageIndex = item?.currentMajorStage ?? 0;
+  const majorStageLabel = PROBLEM_DETAIL_MAJOR_STAGE_LABELS[majorStageIndex] ?? String(majorStageIndex);
+  const workflowAlignCompleted = (item?.workflowAlignCompletedStages || []).join(', ');
+  const itGapCompleted = (item?.itGapCompletedStages || []).join(', ');
+  let currentStageLine = `当前问题的阶段为：${majorStageLabel}（索引 ${majorStageIndex}）。`;
+  if (majorStageIndex === 3) {
+    const subIdx = typeof itStrategyPlanViewingSubstep === 'number' ? itStrategyPlanViewingSubstep : 0;
+    const itStrategyTask = IT_STRATEGY_TASKS[subIdx];
+    if (itStrategyTask) {
+      currentStageLine += ` 当前 IT 策略规划任务为：${itStrategyTask.name}（${itStrategyTask.id}）。`;
+    }
+  }
+  const stateLines = [
+    currentStageLine,
+    `已完成的工作流对齐子步骤索引：${workflowAlignCompleted || '无'}`,
+    `已完成的 ITGap 分析子步骤索引：${itGapCompleted || '无'}`,
+  ].join('\n');
+
+  const userContent = `【当前问题的阶段状态】
+${stateLines}
+
+【沟通历史】
+${commHistory}
+
+【查询需求】
+${queryReq}`;
   const { content, usage, model, durationMs } = await fetchDeepSeekChat([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userContent },
