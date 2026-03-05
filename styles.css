@@ -2641,7 +2641,8 @@ body {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
-  overflow: hidden;
+  /* 允许标题和副标题在折叠状态下完全显示，不被卡片裁切 */
+  overflow: visible;
 }
 
 .tools-card-header {
@@ -2662,16 +2663,23 @@ body {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.15rem;
+  /* 让标题和副标题在一行显示不下时可以正常换行，而不是被箭头或容器裁切 */
+  flex: 1;
+  min-width: 0;
 }
 
 .tools-card-title {
   font-size: 0.95rem;
   font-weight: 600;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .tools-card-desc {
   font-size: 0.8rem;
   color: var(--text-muted);
+  white-space: normal;
+  word-break: break-word;
 }
 
 .tools-card-arrow {
@@ -2686,12 +2694,15 @@ body {
 .tools-card-timeline {
   border-left: 2px solid rgba(255, 255, 255, 0.06);
   padding-left: 0.75rem;
+  /* 限制单个话题时间线的高度，超出部分在卡片内部滚动，避免占满整个列表高度 */
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .tools-timeline {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0.5rem 0 0.75rem 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -2699,32 +2710,53 @@ body {
 
 .tools-timeline-item {
   position: relative;
-  padding-left: 0.5rem;
+  padding-left: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .tools-timeline-item::before {
   content: '';
   position: absolute;
-  left: -0.85rem;
-  top: 0.45rem;
-  width: 8px;
-  height: 8px;
+  left: -0.9rem;
+  top: 0.6rem;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent, #63b3ed);
+  border: 2px solid rgba(26, 35, 50, 0.6);
+  box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.2);
 }
 
 .tools-timeline-time {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-bottom: 0.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(45, 58, 77, 0.5);
+  border-radius: 8px;
+  margin-bottom: 0.15rem;
 }
 
 .tools-timeline-content {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--text);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
+  padding: 0.6rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid rgba(45, 58, 77, 0.4);
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .tools-timeline-empty {
@@ -2749,6 +2781,23 @@ body {
   background: var(--surface);
   color: var(--text);
   font-size: 0.8rem;
+}
+
+.tools-topic-input {
+  display: block;
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.tools-topic-input::placeholder {
+  color: var(--text-muted);
 }
 
 /* 工作区：按钮栏（企业背景洞察等）固定，下方卡片区域可垂直滚动 */

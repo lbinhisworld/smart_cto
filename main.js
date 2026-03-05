@@ -89,8 +89,9 @@ async function analyzeToolDiscussionIntent(text) {
   const systemPrompt = `你是一个「工具/话题讨论意图分析助手」。用户会在聊天框中输入一段关于某个软件工具、平台、方法论或抽象话题（如企业微信、飞书、BMC 商业模式画布分析等）的讨论内容。
 
 【你的任务】
-1. 判断用户这段话的「沟通意图」是哪一类（只能从下面五个中选一类）：
-   - 增加：提出新增功能、补充知识点、增加用法、增加配置项等；
+1. 判断用户这段话的「沟通意图」是哪一类（只能从下面六个中选一类）：
+   - 增加：提出新增功能、补充新的知识点、增加全新的用法或配置项等，并且希望作为一个「新主题」单独记录；
+   - 补充：在已存在的话题/主题下补充更多说明、案例或细节，属于在原有主题时间线上继续追加内容；
    - 删除：希望删除某个配置、去掉某条规则、废弃某个用法/工具等；
    - 修改：希望修改现有配置、规则、流程、使用方式等；
    - 查询：在询问某个工具是什么、怎么用、有没有某功能等；
@@ -106,7 +107,7 @@ async function analyzeToolDiscussionIntent(text) {
 【输出格式】
 请严格返回一个 JSON 对象，不要包含多余说明或 Markdown 代码块，例如：
 {
-  "intent": "增加|删除|修改|查询|讨论",
+  "intent": "增加|补充|删除|修改|查询|讨论",
   "tool": "讨论话题（例如具体工具/平台/方法论名称，如 企业微信 或 BMC 商业模式画布）",
   "newTopic": "当 intent 为 增加 时，代表用户希望新增的话题名称；否则可为 \"\"",
   "content": "用户的原始输入文本"
@@ -2848,14 +2849,18 @@ if (el.toolsChatMessages) {
         let intent = extracted.intent || '';
         let topicName = (extracted.newTopic || extracted.tool || '').trim();
         const note = (extracted.rawText || extracted.content || '').trim();
-        if (!topicName) topicName = '自定义话题';
 
-        // 允许用户在卡片顶部通过下拉框二次选择沟通意图
+        // 允许用户在卡片顶部通过下拉框二次选择沟通意图 & 编辑讨论话题
         const card = btn.closest('.tools-intent-card');
         const selectEl = card && card.querySelector('.tools-intent-select');
+        const topicInput = card && card.querySelector('.tools-topic-input');
         if (selectEl && selectEl.value) {
           intent = selectEl.value;
         }
+        if (topicInput && typeof topicInput.value === 'string' && topicInput.value.trim()) {
+          topicName = topicInput.value.trim();
+        }
+        if (!topicName) topicName = '自定义话题';
 
         // 先尝试按名称命中已存在的话题
         let target = TOOL_KNOWLEDGE_ITEMS.find(
@@ -2959,7 +2964,7 @@ async function handleToolsChatSend() {
     if (intentLabel === '增加') {
       rows.splice(2, 0, { label: '新增话题', value: extraTopic || toolLabel || content || text });
     }
-    const intentOptions = ['增加', '删除', '修改', '查询', '讨论'];
+    const intentOptions = ['增加', '补充', '删除', '修改', '查询', '讨论'];
     const rowsHtml = rows
       .map((r) => {
         if (r.label === '沟通意图') {
@@ -2975,6 +2980,15 @@ async function handleToolsChatSend() {
           return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(
             r.label
           )}</span><span class="problem-detail-basic-info-value">${selectHtml}</span></div>`;
+        }
+        if (r.label === '讨论话题' || r.label === '新增话题') {
+          const placeholder =
+            r.label === '讨论话题' ? '请输入或修改本次讨论的话题名称' : '请输入或修改要新增的话题名称';
+          return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(
+            r.label
+          )}</span><span class="problem-detail-basic-info-value"><input class="tools-topic-input" type="text" value="${escapeHtml(
+            r.value || ''
+          )}" placeholder="${escapeHtml(placeholder)}" /></span></div>`;
         }
         return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(
           r.label
