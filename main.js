@@ -17,16 +17,82 @@ const TOOL_KNOWLEDGE_CHAT_STORAGE_KEY = 'tool_knowledge_chat_html';
 
 /** ITGap 阶段在沟通历史中展示的任务（端到端流程绘制等） */
 const ITGAP_HISTORY_TASKS = [
-  { id: 'task7', name: '端到端流程绘制', stage: 'ITGap分析' },
-  { id: 'task8', name: '全局 ITGap 分析', stage: 'ITGap分析' },
-  { id: 'task9', name: '局部 ITGap 分析', stage: 'ITGap分析' },
+  {
+    id: 'task7',
+    name: '端到端流程绘制',
+    stage: 'ITGap分析',
+    objective: '基于价值流图数据提取并整理端到端流程绘制所需的结构化 JSON，为后续 ITGap 分析提供统一流程底座。',
+    evaluationCriteria: '成功生成端到端流程 JSON；用户在聊天区确认后视为完成。',
+  },
+  {
+    id: 'task8',
+    name: '全局 ITGap 分析',
+    stage: 'ITGap分析',
+    objective: '基于端到端流程与业务场景，形成覆盖全链路的全局 ITGap 分析结论（数据、功能、体验/效率等维度）。',
+    evaluationCriteria: '输出结构化的全局 ITGap 分析 JSON，并在工作区可查看（结构化/JSON 视图）；确认后视为完成。',
+  },
+  {
+    id: 'task9',
+    name: '局部 ITGap 分析',
+    stage: 'ITGap分析',
+    objective: '将全局 ITGap 细化到每个环节，生成并沉淀可执行的局部 ITGap 分析结论，支撑后续环节专项设计。',
+    evaluationCriteria: '为每个环节生成局部 ITGap 分析 session，并可逐环节输出分析 JSON/Markdown；环节分析生成后写入任务过程日志。',
+  },
 ];
 
-/** IT 策略规划阶段任务 */
+/** IT 策略规划阶段任务（PRD：Task10–15） */
 const IT_STRATEGY_TASKS = [
-  { id: 'task10', name: '全局架构设计', stage: 'IT策略规划' },
-  { id: 'task11', name: '环节专项设计', stage: 'IT策略规划' },
-  { id: 'task12', name: '链条串联与闭环', stage: 'IT策略规划' },
+  {
+    id: 'task10',
+    name: '角色与权限模型推演',
+    stage: 'IT策略规划',
+    objective:
+      '基于 VSM（价值流图）节点识别所有业务干系人，并定义其在企业微信和低代码系统中的职责边界与访问范围。',
+    evaluationCriteria:
+      '1）完整性：是否覆盖 VSM 中所有动作的发出者、接收者及监管者？2）安全性：是否实现了内外协同（内部员工与外部联系人/上下游）的权限物理隔离？',
+  },
+  {
+    id: 'task11',
+    name: '核心业务对象推演',
+    stage: 'IT策略规划',
+    objective: '定义流程中流转的数字化实体（如订单、合同、任务单），为低代码数据库建模提供底层的逻辑结构。',
+    evaluationCriteria:
+      '1）颗粒度：对象字段是否足以支撑 IT Gap 分析中提到的所有业务数据记录与统计需求？2）状态定义：是否为每个业务对象建立了清晰的生命周期状态机（State Machine），例如：待处理、执行中、已完成。',
+  },
+  {
+    id: 'task12',
+    name: '全局架构设计',
+    stage: 'IT策略规划',
+    objective:
+      '构建以企业微信为交互入口、低代码平台为逻辑引擎、现有 IT 系统为数据底座的整体技术交互蓝图。',
+    evaluationCriteria:
+      '1）耦合度：各系统间的数据接口（API/Webhook）是否定义清晰、标准化且具备高扩展性？2）入口统一性：用户是否能在企业微信单一工作台内完成全链路的核心业务操作，减少系统切换。',
+  },
+  {
+    id: 'task13',
+    name: '环节专项设计',
+    stage: 'IT策略规划',
+    objective:
+      '针对 VSM 中每个具体的 IT Gap，设计「消息驱动 + 表单操作」的功能微闭环，解决具体的业务痛点。',
+    evaluationCriteria:
+      '1）精准性：企微机器人推送的消息是否包含了用户进行决策所需的关键上下文信息？2）操作体验：用户从接收企微通知到进入低代码表单完成操作的交互层级是否在 3 层以内？',
+  },
+  {
+    id: 'task14',
+    name: '链条串联与闭环',
+    stage: 'IT策略规划',
+    objective: '模拟端到端的业务全路径，确保跨节点、跨角色间的信息传递无断点、无冗余。',
+    evaluationCriteria:
+      '1）协同性：上一环节的「输出」是否能自动且即时地转化为下一环节的「驱动」（如自动触发下游负责人的企微提醒）？2）异常覆盖：流程分支（如审批驳回、任务超时、信息变更）是否都有对应的数字化逻辑闭环。',
+  },
+  {
+    id: 'task15',
+    name: '价值回溯与自检',
+    stage: 'IT策略规划',
+    objective: '将最终生成的解决方案对标原始 IT Gap 清单，验证方案的有效性并评估预期的业务收益。',
+    evaluationCriteria:
+      '1）对冲率：原始 IT Gap 清单中记录的所有痛点，是否在最终方案中实现了 100% 的功能覆盖？2）价值量化：是否能基于现状（As-Is）与方案（To-Be）的对比，给出明确的效率提升或质量改善指标。',
+  },
 ];
 
 /** 工具知识：工具清单（右侧长卡片列表） */
@@ -273,7 +339,7 @@ let lastModificationClarification = null;
 /** 当前正在浏览的大节段（可点击切换，用于回看需求理解等） */
 let problemDetailViewingMajorStage = 0;
 
-/** IT 策略规划阶段当前选中的任务索引：0=全局架构设计 1=环节专项设计 2=链条串联与闭环 */
+/** IT 策略规划阶段当前选中的任务索引：0=角色与权限 1=核心业务对象 2=全局架构 3=环节专项 4=链条串联 5=价值回溯 */
 let itStrategyPlanViewingSubstep = 0;
 
 /** 问题详情页已确认的客户基本信息（解析后点击确认） */
@@ -7910,6 +7976,33 @@ async function handleProblemDetailChatSend() {
 
 const PROBLEM_DETAIL_MAJOR_STAGE_LABELS = ['需求理解', '工作流对齐', 'ITGap分析', 'IT策略规划'];
 
+/** 任务编号前缀（与 task1~task15 一致，圈号数字风格统一） */
+const CIRCLED_TASK_NUMBER_PREFIX = [
+  '',
+  '①',
+  '②',
+  '③',
+  '④',
+  '⑤',
+  '⑥',
+  '⑦',
+  '⑧',
+  '⑨',
+  '⑩',
+  '⑪',
+  '⑫',
+  '⑬',
+  '⑭',
+  '⑮',
+];
+
+function withTaskNumberPrefix(taskId, name) {
+  const m = String(taskId || '').match(/^task(\d{1,2})$/);
+  const n = m ? parseInt(m[1], 10) : NaN;
+  const prefix = !Number.isNaN(n) ? (CIRCLED_TASK_NUMBER_PREFIX[n] || '') : '';
+  return prefix ? `${prefix} ${name}` : name;
+}
+
 /** 根据意图提炼结果，将工作区定位到对应页面并高亮修改目标 */
 function focusWorkspaceOnIntent(extracted) {
   const container = el.problemDetailContent;
@@ -7925,16 +8018,16 @@ function focusWorkspaceOnIntent(extracted) {
   else if (taskId === 'task7') cardTaskId = 'e2e-flow';
   else if (taskId === 'task8') cardTaskId = 'global-itgap';
   else if (taskId === 'task9') cardTaskId = 'local-itgap';
-  else if (['task10', 'task11', 'task12'].includes(taskId)) cardTaskId = taskId;
+  else if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) cardTaskId = taskId;
   const currentMajorStage = item.currentMajorStage ?? 0;
   let targetMajorStage = 0;
   if (['task1', 'task2', 'task3'].includes(taskId)) targetMajorStage = 0;
   else if (['task4', 'task5', 'task6'].includes(taskId)) targetMajorStage = 1;
   else if (['task7', 'task8', 'task9'].includes(taskId)) targetMajorStage = 2;
-  else if (['task10', 'task11', 'task12'].includes(taskId)) targetMajorStage = 3;
+  else if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) targetMajorStage = 3;
   else targetMajorStage = 1;
-  if (['task10', 'task11', 'task12'].includes(taskId)) {
-    const substepMap = { task10: 0, task11: 1, task12: 2 };
+  if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) {
+    const substepMap = { task10: 0, task11: 1, task12: 2, task13: 3, task14: 4, task15: 5 };
     itStrategyPlanViewingSubstep = substepMap[taskId];
   }
   if (problemDetailViewingMajorStage !== targetMajorStage) {
@@ -8075,18 +8168,16 @@ function renderProblemDetailContent() {
   }
   const currentMajorStage = item.currentMajorStage ?? 0;
   if (problemDetailViewingMajorStage === 3) {
-    const itStrategyTasks = ['全局架构设计', '环节专项设计', '链条串联与闭环'];
-    const itStrategyTaskIds = ['task10', 'task11', 'task12'];
-    const itStrategyTaskBarHtml = itStrategyTasks.map((name, i) => {
+    const itStrategyTaskBarHtml = IT_STRATEGY_TASKS.map((t, i) => {
       const current = i === itStrategyPlanViewingSubstep;
       const cls = 'problem-detail-substep' + (current ? ' problem-detail-substep-current' : '');
-      return `<button type="button" class="${cls}" data-it-strategy-substep="${i}" data-task-id="${itStrategyTaskIds[i]}">${escapeHtml(name)}</button>`;
+      const label = withTaskNumberPrefix(t.id, t.name);
+      return `<button type="button" class="${cls}" data-it-strategy-substep="${i}" data-task-id="${t.id}">${escapeHtml(label)}</button>`;
     }).join('<span class="problem-detail-substep-sep" aria-hidden="true">→</span>');
-    const contentPlaceholders = [
-      { title: '全局架构设计', desc: '基于全局 ITGap 分析，设计整体 IT 架构与系统边界，明确各模块职责与集成关系。' },
-      { title: '环节专项设计', desc: '针对各业务环节的局部 ITGap，进行专项方案设计，输出可落地的功能与接口需求。' },
-      { title: '链条串联与闭环', desc: '串联端到端流程各环节方案，形成闭环实施路径与优先级，输出 IT 策略规划结论。' },
-    ];
+    const contentPlaceholders = IT_STRATEGY_TASKS.map((t) => ({
+      title: t.name,
+      desc: `任务目标：${t.objective || '—'} 评估标准：${t.evaluationCriteria || '—'}`,
+    }));
     const currentPlaceholder = contentPlaceholders[itStrategyPlanViewingSubstep];
     container.innerHTML = `
       <div class="problem-detail-substeps">${itStrategyTaskBarHtml}</div>
@@ -8103,7 +8194,11 @@ function renderProblemDetailContent() {
     return;
   }
   if (problemDetailViewingMajorStage >= 2) {
-    const itGapSubsteps = ['端到端流程绘制', '全局 ITGap 分析', '局部 ITGap 分析'];
+    const itGapSubsteps = [
+      { id: 'task7', name: '端到端流程绘制' },
+      { id: 'task8', name: '全局 ITGap 分析' },
+      { id: 'task9', name: '局部 ITGap 分析' },
+    ].map((t) => withTaskNumberPrefix(t.id, t.name));
     const valueStream = resolveValueStreamForItGap(item);
     let itGapCompleted = item.itGapCompletedStages || [];
     // 若已有价值流（端到端流程已绘制），自动将端到端流程绘制任务标为完成并持久化（任务过程日志由用户确认流程写入）
@@ -8236,7 +8331,11 @@ function renderProblemDetailContent() {
     return;
   }
   if (problemDetailViewingMajorStage >= 1) {
-    const workflowSubsteps = ['绘制价值流', 'IT现状标注', '痛点标注'];
+    const workflowSubsteps = [
+      { id: 'task4', name: '绘制价值流' },
+      { id: 'task5', name: 'IT现状标注' },
+      { id: 'task6', name: '痛点标注' },
+    ].map((t) => withTaskNumberPrefix(t.id, t.name));
     const wfCompleted = item.workflowAlignCompletedStages || [];
     const wfCurrent = [0, 1, 2].find((i) => !wfCompleted.includes(i)) ?? 3;
     const workflowSubstepsHtml = workflowSubsteps.map((name, i) => {
@@ -8296,6 +8395,7 @@ function renderProblemDetailContent() {
     '商业画布加载',
     '需求逻辑构建',
   ];
+  const subStepTaskIds = ['task1', 'task2', 'task3'];
   const completedStages = item.completedStages || [];
   const currentStage = [0, 1, 2].find((i) => !completedStages.includes(i)) ?? 3;
   const subStepsHtml = subSteps.map((name, i) => {
@@ -8305,7 +8405,8 @@ function renderProblemDetailContent() {
     if (done) cls += ' problem-detail-substep-done';
     else if (current) cls += ' problem-detail-substep-current';
     const icon = done ? ' <span class="problem-detail-substep-check">✅</span>' : '';
-    return `<span class="${cls}">${escapeHtml(name)}${icon}</span>`;
+    const label = withTaskNumberPrefix(subStepTaskIds[i], name);
+    return `<span class="${cls}">${escapeHtml(label)}${icon}</span>`;
   }).join('<span class="problem-detail-substep-sep">→</span>');
   const basicInfoLabels = [
     { key: 'company_name', label: '公司名称' },
@@ -8428,10 +8529,11 @@ function renderProblemDetailContent() {
 /** IT 策略规划页：任务按钮栏点击切换当前任务并刷新工作区内容 */
 function setupItStrategyPlanTaskButtons(container) {
   if (!container) return;
+  const maxSubstep = (IT_STRATEGY_TASKS && IT_STRATEGY_TASKS.length) ? IT_STRATEGY_TASKS.length - 1 : 5;
   container.querySelectorAll('button[data-it-strategy-substep]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.getAttribute('data-it-strategy-substep'), 10);
-      if (Number.isNaN(idx) || idx < 0 || idx > 2) return;
+      if (Number.isNaN(idx) || idx < 0 || idx > maxSubstep) return;
       itStrategyPlanViewingSubstep = idx;
       renderProblemDetailContent();
     });
