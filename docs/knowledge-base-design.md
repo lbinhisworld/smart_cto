@@ -32,7 +32,7 @@
   - 结构：`Array<{ id, name, description }>`。
 - `TOOL_KNOWLEDGE_STORAGE_KEY = 'tool_knowledge_notes'`
   - 存储每个话题的时间线：
-  - 结构：`{ [toolId: string]: Array<{ content: string, createdAt: string }> }`。
+  - 结构：`{ [toolId: string]: Array<{ content: string, createdAt: string, contentJson?: object }> }`。`createdAt` 为 ISO 字符串，展示时统一格式化为「日期+具体时间」（如 `yyyy-MM-dd HH:mm:ss`）。
 - `TOOL_KNOWLEDGE_CHAT_STORAGE_KEY = 'tool_knowledge_chat_html'`
   - 存储左侧「话题讨论」聊天区的 **HTML 片段**（包含意图卡片）。
 
@@ -72,8 +72,8 @@
       - `<div class="tools-card-timeline">`：时间线容器。
         - `<ul class="tools-timeline">`
           - 多个 `<li class="tools-timeline-item">`：
-            - `tools-timeline-time`：时间 + 简要头部。
-            - `tools-timeline-content`：内容卡片（支持滚动，`max-height` 限制）。
+            - `tools-timeline-time`：时间（与聊天区时间戳格式一致：日期+具体时间）+ 删除按钮。
+            - `tools-timeline-content`：内容卡片（支持内部滚动，`max-height: 260px`；JSON 面板约 234px）。
 
 - 视觉风格：
   - 使用垂直时间线设计：左侧线 + 蓝色圆点，参考「问题详情 → 沟通历史 → 任务过程日志」样式。
@@ -95,20 +95,21 @@
 
 #### 4.1 意图分类（intent）
 
-当前支持的意图枚举值：
+当前支持的意图枚举值（共 5 类）：
 
 - `增加`：希望创建全新的话题主题，或将某段内容作为一个新条目独立记录。
 - `补充`：在已有话题下补充更多说明、案例或细节（**不新建话题，只追加时间线**）。
 - `删除`：希望删除某个话题（主题）及其所有时间线记录，属于**物理删除整个话题卡片**。
-- `修改`：希望修改已有规则 / 流程 / 用法等（当前主要用于语义理解）。
-- `查询`：询问某工具是什么、如何使用等。
-- `讨论`：泛化交流、优缺点、踩坑经验等（不明确属于增 / 删 / 改 / 查）。
+- `修改`：希望根据沟通内容**更新**已有时间线节点；系统将意图卡片 + 该话题时间线发往大模型，返回需更新的节点（时间戳 + 修改后内容），用户确认后覆盖对应节点。
+- `讨论`：泛化交流、优缺点、踩坑经验等；系统将时间线 + 用户沟通内容发往大模型，返回回复卡片，用户确认后将回复写入时间线。
+
+（已移除「查询」意图；若模型历史返回「查询」，前端会归一为「讨论」。）
 
 #### 4.2 模型 Prompt 与输出格式
 
 - 调用入口：`analyzeToolDiscussionIntent(text)`。
 - 模型系统提示词要求：
-  - 从上述 6 类中选择 1 个意图。
+  - 从上述 5 类中选择 1 个意图。
   - 识别清晰的「讨论话题」名称（工具 / 平台 / 方法论等）。
   - `content` 字段直接回传用户原始输入，**不做改写**。
   - **尝试抽取结构化 JSON**：根据沟通内容的文本结构，生成尽量合理的 `contentJson`：
@@ -119,7 +120,7 @@
 
 ```json
 {
-  "intent": "增加|补充|删除|修改|查询|讨论",
+  "intent": "增加|补充|删除|修改|讨论",
   "tool": "讨论话题名称",
   "newTopic": "当 intent 为 增加 时的新增话题名称；否则为 \"\"",
   "content": "用户的原始输入文本",
@@ -142,13 +143,12 @@
 
 - 使用 `problem-detail-basic-info-card` 的结构化行样式，每行包含：
   - `沟通意图`：渲染为下拉框 `<select class="tools-intent-select">`，选项：
-    - `['增加', '补充', '删除', '修改', '查询', '讨论']`
-  - `讨论话题`：渲染为可编辑文本框 `<input class="tools-topic-input">`
-  - `新增话题`（仅在 `intentLabel === '增加'` 时插入）：同样是 `<input class="tools-topic-input">`
+    - `['增加', '补充', '删除', '修改', '讨论']`
+  - `讨论话题`：渲染为可编辑文本框 `<input class="tools-topic-input">`。当意图为「增加」时，该字段初始值设为要新增的话题名称（来自 `newTopic` / `tool`），占位符为「请输入或修改要新增的话题名称」；其他意图时占位符为「请输入或修改本次讨论的话题名称」。不单独展示「新增话题」字段。
   - `沟通内容`：展示 `content || 原始用户输入` 的纯文本说明。
   - `沟通内容 JSON`：当 `contentJson` 非空时，展示为只读的 JSON 预览块 `<pre class="tools-intent-json-pre">`，内部采用截断展示（固定高度、内部省略号），防止撑出聊天框。
 - 底部操作区：
-  - 「确认」按钮：`.btn-confirm-tool-intent`，带 `data-extracted` 属性存储原始 JSON（包括 `contentJson`）。
+  - 「确认」按钮：`.btn-confirm-tool-intent`，带 `data-extracted` 属性存储原始 JSON（包括 `contentJson`、`cardCreatedAt`）。生成卡片时写入 `cardCreatedAt`（ISO），确认写入时间线时使用该时间戳，使节点显示时间与聊天区一致。
 
 #### 5.3 确认时的业务逻辑
 
@@ -167,6 +167,16 @@
 
 - 当初始意图为 `讨论` 且未命中已存在话题：
   - 自动将意图修正为 `增加`（视为「新话题的第一次讨论」）。
+- 当意图为 `讨论` 且命中已有话题时（**讨论回复流程**）：
+  1. 先将意图卡片内容写入时间线：`appendToolKnowledge(target.id, note, noteJson, extracted.cardCreatedAt)`。
+  2. 展示「正在结合该话题时间线知识生成讨论回复…」，调用 `fetchToolDiscussionReply(toolId, note)`：
+     - 上下文：该话题所有时间线节点（内容 + contentJson）+ 用户沟通内容。
+     - 大模型返回一段回复正文。
+  3. 在话题讨论区插入**讨论回复卡片**（`.tools-discussion-response-card`）：
+     - 展示大模型返回内容（Markdown 渲染）。
+     - 下方按钮：「确认」「重做」。
+  4. 用户点击**确认**：将当前卡片中的回复正文作为新条目写入该话题时间线，并移除按钮。
+  5. 用户点击**重做**：再次调用 `fetchToolDiscussionReply`，用新回复替换卡片内容，可再次确认或重做。
 
 ##### 5.3.2 创建 / 选择话题卡片
 
@@ -179,19 +189,21 @@
   - **意图为「补充」或其他**：
     - 若 `currentToolKnowledgeId` 存在，则使用当前选中的话题。
 
-##### 5.3.3 处理时间线追加
+##### 5.3.3 处理时间线追加与时间戳一致
 
 - 准备追加内容：
   - 文本部分：`note = extracted.rawText || extracted.content`。
   - JSON 部分：`noteJson = extracted.contentJson || null`。
-- 若 `target` 存在且 `note` 非空：
+  - 时间戳：使用 `extracted.cardCreatedAt`（意图卡片创建时的 ISO 时间），使时间线节点显示时间与聊天区该卡片下方时间一致。
+- 若 `target` 存在且 `note` 非空（且当前分支并非「讨论」或「修改」的独立流程）：
   - 将 `currentToolKnowledgeId` 切换为 `target.id`。
-  - 调用 `appendToolKnowledge(target.id, note, noteJson)`：
+  - 调用 `appendToolKnowledge(target.id, note, noteJson, extracted.cardCreatedAt)`：
     - 读取 `TOOL_KNOWLEDGE_STORAGE_KEY` 当前状态。
-    - 向对应 `toolId` 的数组追加 `{ content, createdAt, contentJson? }` 条目；
+    - 向对应 `toolId` 的数组追加 `{ content, createdAt, contentJson? }` 条目（`createdAt` 优先使用传入的 `cardCreatedAt`）；
     - 写回本地存储。
   - 调用 `renderToolsKnowledge()` 刷新右侧话题列表。
   - 调用 `saveToolsChatMessagesToStorage()` 保存左侧聊天 HTML。
+- **全系统时间戳**：聊天块与时间线统一使用「日期+具体时间」格式（如 `yyyy-MM-dd HH:mm:ss`），由 `getTimeStr()` / `formatChatTime()` 提供。
 
 ##### 5.3.4 意图为「删除」时的处理
 
@@ -210,9 +222,26 @@
     - 将返回的 `summary` 作为新条目再次追加到对应话题时间线。
     - 同时在左侧聊天区追加一条系统消息展示该总结。
 
+##### 5.3.6 意图为「修改」时的处理（修改方案卡片）
+
+- 当意图为 `修改` 且命中已有话题时：
+  1. 若该话题暂无时间线记录：在聊天区提示「该话题暂无时间线记录，无法执行修改」，结束。
+  2. 否则展示「正在根据沟通内容生成时间线修改方案…」，调用 `fetchToolModificationUpdates(toolId, note)`：
+     - **上下文**：意图卡片内容（沟通内容）+ 该话题所有时间线节点（每条带时间戳 `createdAt` 与内容/JSON）。
+     - **任务描述**：请按照沟通内容信息更新上下文中的内容，并返回需要更新的时间线内容块及时间线时间戳。
+     - 大模型严格返回 JSON：`{ "updates": [ { "createdAt": "节点时间戳", "content": "修改后的正文", "contentJson": null 或 {} } ] }`。
+  3. 若返回 `updates` 为空：在聊天区提示「未识别到需要修改的时间线节点」。
+  4. 否则在话题讨论区插入**修改方案卡片**（`.tools-modification-response-card`）：
+     - 需要修改的话题名称。
+     - 每个更新项：时间线节点时间戳（格式与聊天一致）、修改后的内容。
+     - 下方按钮：「确认」「重做」。
+     - 卡片内隐藏存储 `updates` 的 JSON 与用户沟通内容（供确认/重做使用）。
+  5. 用户点击**确认**：调用 `applyToolKnowledgeUpdates(toolId, updates)`，按 `createdAt` 匹配时间线节点，用返回的 `content`（及可选 `contentJson`）覆盖对应节点，刷新话题与时间线。
+  6. 用户点击**重做**：再次调用 `fetchToolModificationUpdates`，用新返回的 `updates` 更新卡片内容，可再次确认或重做。
+
 ---
 
-### 6. 「增加 / 补充 / 删除」的差异行为
+### 6. 「增加 / 补充 / 删除 / 修改 / 讨论」的差异行为
 
 - **增加（新增主题）**
   - 语义：希望把当前讨论抽象为一个**新的知识主题**。
@@ -235,6 +264,19 @@
     - 同时删除该话题在时间线存储中的所有记录；
     - 自动调整当前选中话题，并在聊天区记录删除结果。
 
+- **修改（更新已有节点）**
+  - 语义：根据沟通内容更新该话题下某些时间线节点的内容。
+  - 行为：
+    - 不直接追加新条目；将意图卡片内容 + 该话题全部时间线发往大模型，得到需更新的节点列表（时间戳 + 修改后内容）；
+    - 在聊天区展示修改方案卡片（确认/重做）；确认后用「修改后的内容」覆盖对应话题、对应时间戳的时间线节点。
+
+- **讨论（延展讨论并写入回复）**
+  - 语义：在已有话题下进行泛化讨论，由大模型结合时间线知识生成回复。
+  - 行为：
+    - 先将意图卡片内容写入时间线（时间戳与卡片一致）；
+    - 再以时间线 + 用户沟通内容为上下文发往大模型，在聊天区展示回复卡片（确认/重做）；
+    - 确认后将大模型回复作为新条目写入该话题时间线。
+
 ---
 
 ### 7. 时间线节点 JSON 视图与后续扩展
@@ -248,7 +290,7 @@
       - `JSON` Tab：显示 `contentJson` 的格式化结果，使用 `pre.tools-timeline-panel-json`，支持滚动但不会撑出卡片。
 - 后续可扩展方向（TODO）：
   - 为时间线条目增加「标签 / 类型」字段（如「踩坑」「最佳实践」「注意事项」）。
-  - 支持在话题卡片中对时间线条目进行**编辑**（当前已支持删除单个条目）。
+  - 时间线节点编辑：当前已支持**删除**单条；**修改**意图通过大模型返回的更新方案（时间戳 + 修改后内容）覆盖对应节点，无需在话题卡片内直接编辑。
   - 增加搜索与过滤能力（按话题名、内容关键字、时间范围等）。
   - 将知识库导出为 Markdown / JSON，方便在外部文档中复用。
 

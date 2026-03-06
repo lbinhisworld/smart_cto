@@ -89,13 +89,12 @@ async function analyzeToolDiscussionIntent(text) {
   const systemPrompt = `你是一个「工具/话题讨论意图分析助手」。用户会在聊天框中输入一段关于某个软件工具、平台、方法论或抽象话题（如企业微信、飞书、BMC 商业模式画布分析等）的讨论内容。
 
 【你的任务】
-1. 判断用户这段话的「沟通意图」是哪一类（只能从下面六个中选一类）：
+1. 判断用户这段话的「沟通意图」是哪一类（只能从下面五类中选一类）：
    - 增加：提出新增功能、补充新的知识点、增加全新的用法或配置项等，并且希望作为一个「新主题」单独记录；
    - 补充：在已存在的话题/主题下补充更多说明、案例或细节，属于在原有主题时间线上继续追加内容；
    - 删除：希望删除某个配置、去掉某条规则、废弃某个用法/工具等；
    - 修改：希望修改现有配置、规则、流程、使用方式等；
-   - 查询：在询问某个工具是什么、怎么用、有没有某功能等；
-   - 讨论：非明确增删改查，而是泛化的经验交流、优缺点讨论、踩坑分享等。
+   - 讨论：非明确增删改，而是泛化的经验交流、优缺点讨论、踩坑分享等。
 
 2. 识别本段讨论主要涉及的「讨论话题」：
    - 可以是软件产品/平台（如：企业微信、飞书、钉钉、Jira）；
@@ -111,7 +110,7 @@ async function analyzeToolDiscussionIntent(text) {
 【输出格式】
 请严格返回一个 JSON 对象，不要包含多余说明或 Markdown 代码块，例如：
 {
-  "intent": "增加|补充|删除|修改|查询|讨论",
+  "intent": "增加|补充|删除|修改|讨论",
   "tool": "讨论话题（例如具体工具/平台/方法论名称，如 企业微信 或 BMC 商业模式画布）",
   "newTopic": "当 intent 为 增加 时，代表用户希望新增的话题名称；否则可为 \"\"",
   "content": "用户的原始输入文本",
@@ -466,11 +465,11 @@ function restoreToolsChatMessagesFromStorage() {
   }
 }
 
-function appendToolKnowledge(toolId, content, contentJson) {
+function appendToolKnowledge(toolId, content, contentJson, createdAt) {
   if (!toolId || !content) return;
   const state = getToolKnowledgeState();
   const list = Array.isArray(state[toolId]) ? state[toolId] : [];
-  const entry = { content, createdAt: new Date().toISOString() };
+  const entry = { content, createdAt: createdAt && typeof createdAt === 'string' ? createdAt : new Date().toISOString() };
   if (contentJson && typeof contentJson === 'object') {
     entry.contentJson = contentJson;
   }
@@ -504,6 +503,100 @@ async function summarizeToolDiscussionContent(text) {
   ]);
   const summary = (content || '').trim();
   return { summary, _llmMeta: { usage, model, durationMs } };
+}
+
+/** 讨论意图：用当前话题所有时间线节点（内容+JSON）与用户沟通内容作为上下文，发往大模型，返回回复 */
+async function fetchToolDiscussionReply(toolId, userContent) {
+  const state = getToolKnowledgeState();
+  const entries = Array.isArray(state[toolId]) ? state[toolId] : [];
+  const contextParts = entries.map((e, i) => {
+    const text = (e.content || '').trim();
+    const jsonStr =
+      e.contentJson && typeof e.contentJson === 'object'
+        ? JSON.stringify(e.contentJson, null, 2)
+        : '';
+    return `[节点 ${i + 1}]\n${text}${jsonStr ? '\n' + jsonStr : ''}`;
+  });
+  const timelineContext =
+    contextParts.length > 0
+      ? contextParts.join('\n\n---\n\n')
+      : '（该话题暂无时间线记录）';
+
+  const systemPrompt = `你是一位知识库讨论助手。用户正在某个「工具/话题」下进行讨论。请根据【该话题时间线知识】和【用户本次沟通内容】，给出专业、简洁的回复：可以是经验总结、解答疑问、补充建议或延展讨论。回复使用中文，直接返回正文，不要用 Markdown 代码块包裹。`;
+
+  const userMessage = `【该话题时间线知识】\n${timelineContext}\n\n【用户本次沟通内容】\n${(userContent || '').trim()}`;
+
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ]);
+  const reply = (content || '').trim();
+  return { reply, _llmMeta: { usage, model, durationMs } };
+}
+
+/** 修改意图：用意图卡片内容+话题时间线作为上下文，让大模型返回需要更新的时间线节点（时间戳+修改后内容） */
+async function fetchToolModificationUpdates(toolId, userContent) {
+  const state = getToolKnowledgeState();
+  const entries = Array.isArray(state[toolId]) ? state[toolId] : [];
+  const contextParts = entries.map((e, i) => {
+    const text = (e.content || '').trim();
+    const jsonStr =
+      e.contentJson && typeof e.contentJson === 'object'
+        ? JSON.stringify(e.contentJson, null, 2)
+        : '';
+    return `[节点 ${i + 1}]\n时间戳: ${e.createdAt || ''}\n${text}${jsonStr ? '\n' + jsonStr : ''}`;
+  });
+  const timelineContext =
+    contextParts.length > 0
+      ? contextParts.join('\n\n---\n\n')
+      : '（该话题暂无时间线记录）';
+
+  const systemPrompt = `你是一位知识库修改助手。用户希望根据【沟通内容】更新【该话题时间线】中的某些节点。
+
+任务描述：请按照沟通内容信息更新上下文中的内容，并返回需要更新的时间线内容块及时间线时间戳。
+
+【重要】你必须严格返回一个 JSON 对象，不要包含任何其他文字或 Markdown 代码块。格式如下：
+{
+  "updates": [
+    {
+      "createdAt": "上下文里该节点的完整时间戳字符串（必须与上方「时间戳:」后的值完全一致）",
+      "content": "修改后的正文内容",
+      "contentJson": null 或 结构化对象（若该节点有 JSON 且需修改则填写，否则 null）
+    }
+  ]
+}
+
+若沟通内容不涉及任何具体修改或无法匹配到节点，可返回 { "updates": [] }。`;
+
+  const userMessage = `【该话题时间线】\n${timelineContext}\n\n【沟通内容】\n${(userContent || '').trim()}`;
+
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ]);
+  const jsonMatch = (content || '').match(/\{[\s\S]*\}/);
+  const jsonStr = jsonMatch ? jsonMatch[0] : content || '{}';
+  const parsed = JSON.parse(jsonStr);
+  const updates = Array.isArray(parsed.updates) ? parsed.updates : [];
+  return { updates, _llmMeta: { usage, model, durationMs } };
+}
+
+/** 用大模型返回的 updates 覆盖对应时间线节点的 content/contentJson */
+function applyToolKnowledgeUpdates(toolId, updates) {
+  if (!toolId || !Array.isArray(updates) || updates.length === 0) return;
+  const state = getToolKnowledgeState();
+  const list = Array.isArray(state[toolId]) ? state[toolId] : [];
+  for (const u of updates) {
+    const createdAt = u && typeof u.createdAt === 'string' ? u.createdAt.trim() : '';
+    if (!createdAt) continue;
+    const entry = list.find((e) => String(e.createdAt) === createdAt);
+    if (entry) {
+      if (typeof u.content === 'string') entry.content = u.content;
+      if (u.contentJson !== undefined) entry.contentJson = u.contentJson && typeof u.contentJson === 'object' ? u.contentJson : null;
+    }
+  }
+  state[toolId] = list;
+  saveToolKnowledgeState(state);
 }
 
 function renderToolsTopicDetail(toolId, stateOverride) {
@@ -1551,16 +1644,25 @@ function renderModificationHistory() {
        </div>`;
 }
 
+/** 沟通历史/任务过程日志时间：与 formatChatTime 一致的「日期+具体时间」 */
 function formatHistoryTime(ts) {
   if (!ts) return '—';
   try {
     const d = new Date(ts);
-    return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    if (Number.isNaN(d.getTime())) return String(ts);
+    const y = d.getFullYear();
+    const m = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    const h = d.getHours().toString().padStart(2, '0');
+    const min = d.getMinutes().toString().padStart(2, '0');
+    const sec = d.getSeconds().toString().padStart(2, '0');
+    return `${y}-${m}-${day} ${h}:${min}:${sec}`;
   } catch {
     return String(ts);
   }
 }
 
+/** 将 ISO 或时间戳格式化为「日期+具体时间」，与 getTimeStr 一致 */
 function formatChatTime(ts) {
   if (!ts) return getTimeStr();
   const s = String(ts).trim();
@@ -1569,7 +1671,13 @@ function formatChatTime(ts) {
   if (Number.isNaN(d.getTime())) {
     return s;
   }
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const y = d.getFullYear();
+  const m = (d.getMonth() + 1).toString().padStart(2, '0');
+  const day = d.getDate().toString().padStart(2, '0');
+  const h = d.getHours().toString().padStart(2, '0');
+  const min = d.getMinutes().toString().padStart(2, '0');
+  const sec = d.getSeconds().toString().padStart(2, '0');
+  return `${y}-${m}-${day} ${h}:${min}:${sec}`;
 }
 
 /** 从 parsed 获取价值流索引 */
@@ -2862,6 +2970,148 @@ if (el.problemDetailChatMessages) {
 }
 if (el.toolsChatMessages) {
   el.toolsChatMessages.addEventListener('click', (e) => {
+    const confirmDiscussionBtn = e.target.closest('.btn-confirm-discussion-response');
+    if (confirmDiscussionBtn && !confirmDiscussionBtn.disabled) {
+      const card = confirmDiscussionBtn.closest('.tools-discussion-response-card');
+      if (card) {
+        const toolId = card.dataset.toolId;
+        const body = card.querySelector('.tools-discussion-response-body');
+        const content = body ? (body.innerText || body.textContent || '').trim() : '';
+        if (toolId && content) {
+          appendToolKnowledge(toolId, content);
+          renderToolsKnowledge();
+          const actions = card.querySelector('.tools-discussion-response-actions');
+          if (actions) actions.remove();
+          confirmDiscussionBtn.textContent = '已确认';
+          confirmDiscussionBtn.disabled = true;
+          saveToolsChatMessagesToStorage();
+        }
+      }
+      return;
+    }
+    const redoDiscussionBtn = e.target.closest('.btn-redo-discussion-response');
+    if (redoDiscussionBtn && !redoDiscussionBtn.disabled) {
+      const card = redoDiscussionBtn.closest('.tools-discussion-response-card');
+      if (card) {
+        const toolId = card.dataset.toolId;
+        const userContentEl = card.querySelector('.tools-discussion-user-content');
+        const userContent = userContentEl ? (userContentEl.textContent || '').trim() : '';
+        const body = card.querySelector('.tools-discussion-response-body');
+        const actions = card.querySelector('.tools-discussion-response-actions');
+        if (body && actions) {
+          redoDiscussionBtn.disabled = true;
+          const confirmBtn = card.querySelector('.btn-confirm-discussion-response');
+          if (confirmBtn) confirmBtn.disabled = true;
+          body.innerHTML = '<span class="tools-chat-msg-content">正在重新生成…</span>';
+          (async () => {
+            try {
+              const { reply, _llmMeta } = await fetchToolDiscussionReply(toolId, userContent);
+              body.innerHTML = renderMarkdown(reply || '');
+              body.classList.add('markdown-body');
+              const existingMeta = card.querySelector('.problem-detail-chat-msg-llm-meta');
+              if (existingMeta) existingMeta.remove();
+              const timeEl = card.querySelector('.tools-chat-msg-time');
+              if (timeEl && _llmMeta) {
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'problem-detail-chat-msg-llm-meta';
+                metaDiv.innerHTML = buildLlmMetaHtml(_llmMeta);
+                timeEl.insertAdjacentElement('afterend', metaDiv);
+              }
+              saveToolsChatMessagesToStorage();
+            } catch (err) {
+              body.innerHTML = '<span class="tools-chat-msg-content">重做失败：' + escapeHtml(err.message || String(err)) + '</span>';
+              saveToolsChatMessagesToStorage();
+            } finally {
+              redoDiscussionBtn.disabled = false;
+              const confirmBtn2 = card.querySelector('.btn-confirm-discussion-response');
+              if (confirmBtn2) confirmBtn2.disabled = false;
+            }
+          })();
+        }
+      }
+      return;
+    }
+
+    const confirmModificationBtn = e.target.closest('.btn-confirm-modification-response');
+    if (confirmModificationBtn && !confirmModificationBtn.disabled) {
+      const card = confirmModificationBtn.closest('.tools-modification-response-card');
+      if (card) {
+        const toolId = card.dataset.toolId;
+        const payloadEl = card.querySelector('.tools-modification-updates-payload');
+        const payloadStr = payloadEl ? payloadEl.textContent : '';
+        let updates = [];
+        try {
+          updates = JSON.parse(payloadStr || '[]');
+        } catch (_) {}
+        if (toolId && Array.isArray(updates) && updates.length > 0) {
+          applyToolKnowledgeUpdates(toolId, updates);
+          renderToolsKnowledge();
+          const actions = card.querySelector('.tools-modification-response-actions');
+          if (actions) actions.remove();
+          confirmModificationBtn.textContent = '已确认';
+          confirmModificationBtn.disabled = true;
+          saveToolsChatMessagesToStorage();
+        }
+      }
+      return;
+    }
+    const redoModificationBtn = e.target.closest('.btn-redo-modification-response');
+    if (redoModificationBtn && !redoModificationBtn.disabled) {
+      const card = redoModificationBtn.closest('.tools-modification-response-card');
+      if (card) {
+        const toolId = card.dataset.toolId;
+        const userContentEl = card.querySelector('.tools-modification-user-content');
+        const userContent = userContentEl ? (userContentEl.textContent || '').trim() : '';
+        const body = card.querySelector('.tools-modification-response-body');
+        const actions = card.querySelector('.tools-modification-response-actions');
+        if (body && actions && toolId) {
+          redoModificationBtn.disabled = true;
+          const confirmBtn = card.querySelector('.btn-confirm-modification-response');
+          if (confirmBtn) confirmBtn.disabled = true;
+          body.innerHTML = '<span class="tools-chat-msg-content">正在重新生成修改方案…</span>';
+          (async () => {
+            try {
+              const { updates, _llmMeta } = await fetchToolModificationUpdates(toolId, userContent);
+              const topic = TOOL_KNOWLEDGE_ITEMS.find((t) => String(t.id) === String(toolId));
+              const topicName = topic ? (topic.name || '该话题') : '该话题';
+              if (!updates || updates.length === 0) {
+                body.innerHTML = '<div class="tools-modification-response-body">未识别到需要修改的时间线节点。</div>';
+              } else {
+                const bodyParts = [
+                  `<div class="tools-modification-topic">需要修改的话题：${escapeHtml(topicName)}</div>`,
+                  ...updates.map(
+                    (u) =>
+                      `<div class="tools-modification-item"><div class="tools-modification-item-time">时间线节点时间戳：${escapeHtml(formatChatTime(u.createdAt))}</div><div class="tools-modification-item-content">${escapeHtml((u.content || '').trim() || '—')}</div></div>`
+                  ),
+                ];
+                body.innerHTML = bodyParts.join('');
+                const payloadEl = card.querySelector('.tools-modification-updates-payload');
+                if (payloadEl) payloadEl.textContent = JSON.stringify(updates);
+              }
+              const existingMeta = card.querySelector('.problem-detail-chat-msg-llm-meta');
+              if (existingMeta) existingMeta.remove();
+              const timeEl = card.querySelector('.tools-chat-msg-time');
+              if (timeEl && _llmMeta) {
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'problem-detail-chat-msg-llm-meta';
+                metaDiv.innerHTML = buildLlmMetaHtml(_llmMeta);
+                timeEl.insertAdjacentElement('afterend', metaDiv);
+              }
+              saveToolsChatMessagesToStorage();
+            } catch (err) {
+              body.innerHTML = '<span class="tools-chat-msg-content">重做失败：' + escapeHtml(err.message || String(err)) + '</span>';
+              saveToolsChatMessagesToStorage();
+            } finally {
+              redoModificationBtn.disabled = false;
+              const confirmBtn2 = card.querySelector('.btn-confirm-modification-response');
+              if (confirmBtn2) confirmBtn2.disabled = false;
+            }
+          })();
+        }
+      }
+      return;
+    }
+
     const btn = e.target.closest('.btn-confirm-tool-intent');
     if (btn && !btn.disabled) {
       btn.textContent = '已确认';
@@ -2956,9 +3206,117 @@ if (el.toolsChatMessages) {
           return;
         }
 
+        // 意图为「修改」且命中已有话题：意图卡片内容+时间线作为上下文发往大模型，展示修改方案卡片（确认/重做）
+        if (target && intent === '修改') {
+          currentToolKnowledgeId = target.id;
+          renderToolsKnowledge();
+          const state = getToolKnowledgeState();
+          const entries = Array.isArray(state[target.id]) ? state[target.id] : [];
+          if (entries.length === 0) {
+            if (el.toolsChatMessages) {
+              const sysBlock = document.createElement('div');
+              sysBlock.className = 'tools-chat-msg tools-chat-msg-system';
+              sysBlock.innerHTML = `<div class="tools-chat-msg-content">该话题暂无时间线记录，无法执行修改。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+              el.toolsChatMessages.appendChild(sysBlock);
+              el.toolsChatMessages.scrollTop = el.toolsChatMessages.scrollHeight;
+              saveToolsChatMessagesToStorage();
+            }
+            return;
+          }
+          const loadingBlock = document.createElement('div');
+          loadingBlock.className = 'tools-chat-msg tools-chat-msg-system';
+          loadingBlock.innerHTML = `<div class="tools-chat-msg-content">正在根据沟通内容生成时间线修改方案…</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+          el.toolsChatMessages.appendChild(loadingBlock);
+          el.toolsChatMessages.scrollTop = el.toolsChatMessages.scrollHeight;
+          saveToolsChatMessagesToStorage();
+          (async () => {
+            try {
+              if (!DEEPSEEK_API_KEY) {
+                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+                return;
+              }
+              const { updates, _llmMeta } = await fetchToolModificationUpdates(target.id, note);
+              loadingBlock.remove();
+              const topicName = target.name || topicName || '该话题';
+              if (!updates || updates.length === 0) {
+                const emptyBlock = document.createElement('div');
+                emptyBlock.className = 'tools-chat-msg tools-chat-msg-system';
+                emptyBlock.innerHTML = `<div class="tools-chat-msg-content">未识别到需要修改的时间线节点。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+                el.toolsChatMessages.appendChild(emptyBlock);
+                el.toolsChatMessages.scrollTop = el.toolsChatMessages.scrollHeight;
+                saveToolsChatMessagesToStorage();
+                return;
+              }
+              const llmMetaHtml = _llmMeta ? buildLlmMetaHtml(_llmMeta) : '';
+              const updatesPayload = JSON.stringify(updates);
+              const bodyParts = [
+                `<div class="tools-modification-topic">需要修改的话题：${escapeHtml(topicName)}</div>`,
+                ...updates.map(
+                  (u) =>
+                    `<div class="tools-modification-item"><div class="tools-modification-item-time">时间线节点时间戳：${escapeHtml(formatChatTime(u.createdAt))}</div><div class="tools-modification-item-content">${escapeHtml((u.content || '').trim() || '—')}</div></div>`
+                ),
+              ];
+              const card = document.createElement('div');
+              card.className = 'tools-chat-msg tools-chat-msg-system tools-modification-response-card';
+              card.dataset.toolId = String(target.id);
+              card.innerHTML = `<div class="tools-modification-user-content" aria-hidden="true" style="display:none">${escapeHtml(note || '')}</div><div class="tools-modification-response-body">${bodyParts.join('')}</div><div class="tools-modification-response-actions"><button type="button" class="btn-confirm-modification-response btn-confirm-primary">确认</button><button type="button" class="btn-redo-modification-response">重做</button></div><div class="tools-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
+              const payloadEl = document.createElement('div');
+              payloadEl.className = 'tools-modification-updates-payload';
+              payloadEl.hidden = true;
+              payloadEl.textContent = updatesPayload;
+              card.appendChild(payloadEl);
+              el.toolsChatMessages.appendChild(card);
+              el.toolsChatMessages.scrollTop = el.toolsChatMessages.scrollHeight;
+              saveToolsChatMessagesToStorage();
+            } catch (err) {
+              loadingBlock.innerHTML = `<div class="tools-chat-msg-content">修改方案生成失败：${escapeHtml(err.message || String(err))}</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+              saveToolsChatMessagesToStorage();
+            }
+          })();
+          return;
+        }
+
+        // 意图为「讨论」且命中已有话题：先将意图卡片内容写入时间线，再发往大模型展示回复卡片（确认/重做）
+        if (target && intent === '讨论') {
+          currentToolKnowledgeId = target.id;
+          if (note) appendToolKnowledge(target.id, note, noteJson, extracted.cardCreatedAt);
+          renderToolsKnowledge();
+          saveToolsChatMessagesToStorage();
+          const loadingBlock = document.createElement('div');
+          loadingBlock.className = 'tools-chat-msg tools-chat-msg-system';
+          loadingBlock.innerHTML = `<div class="tools-chat-msg-content">正在结合该话题时间线知识生成讨论回复…</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+          el.toolsChatMessages.appendChild(loadingBlock);
+          el.toolsChatMessages.scrollTop = el.toolsChatMessages.scrollHeight;
+          saveToolsChatMessagesToStorage();
+          (async () => {
+            try {
+              if (!DEEPSEEK_API_KEY) {
+                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+                return;
+              }
+              const { reply, _llmMeta } = await fetchToolDiscussionReply(target.id, note);
+              loadingBlock.remove();
+              const llmMetaHtml = _llmMeta ? buildLlmMetaHtml(_llmMeta) : '';
+              const userContentEscaped = escapeHtml(note || '');
+              const replyHtml = renderMarkdown(reply || '');
+              const card = document.createElement('div');
+              card.className = 'tools-chat-msg tools-chat-msg-system tools-discussion-response-card';
+              card.dataset.toolId = String(target.id);
+              card.innerHTML = `<div class="tools-discussion-user-content" aria-hidden="true" style="display:none">${userContentEscaped}</div><div class="tools-discussion-response-body markdown-body">${replyHtml}</div><div class="tools-discussion-response-actions"><button type="button" class="btn-confirm-discussion-response btn-confirm-primary">确认</button><button type="button" class="btn-redo-discussion-response">重做</button></div><div class="tools-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
+              el.toolsChatMessages.appendChild(card);
+              el.toolsChatMessages.scrollTop = el.toolsChatMessages.scrollHeight;
+              saveToolsChatMessagesToStorage();
+            } catch (err) {
+              loadingBlock.innerHTML = `<div class="tools-chat-msg-content">讨论回复生成失败：${escapeHtml(err.message || String(err))}</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+              saveToolsChatMessagesToStorage();
+            }
+          })();
+          return;
+        }
+
         if (target && note) {
           currentToolKnowledgeId = target.id;
-          appendToolKnowledge(target.id, note, noteJson);
+          appendToolKnowledge(target.id, note, noteJson, extracted.cardCreatedAt);
           renderToolsKnowledge();
           saveToolsChatMessagesToStorage();
 
@@ -3093,15 +3451,17 @@ async function handleToolsChatSend() {
     if (!DEEPSEEK_API_KEY) {
       throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用工具/话题讨论意图管理功能。');
     }
-    const { intent, tool, newTopic, content, contentJson, _llmMeta } = await analyzeToolDiscussionIntent(text);
+    const result = await analyzeToolDiscussionIntent(text);
     parsingBlock.remove();
-
+    let intent = result.intent || '';
+    if (intent === '查询') intent = '讨论';
+    const { tool, newTopic, content, contentJson, _llmMeta } = result;
     const intentLabel = intent || '—';
     const toolLabel = tool || '—';
     const extraTopic = newTopic || '';
     const rows = [
       { label: '沟通意图', value: intentLabel },
-      { label: '讨论话题', value: toolLabel },
+      { label: '讨论话题', value: intentLabel === '增加' ? (extraTopic || toolLabel || content || text) : toolLabel },
       { label: '沟通内容', value: content || text },
     ];
     const normalizedContentJson =
@@ -3112,10 +3472,7 @@ async function handleToolsChatSend() {
         value: JSON.stringify(normalizedContentJson, null, 2),
       });
     }
-    if (intentLabel === '增加') {
-      rows.splice(2, 0, { label: '新增话题', value: extraTopic || toolLabel || content || text });
-    }
-    const intentOptions = ['增加', '补充', '删除', '修改', '查询', '讨论'];
+    const intentOptions = ['增加', '补充', '删除', '修改', '讨论'];
     const rowsHtml = rows
       .map((r) => {
         if (r.label === '沟通意图') {
@@ -3132,9 +3489,9 @@ async function handleToolsChatSend() {
             r.label
           )}</span><span class="problem-detail-basic-info-value">${selectHtml}</span></div>`;
         }
-        if (r.label === '讨论话题' || r.label === '新增话题') {
+        if (r.label === '讨论话题') {
           const placeholder =
-            r.label === '讨论话题' ? '请输入或修改本次讨论的话题名称' : '请输入或修改要新增的话题名称';
+            intentLabel === '增加' ? '请输入或修改要新增的话题名称' : '请输入或修改本次讨论的话题名称';
           return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(
             r.label
           )}</span><span class="problem-detail-basic-info-value"><input class="tools-topic-input" type="text" value="${escapeHtml(
@@ -3156,6 +3513,7 @@ async function handleToolsChatSend() {
     const cardBlock = document.createElement('div');
     cardBlock.className = 'tools-chat-msg tools-chat-msg-system tools-intent-card';
     const llmMetaHtml = _llmMeta ? buildLlmMetaHtml(_llmMeta) : '';
+    const cardCreatedAt = new Date().toISOString();
     const dataAttr = String(
       JSON.stringify({
         intent: intentLabel,
@@ -3164,6 +3522,7 @@ async function handleToolsChatSend() {
         content: content || '',
         contentJson: normalizedContentJson || null,
         rawText: text,
+        cardCreatedAt,
       })
     )
       .replace(
@@ -3179,7 +3538,7 @@ async function handleToolsChatSend() {
   <div class="problem-detail-basic-info-card-actions">
     <button type="button" class="btn-confirm-tool-intent btn-confirm-primary" data-extracted="${dataAttr}">确认</button>
   </div>
-</div><div class="tools-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
+</div><div class="tools-chat-msg-time">${formatChatTime(cardCreatedAt)}</div>${llmMetaHtml}`;
     container.appendChild(cardBlock);
     container.scrollTop = container.scrollHeight;
   saveToolsChatMessagesToStorage();
@@ -3305,9 +3664,16 @@ function copyBmcJson() {
   });
 }
 
+/** 统一时间戳格式：日期 + 具体时间（用于聊天块、时间线等） */
 function getTimeStr() {
   const now = new Date();
-  return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+  const y = now.getFullYear();
+  const m = (now.getMonth() + 1).toString().padStart(2, '0');
+  const d = now.getDate().toString().padStart(2, '0');
+  const h = now.getHours().toString().padStart(2, '0');
+  const min = now.getMinutes().toString().padStart(2, '0');
+  const s = now.getSeconds().toString().padStart(2, '0');
+  return `${y}-${m}-${d} ${h}:${min}:${s}`;
 }
 
 function appendChatBlock(container, role, content, timeStr) {

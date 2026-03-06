@@ -922,6 +922,8 @@ body {
 }
 
 .btn-confirm-primary,
+.btn-confirm-discussion-response,
+.btn-confirm-modification-response,
 .btn-confirm-start-global-itgap,
 .btn-confirm-global-itgap,
 .btn-confirm-global-itgap-json,
@@ -941,6 +943,8 @@ body {
 }
 
 .btn-confirm-primary:hover:not(:disabled),
+.btn-confirm-discussion-response:hover:not(:disabled),
+.btn-confirm-modification-response:hover:not(:disabled),
 .btn-confirm-start-global-itgap:hover:not(:disabled),
 .btn-confirm-global-itgap:hover:not(:disabled),
 .btn-confirm-global-itgap-json:hover:not(:disabled),
@@ -952,6 +956,8 @@ body {
 }
 
 .btn-confirm-primary:disabled,
+.btn-confirm-discussion-response:disabled,
+.btn-confirm-modification-response:disabled,
 .btn-confirm-start-global-itgap:disabled,
 .btn-confirm-global-itgap:disabled,
 .btn-confirm-global-itgap-json:disabled,
@@ -2923,7 +2929,7 @@ body {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 6px;
   border: 1px solid rgba(45, 58, 77, 0.4);
-  max-height: 200px;
+  max-height: 260px; /* 原 200px，扩大 30% */
   overflow-y: auto;
 }
 
@@ -2963,7 +2969,7 @@ body {
     'Courier New', monospace;
   font-size: 0.75rem;
   white-space: pre;
-  max-height: 180px;
+  max-height: 234px; /* 原 180px，扩大 30% */
   overflow-y: auto;
 }
 
@@ -3034,6 +3040,123 @@ body {
 
 .tools-topic-input::placeholder {
   color: var(--text-muted);
+}
+
+.tools-discussion-response-card {
+  display: block;
+}
+
+.tools-discussion-response-body {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.tools-discussion-response-body.markdown-body {
+  padding: 0.6rem 0;
+}
+
+.tools-discussion-response-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tools-discussion-response-actions .btn-confirm-discussion-response {
+  margin-right: 0.25rem;
+}
+
+.btn-redo-discussion-response {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-redo-discussion-response:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn-redo-discussion-response:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tools-modification-response-card {
+  display: block;
+}
+
+.tools-modification-topic {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.tools-modification-item {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  border: 1px solid rgba(45, 58, 77, 0.35);
+}
+
+.tools-modification-item-time {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.tools-modification-item-content {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tools-modification-response-body {
+  margin-bottom: 0.75rem;
+}
+
+.tools-modification-response-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tools-modification-response-actions .btn-confirm-modification-response {
+  margin-right: 0.25rem;
+}
+
+.btn-redo-modification-response {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-redo-modification-response:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn-redo-modification-response:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 工作区：按钮栏（企业背景洞察等）固定，下方卡片区域可垂直滚动 */
