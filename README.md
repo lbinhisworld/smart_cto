@@ -49,13 +49,10 @@ npx serve .
 
 ### 2. 配置
 
-在 `main.js` 顶部：
-
-- **企业分析 API**  
-  - `API_URL`：企业基本信息与 BMC 查询（POST，请求体 `{ "companyName": "企业名称" }`）。  
-  - `VALUE_STREAM_API_URL`：价值流列表查询（按项目实际接口填写）。
 - **大模型（DeepSeek）**  
-  - `DEEPSEEK_API_URL`、`DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`：用于解析数字化问题、生成 BMC、需求逻辑、价值流、IT 现状/痛点标注、全局/局部 ITGap 分析及聊天区意图提炼与回复。
+  将 `config.example.js` 复制为 `config.local.js`，在 `config.local.js` 中填入 `DEEPSEEK_API_KEY`（及可选 `DEEPSEEK_API_URL`、`DEEPSEEK_MODEL`）。`config.local.js` 已加入 .gitignore，不会提交到 Git。用于解析数字化问题、生成 BMC、需求逻辑、价值流、IT 现状/痛点标注、全局/局部 ITGap 分析及聊天区意图提炼与回复。
+- **企业分析 API**（画布模式）  
+  在 `main.js` 顶部：`API_URL`（企业基本信息与 BMC 查询）、`VALUE_STREAM_API_URL`（价值流列表查询），按项目实际接口填写。
 
 ### 3. 后端接口约定（企业分析 API）
 

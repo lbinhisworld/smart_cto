@@ -206,10 +206,10 @@ const FOLLOW_TASKS = [
 /** 聊天区删除按钮图标（白色垃圾桶） */
 const DELETE_CHAT_MSG_ICON = '<svg class="icon-trash" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
 
-/** DeepSeek 大模型配置：请在 main.js 中设置你的 API Key，或通过环境变量/配置注入 */
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
-const DEEPSEEK_API_KEY = 'sk-051df7f3ec0a406cb1ceb0fa83317d76'; // 请填入你的 DeepSeek API Key
-const DEEPSEEK_MODEL = 'deepseek-chat';
+/** DeepSeek 大模型配置：从 config.js / config.local.js 读取，请将 config.example.js 复制为 config.local.js 并填入 API Key */
+const DEEPSEEK_API_URL = (window.APP_CONFIG && window.APP_CONFIG.DEEPSEEK_API_URL) || 'https://api.deepseek.com/v1/chat/completions';
+const DEEPSEEK_API_KEY = (window.APP_CONFIG && window.APP_CONFIG.DEEPSEEK_API_KEY) || '';
+const DEEPSEEK_MODEL = (window.APP_CONFIG && window.APP_CONFIG.DEEPSEEK_MODEL) || 'deepseek-chat';
 
 /** 调用 DeepSeek 大模型，返回 content、usage、耗时 */
 async function fetchDeepSeekChat(messages) {
@@ -2358,6 +2358,9 @@ if (el.problemDetailChatMessages) {
           container.innerHTML = '';
           renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
           container.scrollTop = container.scrollHeight;
+          if (msg?.type === 'rolePermissionCard') {
+            renderProblemDetailContent();
+          }
           requestAnimationFrame(() => {
             maybeShowBmcStartBlock();
             maybeShowRequirementLogicStartBlock();
@@ -2367,6 +2370,60 @@ if (el.problemDetailChatMessages) {
           });
         }
       }
+      return;
+    }
+    const rpHeader = e.target.closest(
+      '.problem-detail-card-role-permission .problem-detail-card-header'
+    );
+    if (rpHeader) {
+      const card = rpHeader.closest('.problem-detail-card-role-permission');
+      const body = card?.querySelector('.problem-detail-card-body');
+      if (body) {
+        const willShow = body.hidden;
+        body.hidden = !willShow;
+        rpHeader.setAttribute('aria-expanded', String(willShow));
+        rpHeader.classList.toggle('problem-detail-card-header-collapsed', !willShow);
+      }
+      return;
+    }
+    const confirmRolePermissionBtn = e.target.closest('.btn-confirm-role-permission');
+    if (confirmRolePermissionBtn && !confirmRolePermissionBtn.disabled) {
+      confirmRolePermissionBtn.disabled = true;
+      confirmRolePermissionBtn.textContent = '已确认';
+      const item = currentProblemDetailItem;
+      if (item?.createdAt) {
+        const idx = problemDetailChatMessages
+          .slice()
+          .reverse()
+          .findIndex((m) => m.type === 'rolePermissionCard' && !m.confirmed);
+        if (idx >= 0) {
+          const realIdx = problemDetailChatMessages.length - 1 - idx;
+          const msg = problemDetailChatMessages[realIdx];
+          const content = msg?.content || '';
+          problemDetailChatMessages[realIdx] = {
+            ...msg,
+            confirmed: true,
+          };
+          saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+          const rolePermissionModelJson = parseRolePermissionModel(content);
+          pushAndSaveProblemDetailChat({
+            type: 'rolePermissionConfirmedLog',
+            role: 'system',
+            content: '已确认角色与权限模型推演',
+            timestamp: getTimeStr(),
+            rolePermissionModelJson,
+          });
+          renderProblemDetailContent();
+        }
+      }
+      return;
+    }
+    const redoRolePermissionBtn = e.target.closest('.btn-redo-role-permission');
+    if (redoRolePermissionBtn && !redoRolePermissionBtn.disabled) {
+      redoRolePermissionBtn.disabled = true;
+      const confirmBtn = el.problemDetailChatMessages?.querySelector('.btn-confirm-role-permission');
+      if (confirmBtn) confirmBtn.disabled = true;
+      requestAnimationFrame(() => runRolePermissionModeling(true));
       return;
     }
     const startItStatusBtn = e.target.closest('.btn-confirm-start-it-status');
@@ -2609,7 +2666,33 @@ if (el.problemDetailChatMessages) {
         itStrategyPlanViewingSubstep = 0;
         updateProblemDetailProgressStages(3, 3);
         renderProblemDetailContent();
+        requestAnimationFrame(() => maybeShowRolePermissionStartBlock());
       }
+      return;
+    }
+    const startRolePermissionBtn = e.target.closest('.btn-confirm-start-role-permission');
+    if (startRolePermissionBtn && !startRolePermissionBtn.disabled) {
+      startRolePermissionBtn.disabled = true;
+      startRolePermissionBtn.textContent = '已确认';
+      const item = currentProblemDetailItem;
+      let idx = problemDetailChatMessages.findIndex((m) => m.type === 'rolePermissionStartBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+      }
+      const container = el.problemDetailChatMessages;
+      pushAndSaveProblemDetailChat({
+        role: 'system',
+        content: '正在准备工作区',
+        timestamp: getTimeStr(),
+      });
+      const preparingBlock = document.createElement('div');
+      preparingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+      preparingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">正在准备工作区</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container?.appendChild(preparingBlock);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      requestAnimationFrame(() => runRolePermissionModeling(false));
       return;
     }
     const startItGapBtn = e.target.closest('.btn-confirm-start-it-gap');
@@ -3097,7 +3180,6 @@ if (el.toolsChatMessages) {
       }
       return;
     }
-
     const confirmModificationBtn = e.target.closest('.btn-confirm-modification-response');
     if (confirmModificationBtn && !confirmModificationBtn.disabled) {
       const card = confirmModificationBtn.closest('.tools-modification-response-card');
@@ -3298,7 +3380,7 @@ if (el.toolsChatMessages) {
           (async () => {
             try {
               if (!DEEPSEEK_API_KEY) {
-                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
                 return;
               }
               const { updates, _llmMeta } = await fetchToolModificationUpdates(target.id, note);
@@ -3357,7 +3439,7 @@ if (el.toolsChatMessages) {
           (async () => {
             try {
               if (!DEEPSEEK_API_KEY) {
-                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
                 return;
               }
               const { reply, _llmMeta } = await fetchToolDiscussionReply(target.id, note);
@@ -3515,7 +3597,7 @@ async function handleToolsChatSend() {
 
   try {
     if (!DEEPSEEK_API_KEY) {
-      throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用工具/话题讨论意图管理功能。');
+      throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用工具/话题讨论意图管理功能。');
     }
     const result = await analyzeToolDiscussionIntent(text);
     parsingBlock.remove();
@@ -5343,7 +5425,7 @@ async function handleParseClick() {
   if (el.parsePreview) el.parsePreview.hidden = true;
   try {
     if (!DEEPSEEK_API_KEY) {
-      throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
+      throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
     }
     const parsed = await parseDigitalProblemInput(text);
     lastParsedResult = parsed;
@@ -5656,6 +5738,7 @@ function inferTaskIdFromMessage(msg) {
   if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
   if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog') return 'task8';
   if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog') return 'task9';
+  if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionConfirmedLog') return 'task10';
   return null;
 }
 
@@ -5684,6 +5767,8 @@ function shouldIncludeInCommunicationHistory(msg) {
   if (type === 'localItGapSessionsBlock') return true;
   if (type === 'localItGapAnalysisCard') return !!msg.confirmed;
   if (type === 'localItGapAnalysisLog') return true;
+  if (type === 'rolePermissionCard') return !!msg.confirmed;
+  if (type === 'rolePermissionConfirmedLog') return true;
   return false;
 }
 
@@ -5746,6 +5831,12 @@ function getCommunicationsByTask(createdAt) {
     if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.stepName) payload.stepName = msg.stepName;
     if (msg.type === 'localItGapSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
     if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.llmMeta) payload.llmMeta = msg.llmMeta;
+    if (msg.type === 'rolePermissionCard' && msg.confirmed && typeof msg.content === 'string') {
+      payload.rolePermissionModelJson = parseRolePermissionModel(msg.content);
+    }
+    if (msg.type === 'rolePermissionConfirmedLog' && msg.rolePermissionModelJson) {
+      payload.rolePermissionModelJson = msg.rolePermissionModelJson;
+    }
     const contentJson = JSON.stringify(payload, null, 2);
     const entry = { speaker, time: msg.timestamp || '', content: contentJson };
     byTask[currentTask].push(entry);
@@ -6045,6 +6136,16 @@ function renderProblemDetailHistory() {
               titleLabel = parsed.content || '已生成全局 ITGap 分析';
               if (parsed.analysisJson) {
                 contentStr = (parsed.content || '') + '\n\n【全局 ITGap 分析 JSON】\n' + JSON.stringify(parsed.analysisJson, null, 2);
+              }
+            } else if (parsed?.type === 'rolePermissionCard') {
+              titleLabel = '角色与权限模型推演';
+              if (parsed.rolePermissionModelJson) {
+                contentStr = '【角色与权限模型推演 JSON】\n' + JSON.stringify(parsed.rolePermissionModelJson, null, 2);
+              }
+            } else if (parsed?.type === 'rolePermissionConfirmedLog') {
+              titleLabel = parsed.content || '已确认角色与权限模型推演';
+              if (parsed.rolePermissionModelJson) {
+                contentStr = (parsed.content || '') + '\n\n【角色与权限模型推演 JSON】\n' + JSON.stringify(parsed.rolePermissionModelJson, null, 2);
               }
             }
           } catch (_) {}
@@ -6723,6 +6824,316 @@ function maybeShowItStrategyPlanStartBlock() {
   container.scrollTop = container.scrollHeight;
 }
 
+function maybeShowRolePermissionStartBlock() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if ((item.currentMajorStage ?? 0) !== 3) return;
+  if (itStrategyPlanViewingSubstep !== 0) return;
+  if (problemDetailChatMessages.some((m) => m.type === 'rolePermissionStartBlock')) return;
+  pushAndSaveProblemDetailChat({
+    type: 'rolePermissionStartBlock',
+    content: '即将开始角色与权限模型推演',
+    timestamp: getTimeStr(),
+    confirmed: false,
+  });
+  const block = document.createElement('div');
+  block.className =
+    'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-start';
+  block.innerHTML = `
+    <div class="problem-detail-chat-msg-content-wrap">
+      <div class="problem-detail-chat-msg-content">即将开始角色与权限模型推演</div>
+      <div class="problem-detail-chat-role-permission-start-actions">
+        <button type="button" class="btn-confirm-start-role-permission btn-confirm-primary">确认</button>
+      </div>
+    </div>
+    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(block);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function runRolePermissionModeling(isRedo) {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!DEEPSEEK_API_KEY) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({
+      role: 'system',
+      content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用角色与权限模型推演功能。',
+      timestamp: getTimeStr(),
+    });
+    return;
+  }
+  const valueStream = item.valueStream;
+  if (!valueStream || valueStream.raw) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">角色与权限模型推演需要完整的价值流图，请先在工作流对齐阶段完成价值流图绘制。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({
+      role: 'system',
+      content: '角色与权限模型推演需要完整的价值流图，请先在工作流对齐阶段完成价值流图绘制。',
+      timestamp: getTimeStr(),
+    });
+    return;
+  }
+  const customerName = (item.customerName ?? item.customer_name ?? '').trim() || '该客户';
+  const projectName = `${customerName} 数字化项目`;
+  const vsmJson = JSON.stringify(valueStream, null, 2);
+  let parsingBlock = null;
+  if (!isRedo) {
+    parsingBlock = document.createElement('div');
+    parsingBlock.className =
+      'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在推演角色与权限模型…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(parsingBlock);
+    container.scrollTop = container.scrollHeight;
+  } else {
+    const lastCard = container.querySelector('.problem-detail-chat-role-permission-card');
+    if (lastCard) {
+      const body = lastCard.querySelector('.problem-detail-chat-role-permission-body');
+      if (body) {
+        body.innerHTML =
+          '<div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在重新生成角色与权限模型推演结果…</span></div>';
+      }
+    }
+  }
+  try {
+    const systemPrompt =
+      '你是一位熟悉企业微信和低代码平台的业务分析师与解决方案架构师，擅长基于价值流图进行角色与权限设计。请严格按照要求组织表格内容，便于后续程序解析。';
+    const userPrompt = `我正在进行 ${projectName} 的 IT 解决方案设计。目前已完成价值流图（VSM），数据如下（JSON）：\n\n${vsmJson}\n\n请你基于这些节点，运用业务分析师思维，推演所需的角色模型：\n- 识别角色：每个节点谁是执行者、谁是审批者、谁是知情者？\n- 定义权限：哪些角色需要移动端（企微）操作，哪些需要后台管理（低代码）权限？\n- 交互场景：他们在企业微信中分别需要接收什么样的通知或查询什么数据？\n\n【重要格式要求】\n1. 请以 Markdown 表格形式输出，表头固定为：节点 | 建议角色 | 核心职责 | 权限类型。\n2. 「建议角色」一列，必须严格使用以下格式：\n   执行者: 角色A、角色B；审批者: 角色C；知情者: 角色D、角色E\n3. 「权限类型」一列，必须严格使用以下格式（可以为空但键名不能省略）：\n   企微端: xxx；低代码: yyy；接收通知: zzz；查询数据: kkk\n\n请严格遵守以上键名与分隔符，避免使用其他描述方式。`;
+    const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ]);
+    if (parsingBlock) parsingBlock.remove();
+    const llmMeta = { usage, model, durationMs };
+    const parsedModel = parseRolePermissionModel(content || '');
+    const hasStructured = Array.isArray(parsedModel) && parsedModel.length > 0;
+    const structuredHtml = hasStructured ? buildRolePermissionNodeCardsHtml(parsedModel) : '';
+    const llmMetaHtml = buildLlmMetaHtml(llmMeta);
+    if (isRedo) {
+      const lastCard = container.querySelector('.problem-detail-chat-role-permission-card');
+      if (lastCard) {
+        const body = lastCard.querySelector('.problem-detail-chat-role-permission-body');
+        if (body) {
+          body.innerHTML = hasStructured
+            ? structuredHtml
+            : `<div class="problem-detail-basic-info-card-body markdown-body">${renderMarkdown(
+                content || ''
+              )}</div>`;
+        }
+        lastCard.querySelector('.problem-detail-chat-msg-llm-meta')?.remove();
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'problem-detail-chat-msg-llm-meta';
+        metaDiv.innerHTML = llmMetaHtml;
+        lastCard.appendChild(metaDiv);
+      }
+      // 不重复追加消息，只更新最新一条 rolePermissionCard 的内容和元信息
+      const idx = problemDetailChatMessages
+        .slice()
+        .reverse()
+        .findIndex((m) => m.type === 'rolePermissionCard');
+      if (idx >= 0) {
+        const realIdx = problemDetailChatMessages.length - 1 - idx;
+        problemDetailChatMessages[realIdx] = {
+          ...problemDetailChatMessages[realIdx],
+          content,
+          llmMeta,
+        };
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      }
+    } else {
+      const card = document.createElement('div');
+      card.className =
+        'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-card problem-detail-chat-msg-with-delete';
+      card.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-basic-info-card problem-detail-role-permission-card-inner">
+            <div class="problem-detail-basic-info-card-body problem-detail-chat-role-permission-body${
+              hasStructured ? '' : ' markdown-body'
+            }">
+              ${
+                hasStructured
+                  ? structuredHtml
+                  : renderMarkdown(content || '')
+              }
+            </div>
+            <div class="problem-detail-basic-info-card-actions">
+              <button type="button" class="btn-confirm-role-permission btn-confirm-primary">确认</button>
+              <button type="button" class="btn-redo-role-permission">重做</button>
+            </div>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>
+        ${llmMetaHtml}`;
+      container.appendChild(card);
+      container.scrollTop = container.scrollHeight;
+      pushAndSaveProblemDetailChat({
+        type: 'rolePermissionCard',
+        content,
+        timestamp: getTimeStr(),
+        confirmed: false,
+        llmMeta,
+      });
+      card.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+    }
+  } catch (err) {
+    if (parsingBlock) parsingBlock.remove();
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">角色与权限模型推演失败：${escapeHtml(
+      err.message || String(err)
+    )}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    container.scrollTop = container.scrollHeight;
+    pushAndSaveProblemDetailChat({
+      role: 'system',
+      content: '角色与权限模型推演失败：' + (err.message || String(err)),
+      timestamp: getTimeStr(),
+    });
+  }
+}
+
+function getLatestConfirmedRolePermissionContent() {
+  if (!Array.isArray(problemDetailChatMessages) || problemDetailChatMessages.length === 0) {
+    return null;
+  }
+  for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
+    const m = problemDetailChatMessages[i];
+    if (m && m.type === 'rolePermissionCard' && m.confirmed && typeof m.content === 'string') {
+      return m.content;
+    }
+  }
+  return null;
+}
+
+function parseRolePermissionModel(markdown) {
+  if (!markdown || typeof markdown !== 'string') return [];
+  const lines = markdown.split(/\r?\n/).map((l) => l.trim());
+  const tableLines = lines.filter((l) => l.includes('|'));
+  if (tableLines.length < 2) return [];
+  const headerLine = tableLines[0];
+  const separatorLine = tableLines[1];
+  if (!separatorLine.replace(/\|/g, '').match(/^-+$/)) {
+    // 简单容错：若第二行不是典型分隔线，则仍然按第一行为表头、其余为数据行处理
+  }
+  const headerCells = headerLine
+    .split('|')
+    .map((c) => c.trim())
+    .filter((c) => c);
+  const idxNode = headerCells.findIndex((c) => c.includes('节点'));
+  const idxRole = headerCells.findIndex((c) => c.includes('建议角色'));
+  const idxDuty = headerCells.findIndex((c) => c.includes('核心职责'));
+  const idxPerm = headerCells.findIndex((c) => c.includes('权限'));
+  const rows = [];
+  for (let i = 2; i < tableLines.length; i++) {
+    const line = tableLines[i];
+    if (!line || !line.includes('|')) continue;
+    const cells = line
+      .split('|')
+      .map((c) => c.trim())
+      .filter((c) => c);
+    if (cells.length < 2) continue;
+    const getCell = (idx) => (idx >= 0 && idx < cells.length ? cells[idx] : '');
+    const nodeName = getCell(idxNode >= 0 ? idxNode : 0);
+    if (!nodeName) continue;
+    const roleText = getCell(idxRole >= 0 ? idxRole : 1);
+    const dutyText = getCell(idxDuty >= 0 ? idxDuty : 2);
+    const permText = getCell(idxPerm >= 0 ? idxPerm : 3);
+    const roles = { executor: '', approver: '', informer: '' };
+    if (roleText) {
+      const execMatch = roleText.match(/执行者[:：]([^；;]+)/);
+      const apprMatch = roleText.match(/审批者[:：]([^；;]+)/);
+      const infoMatch = roleText.match(/知情者[:：]([^；;]+)/);
+      roles.executor = execMatch ? execMatch[1].trim() : '';
+      roles.approver = apprMatch ? apprMatch[1].trim() : '';
+      roles.informer = infoMatch ? infoMatch[1].trim() : '';
+    }
+    const perms = { wechat: '', lowcode: '', notify: '', query: '' };
+    if (permText) {
+      const wechatMatch = permText.match(/企微端[:：]([^；;]+)/);
+      const lowcodeMatch = permText.match(/低代码[:：]([^；;]+)/);
+      const notifyMatch = permText.match(/接收通知[:：]([^；;]+)/);
+      const queryMatch = permText.match(/查询数据[:：]([^；;]+)/);
+      perms.wechat = wechatMatch ? wechatMatch[1].trim() : '';
+      perms.lowcode = lowcodeMatch ? lowcodeMatch[1].trim() : '';
+      perms.notify = notifyMatch ? notifyMatch[1].trim() : '';
+      perms.query = queryMatch ? queryMatch[1].trim() : '';
+    }
+    rows.push({
+      node: nodeName,
+      roles,
+      duty: dutyText,
+      perms,
+    });
+  }
+  return rows;
+}
+
+function buildRolePermissionNodeCardsHtml(model) {
+  if (!Array.isArray(model) || model.length === 0) return '';
+  return model
+    .map((m) => {
+      const nodeName = m.node || '';
+      if (!nodeName) return '';
+      const roles = m.roles || { executor: '', approver: '', informer: '' };
+      const perms = m.perms || { wechat: '', lowcode: '', notify: '', query: '' };
+      const duty = m.duty || '';
+      return `
+      <div class="problem-detail-card problem-detail-card-role-permission">
+        <div class="problem-detail-card-header" tabindex="0" role="button" aria-expanded="false">
+          <span class="problem-detail-card-header-title">环节：${escapeHtml(nodeName)}</span>
+        </div>
+        <div class="problem-detail-card-body" hidden>
+          <div class="problem-detail-role-permission-grid">
+            <div class="problem-detail-role-permission-subcard">
+              <div class="problem-detail-role-permission-subtitle">环节名称</div>
+              <div class="problem-detail-role-permission-text">${escapeHtml(nodeName)}</div>
+            </div>
+            <div class="problem-detail-role-permission-subcard">
+              <div class="problem-detail-role-permission-subtitle">角色设计</div>
+              <div class="problem-detail-role-permission-text">
+                <div>执行者：${escapeHtml(roles.executor || '—')}</div>
+                <div>审批者：${escapeHtml(roles.approver || '—')}</div>
+                <div>知情者：${escapeHtml(roles.informer || '—')}</div>
+              </div>
+            </div>
+            <div class="problem-detail-role-permission-subcard">
+              <div class="problem-detail-role-permission-subtitle">企微端</div>
+              <div class="problem-detail-role-permission-text">${escapeHtml(perms.wechat || '—')}</div>
+            </div>
+            <div class="problem-detail-role-permission-subcard">
+              <div class="problem-detail-role-permission-subtitle">低代码</div>
+              <div class="problem-detail-role-permission-text">${escapeHtml(perms.lowcode || '—')}</div>
+            </div>
+            <div class="problem-detail-role-permission-subcard">
+              <div class="problem-detail-role-permission-subtitle">接收通知</div>
+              <div class="problem-detail-role-permission-text">${escapeHtml(perms.notify || '—')}</div>
+            </div>
+            <div class="problem-detail-role-permission-subcard">
+              <div class="problem-detail-role-permission-subtitle">查询数据</div>
+              <div class="problem-detail-role-permission-text">${escapeHtml(perms.query || '—')}</div>
+            </div>
+          </div>
+          ${
+            duty
+              ? `<div class="problem-detail-role-permission-duty"><span class="problem-detail-role-permission-subtitle">核心职责</span><div class="problem-detail-role-permission-text">${escapeHtml(
+                  duty
+                )}</div></div>`
+              : ''
+          }
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
 async function runLocalItGapAnalysisForNextStep() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -6732,9 +7143,9 @@ async function runLocalItGapAnalysisForNextStep() {
   if (!DEEPSEEK_API_KEY) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用局部 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用局部 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用局部 ITGap 分析功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用局部 ITGap 分析功能。', timestamp: getTimeStr() });
     return;
   }
   const globalItGap = item.globalItGapAnalysisJson;
@@ -6820,9 +7231,9 @@ async function runGlobalItGapAnalysis(isRedo) {
   if (!DEEPSEEK_API_KEY) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用全局 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用全局 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用全局 ITGap 分析功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用全局 ITGap 分析功能。', timestamp: getTimeStr() });
     return;
   }
   const enterpriseContext = {
@@ -6950,9 +7361,9 @@ async function runItStatusAnnotation() {
   if (!DEEPSEEK_API_KEY) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用 IT 现状标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用 IT 现状标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用 IT 现状标注功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用 IT 现状标注功能。', timestamp: getTimeStr() });
     return;
   }
   const valueStream = item.valueStream;
@@ -7010,9 +7421,9 @@ async function runPainPointAnnotation(isRerun) {
   if (!DEEPSEEK_API_KEY) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用痛点标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用痛点标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用痛点标注功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用痛点标注功能。', timestamp: getTimeStr() });
     return;
   }
   const valueStream = item.valueStream;
@@ -7120,9 +7531,9 @@ async function runValueStreamGeneration() {
   if (!DEEPSEEK_API_KEY) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用价值流图生成功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用价值流图生成功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用价值流图生成功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用价值流图生成功能。', timestamp: getTimeStr() });
     return;
   }
   const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || {};
@@ -7391,6 +7802,40 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(cardBlock);
+    } else if (msg.type === 'rolePermissionCard') {
+      const content = msg.content || '';
+      const parsedModel = parseRolePermissionModel(content);
+      const hasStructured = Array.isArray(parsedModel) && parsedModel.length > 0;
+      const structuredHtml = hasStructured ? buildRolePermissionNodeCardsHtml(parsedModel) : '';
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
+      const card = document.createElement('div');
+      card.className =
+        'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-card problem-detail-chat-msg-with-delete';
+      card.dataset.msgIndex = String(idx);
+      card.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-basic-info-card problem-detail-role-permission-card-inner">
+            <div class="problem-detail-basic-info-card-body problem-detail-chat-role-permission-body${
+              hasStructured ? '' : ' markdown-body'
+            }">
+              ${
+                hasStructured
+                  ? structuredHtml
+                  : renderMarkdown(content || '')
+              }
+            </div>
+            <div class="problem-detail-basic-info-card-actions">
+              <button type="button" class="btn-confirm-role-permission btn-confirm-primary" ${
+                msg.confirmed ? 'disabled' : ''
+              }>${msg.confirmed ? '已确认' : '确认'}</button>
+              <button type="button" class="btn-redo-role-permission">重做</button>
+            </div>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>
+        ${llmMetaHtml}`;
+      container.appendChild(card);
     } else if (msg.type === 'basicInfoJsonBlock') {
       const jsonBlock = document.createElement('div');
       jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible problem-detail-chat-msg-with-delete';
@@ -7891,7 +8336,7 @@ async function handleProblemDetailChatSend() {
   container.scrollTop = container.scrollHeight;
   try {
     if (!DEEPSEEK_API_KEY) {
-      throw new Error('请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
+      throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
     }
     const item = currentProblemDetailItem;
     const createdAt = item?.createdAt;
@@ -8179,18 +8624,86 @@ function renderProblemDetailContent() {
       desc: `任务目标：${t.objective || '—'} 评估标准：${t.evaluationCriteria || '—'}`,
     }));
     const currentPlaceholder = contentPlaceholders[itStrategyPlanViewingSubstep];
+    let workspaceInner = `
+      <div class="problem-detail-it-strategy-content">
+        <div class="problem-detail-workflow-align-placeholder">
+          <h3 class="problem-detail-workflow-align-title">${escapeHtml(currentPlaceholder.title)}</h3>
+          <p class="problem-detail-workflow-align-desc">${escapeHtml(currentPlaceholder.desc)}</p>
+          <p class="problem-detail-workflow-align-desc problem-detail-workflow-align-note">此任务内容展示区，后续可接入大模型生成与编辑。</p>
+        </div>
+      </div>`;
+    if (itStrategyPlanViewingSubstep === 0) {
+      const valueStream = item.valueStream;
+      if (valueStream && !valueStream.raw) {
+        const { stages } = parseValueStreamGraph(valueStream);
+        const roleContent = getLatestConfirmedRolePermissionContent();
+        const model = roleContent ? parseRolePermissionModel(roleContent) : [];
+        const stageCardsHtml = stages
+          .map((stage) => {
+            const stepCardsHtml = (stage.steps || [])
+              .map((step) => {
+                const nodeName = step?.name || '';
+                if (!nodeName) return '';
+                const match =
+                  model.find((m) => m.node === nodeName) ||
+                  model.find((m) => nodeName.includes(m.node) || m.node.includes(nodeName));
+                const roles = match?.roles || { executor: '', approver: '', informer: '' };
+                const perms = match?.perms || { wechat: '', lowcode: '', notify: '', query: '' };
+                const duty = match?.duty || '';
+                const hasContent = match && (roles.executor || roles.approver || roles.informer || perms.wechat || perms.lowcode || perms.notify || perms.query || duty);
+                const stepBodyContent = hasContent
+                  ? `
+                      <table class="problem-detail-role-permission-table">
+                        <tbody>
+                          <tr><td class="problem-detail-role-permission-table-label">环节名称</td><td class="problem-detail-role-permission-table-value">${escapeHtml(nodeName)}</td></tr>
+                          <tr><td class="problem-detail-role-permission-table-label">执行者</td><td class="problem-detail-role-permission-table-value">${escapeHtml(roles.executor || '—')}</td></tr>
+                          <tr><td class="problem-detail-role-permission-table-label">审批者</td><td class="problem-detail-role-permission-table-value">${escapeHtml(roles.approver || '—')}</td></tr>
+                          <tr><td class="problem-detail-role-permission-table-label">知情者</td><td class="problem-detail-role-permission-table-value">${escapeHtml(roles.informer || '—')}</td></tr>
+                          <tr><td class="problem-detail-role-permission-table-label">企微端</td><td class="problem-detail-role-permission-table-value">${escapeHtml(perms.wechat || '—')}</td></tr>
+                          <tr><td class="problem-detail-role-permission-table-label">低代码</td><td class="problem-detail-role-permission-table-value">${escapeHtml(perms.lowcode || '—')}</td></tr>
+                          <tr><td class="problem-detail-role-permission-table-label">接收通知</td><td class="problem-detail-role-permission-table-value">${escapeHtml(perms.notify || '—')}</td></tr>
+                          <tr><td class="problem-detail-role-permission-table-label">查询数据</td><td class="problem-detail-role-permission-table-value">${escapeHtml(perms.query || '—')}</td></tr>
+                          ${duty ? `<tr><td class="problem-detail-role-permission-table-label">核心职责</td><td class="problem-detail-role-permission-table-value">${escapeHtml(duty)}</td></tr>` : ''}
+                        </tbody>
+                      </table>`
+                  : '<div class="problem-detail-role-permission-placeholder">待推演</div>';
+                return `
+                  <div class="problem-detail-card problem-detail-card-role-permission">
+                    <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
+                      <span class="problem-detail-card-header-title">环节：${escapeHtml(nodeName)}</span>
+                      <span class="problem-detail-card-header-arrow">▾</span>
+                    </div>
+                    <div class="problem-detail-card-body" hidden>${stepBodyContent}</div>
+                  </div>`;
+              })
+              .join('');
+            const stageName = stage.name || '未命名阶段';
+            return `
+              <div class="problem-detail-card problem-detail-role-permission-stage">
+                <div class="problem-detail-card-header" tabindex="0" role="button" aria-expanded="true">
+                  <span class="problem-detail-card-header-title">${escapeHtml(stageName)}</span>
+                  <span class="problem-detail-card-header-arrow">▾</span>
+                </div>
+                <div class="problem-detail-card-body">${stepCardsHtml}</div>
+              </div>`;
+          })
+          .join('');
+        workspaceInner = `
+          <div class="problem-detail-it-strategy-content">
+            <div class="problem-detail-role-permission-wrap">
+              ${stageCardsHtml}
+            </div>
+          </div>`;
+      }
+    }
     container.innerHTML = `
       <div class="problem-detail-substeps">${itStrategyTaskBarHtml}</div>
       <div class="problem-detail-workspace-scroll">
-        <div class="problem-detail-it-strategy-content">
-          <div class="problem-detail-workflow-align-placeholder">
-            <h3 class="problem-detail-workflow-align-title">${escapeHtml(currentPlaceholder.title)}</h3>
-            <p class="problem-detail-workflow-align-desc">${escapeHtml(currentPlaceholder.desc)}</p>
-            <p class="problem-detail-workflow-align-desc problem-detail-workflow-align-note">此任务内容展示区，后续可接入大模型生成与编辑。</p>
-          </div>
-        </div>
+        ${workspaceInner}
       </div>`;
     setupItStrategyPlanTaskButtons(container);
+    setupProblemDetailCardToggle();
+    requestAnimationFrame(() => maybeShowRolePermissionStartBlock());
     return;
   }
   if (problemDetailViewingMajorStage >= 2) {
@@ -8762,7 +9275,7 @@ async function sendChatMessage() {
   messages.scrollTop = messages.scrollHeight;
 
   if (!DEEPSEEK_API_KEY) {
-    loadingBlock.querySelector('.chat-message-content').textContent = '请在 main.js 中配置 DEEPSEEK_API_KEY 才能使用大模型对话。';
+    loadingBlock.querySelector('.chat-message-content').textContent = '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用大模型对话。';
     loadingBlock.classList.remove('chat-message-loading');
     return;
   }
