@@ -2541,6 +2541,15 @@ body {
   flex: 1;
 }
 
+/* 沟通历史任务标题栏：已完成=绿色，进行中=蓝色 */
+.problem-detail-history-task-root.problem-detail-history-task-done .task-node-name {
+  color: #22c55e;
+}
+
+.problem-detail-history-task-root.problem-detail-history-task-current .task-node-name {
+  color: #3b82f6;
+}
+
 .problem-detail-history-task-node .task-node-badge {
   font-size: 0.7rem;
   color: var(--text-muted);

@@ -724,8 +724,8 @@ ${currentContent || '(空)'}
 ### API 配置
 
 - **大模型**：DeepSeek，用于解析、BMC、需求逻辑、价值流、IT 现状/痛点、ITGap 分析及聊天意图提炼与回复。
-- **配置位置**：`main.js` 中的 `DEEPSEEK_API_URL`、`DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`
-- **企业数据**：企业基本信息与 BMC 查询、价值流列表由 `main.js` 中的 `API_URL`、`VALUE_STREAM_API_URL` 配置（Base44 等），与 DeepSeek 独立。
+- **配置位置**：`config.local.js` 中的 `DEEPSEEK_API_KEY`；`js/api.js` 中的 `DEEPSEEK_API_URL`、`DEEPSEEK_MODEL`（可通过 `window.APP_CONFIG` 覆盖）。
+- **企业数据**：企业基本信息与 BMC 查询、价值流列表由 `js/config.js` 中的 `API_URL`、`VALUE_STREAM_API_URL` 配置（Base44 等），与 DeepSeek 独立。
 
 ### 通用规则
 

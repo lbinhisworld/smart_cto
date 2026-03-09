@@ -31,7 +31,7 @@
 | 你访问的地址 | 原因 | 做法 |
 |-------------|------|------|
 | 例如 `http://localhost:3000`（前端页面） | 没有启动前端静态服务 | 在本项目目录执行：`npx serve .`，再打开终端里显示的地址（如 http://localhost:3000） |
-| 画布页点击「查询」报错、或你访问的是后端 API 地址 | 企业分析 API 未就绪 | 确保 `main.js` 里 `API_URL`、`VALUE_STREAM_API_URL` 指向已部署的 Base44 接口；本地联调时需在后端项目启动对应服务 |
+| 画布页点击「查询」报错、或你访问的是后端 API 地址 | 企业分析 API 未就绪 | 确保 `js/config.js` 里 `API_URL`、`VALUE_STREAM_API_URL` 指向已部署的 Base44 接口；本地联调时需在后端项目启动对应服务 |
 
 **注意**：首页的「解析」「生成 BMC」「需求逻辑」「价值流」「IT 现状/痛点标注」「ITGap 分析」及聊天区意图提炼等，均调用 **DeepSeek 大模型**（见下方配置），不依赖 Base44 端口。
 
@@ -52,7 +52,7 @@ npx serve .
 - **大模型（DeepSeek）**  
   将 `config.example.js` 复制为 `config.local.js`，在 `config.local.js` 中填入 `DEEPSEEK_API_KEY`（及可选 `DEEPSEEK_API_URL`、`DEEPSEEK_MODEL`）。`config.local.js` 已加入 .gitignore，不会提交到 Git。用于解析数字化问题、生成 BMC、需求逻辑、价值流、IT 现状/痛点标注、全局/局部 ITGap 分析及聊天区意图提炼与回复。
 - **企业分析 API**（画布模式）  
-  在 `main.js` 顶部：`API_URL`（企业基本信息与 BMC 查询）、`VALUE_STREAM_API_URL`（价值流列表查询），按项目实际接口填写。
+  在 `js/config.js` 中配置 `API_URL`（企业基本信息与 BMC 查询）、`VALUE_STREAM_API_URL`（价值流列表查询），按项目实际接口填写。
 
 ### 3. 后端接口约定（企业分析 API）
 
@@ -70,8 +70,11 @@ npx serve .
 | 文件 | 说明 |
 |------|------|
 | `index.html` | 页面结构：首页录入、画布搜索与结果、列表、问题详情（工作区 + 聊天区）、任务追踪等 |
-| `styles.css` | 样式与 BMC 九宫格、价值流、工作区卡片等布局 |
-| `main.js` | 路由、API 请求、大模型调用、意图提炼、工作区与聊天区逻辑、任务阶段与过程日志 |
+| `styles.css` | 样式与 BMC 九宫格、价值流、工作区卡片、沟通历史任务标题栏颜色（已完成=绿色、进行中=蓝色）等布局 |
+| `js/config.js` | 常量、API 地址、存储键、任务定义（FOLLOW_TASKS、ITGAP_HISTORY_TASKS、IT_STRATEGY_TASKS、TASK_EXTRA_FIELDS 等） |
+| `js/utils.js` | 工具函数：formatValue、escapeHtml、renderMarkdown、getTimeStr、formatHistoryTime、formatChatTime、slugifyTopicName |
+| `js/api.js` | DeepSeek 大模型调用：DEEPSEEK_API_* 配置、fetchDeepSeekChat、buildLlmMetaHtml |
+| `main.js` | 路由、业务逻辑、意图提炼、工作区与聊天区、任务阶段与过程日志、沟通历史渲染等 |
 | `README.md` | 本说明 |
 | `PROMPTS.md` | 所有大模型提示词汇总（解析、BMC、需求逻辑、价值流、IT 现状/痛点、ITGap、意图提炼等） |
 | `对话模型管理.md` | 意图类型、过程日志纳入/展示规则、ITGap 流程与代码位置 |
