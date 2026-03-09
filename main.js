@@ -95,6 +95,25 @@ const IT_STRATEGY_TASKS = [
   },
 ];
 
+/** 各任务扩展字段：输入、动作、输出反馈（供沟通历史折叠卡片展示） */
+const TASK_EXTRA_FIELDS = {
+  task1: { input: '客户输入的企业信息', action: '提炼并结构化企业基本信息', outputFeedback: '包含核心字段的 JSON，用户确认' },
+  task2: { input: '企业基本信息', action: '运用 BMC 框架生成商业分析', outputFeedback: 'BMC JSON，用户确认' },
+  task3: { input: '基本信息 + BMC + 初步需求', action: '产出需求逻辑链条分析', outputFeedback: '需求逻辑 Markdown，用户确认' },
+  task4: { input: 'enterprise_info + bmc_data + requirement_logic', action: '生成价值流 JSON 并绘制', outputFeedback: '价值流 JSON + 用户点击「开始绘制」' },
+  task5: { input: '价值流图 + 需求逻辑', action: '在各环节标注 IT 支撑方式', outputFeedback: '各环节 itStatus，用户确认' },
+  task6: { input: '价值流图 + 需求逻辑', action: '在各环节提炼痛点', outputFeedback: '各环节 painPoint，用户确认' },
+  task7: { input: '已绘制价值流图', action: '提取端到端全流程 JSON', outputFeedback: '端到端流程 JSON，用户确认' },
+  task8: { input: '企业上下文 + BMC + 全流程', action: '从多维度产出全局 ITGap 分析', outputFeedback: '结构化 JSON 卡片，用户确认' },
+  task9: { input: '全局 ITGap + 端到端流程', action: '逐环节生成局部 ITGap 分析', outputFeedback: '各环节 analysis，写入 Task9 日志' },
+  task10: { input: '价值流图（环节与角色）', action: '识别干系人并定义权限边界', outputFeedback: 'Markdown 表格，用户确认' },
+  task11: { input: '流程与 IT Gap', action: '定义数字化实体与状态机', outputFeedback: '业务对象 JSON，用户确认' },
+  task12: { input: '全局 ITGap 分析', action: '设计 IT 架构与系统边界', outputFeedback: '架构图/文档，用户确认' },
+  task13: { input: '局部 ITGap', action: '针对各环节设计专项方案', outputFeedback: '功能/接口需求，用户确认' },
+  task14: { input: '环节方案', action: '串联端到端，形成闭环', outputFeedback: '实施路径与优先级，用户确认' },
+  task15: { input: 'IT Gap 清单 + 方案', action: '对标验证并评估收益', outputFeedback: '对冲率与价值量化，用户确认' },
+};
+
 /** 工具知识：工具清单（右侧长卡片列表） */
 const TOOL_KNOWLEDGE_ITEMS = [
   {
@@ -279,6 +298,13 @@ const el = {
   problemDetailChatMessages: document.getElementById('problemDetailChatMessages'),
   problemDetailChatInput: document.getElementById('problemDetailChatInput'),
   problemDetailChatSend: document.getElementById('problemDetailChatSend'),
+  problemDetailChatHeaderLabel: document.getElementById('problemDetailChatHeaderLabel'),
+  problemDetailChatModeTrigger: document.getElementById('problemDetailChatModeTrigger'),
+  problemDetailChatModeTriggerIcon: document.getElementById('problemDetailChatModeTriggerIcon'),
+  problemDetailChatModeTriggerText: document.getElementById('problemDetailChatModeTriggerText'),
+  problemDetailChatModeDropdown: document.getElementById('problemDetailChatModeDropdown'),
+  problemDetailChatModeOptionAgent: document.getElementById('problemDetailChatModeOptionAgent'),
+  problemDetailChatModeOptionAsk: document.getElementById('problemDetailChatModeOptionAsk'),
   btnProblemDetailBack: document.getElementById('btnProblemDetailBack'),
   problemDetailBody: document.getElementById('problemDetailBody'),
   btnProblemDetailRollback: document.getElementById('btnProblemDetailRollback'),
@@ -347,6 +373,9 @@ let problemDetailConfirmedBasicInfo = null;
 
 /** 当前问题详情页的聊天记录（用于持久化） */
 let problemDetailChatMessages = [];
+
+/** 问题详情对话模式：'agent' | 'ask'，Agent 与大模型完整联动，Ask 仅支持查询与讨论 */
+let problemDetailChatMode = 'agent';
 
 /** 聊天历史，用于 DeepSeek API 的 messages 上下文 */
 let chatHistory = [];
@@ -2273,6 +2302,44 @@ if (el.problemDetailChatInput) {
     }
   });
 }
+if (el.problemDetailChatModeTrigger) {
+  el.problemDetailChatModeTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dd = el.problemDetailChatModeDropdown;
+    if (!dd) return;
+    const isOpen = dd.getAttribute('aria-hidden') !== 'true';
+    dd.setAttribute('aria-hidden', String(isOpen));
+    el.problemDetailChatModeTrigger?.setAttribute('aria-expanded', String(!isOpen));
+  });
+}
+if (el.problemDetailChatModeOptionAgent) {
+  el.problemDetailChatModeOptionAgent.addEventListener('click', () => {
+    problemDetailChatMode = 'agent';
+    if (el.problemDetailChatModeTriggerText) el.problemDetailChatModeTriggerText.textContent = 'Agent';
+    if (el.problemDetailChatModeTriggerIcon) el.problemDetailChatModeTriggerIcon.textContent = '∞';
+    if (el.problemDetailChatModeOptionAgent) el.problemDetailChatModeOptionAgent.setAttribute('aria-selected', 'true');
+    if (el.problemDetailChatModeOptionAsk) el.problemDetailChatModeOptionAsk.setAttribute('aria-selected', 'false');
+    if (el.problemDetailChatModeDropdown) el.problemDetailChatModeDropdown.setAttribute('aria-hidden', 'true');
+    if (el.problemDetailChatModeTrigger) el.problemDetailChatModeTrigger.setAttribute('aria-expanded', 'false');
+    updateProblemDetailChatHeaderLabel();
+  });
+}
+if (el.problemDetailChatModeOptionAsk) {
+  el.problemDetailChatModeOptionAsk.addEventListener('click', () => {
+    problemDetailChatMode = 'ask';
+    if (el.problemDetailChatModeTriggerText) el.problemDetailChatModeTriggerText.textContent = 'Ask';
+    if (el.problemDetailChatModeTriggerIcon) el.problemDetailChatModeTriggerIcon.textContent = '💬';
+    if (el.problemDetailChatModeOptionAgent) el.problemDetailChatModeOptionAgent.setAttribute('aria-selected', 'false');
+    if (el.problemDetailChatModeOptionAsk) el.problemDetailChatModeOptionAsk.setAttribute('aria-selected', 'true');
+    if (el.problemDetailChatModeDropdown) el.problemDetailChatModeDropdown.setAttribute('aria-hidden', 'true');
+    if (el.problemDetailChatModeTrigger) el.problemDetailChatModeTrigger.setAttribute('aria-expanded', 'false');
+    updateProblemDetailChatHeaderLabel();
+  });
+}
+document.addEventListener('click', () => {
+  if (el.problemDetailChatModeDropdown) el.problemDetailChatModeDropdown.setAttribute('aria-hidden', 'true');
+  if (el.problemDetailChatModeTrigger) el.problemDetailChatModeTrigger.setAttribute('aria-expanded', 'false');
+});
 if (el.toolsChatSend) el.toolsChatSend.addEventListener('click', handleToolsChatSend);
 if (el.toolsChatInput) {
   el.toolsChatInput.addEventListener('keydown', (e) => {
@@ -2904,6 +2971,16 @@ if (el.problemDetailChatMessages) {
         intentBtn.textContent = '已确认';
         intentBtn.disabled = true;
         renderProblemDetailHistory();
+        if (problemDetailChatMode === 'ask' && (extracted.intent === 'modification' || extracted.intent === 'execute')) {
+          const container = el.problemDetailChatMessages;
+          const tipBlock = document.createElement('div');
+          tipBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+          tipBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">当前为 Ask 模式，仅支持查询与讨论。请切换至 Agent 模式</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+          container?.appendChild(tipBlock);
+          container.scrollTop = container.scrollHeight;
+          pushAndSaveProblemDetailChat({ role: 'system', content: '当前为 Ask 模式，仅支持查询与讨论。请切换至 Agent 模式', timestamp: getTimeStr() });
+          return;
+        }
         if (extracted.intent === 'execute' && extracted.executeTaskId) {
           const runMap = {
             task2: runBmcGeneration,
@@ -2913,7 +2990,18 @@ if (el.problemDetailChatMessages) {
             task6: () => runPainPointAnnotation(true),
           };
           const run = runMap[extracted.executeTaskId];
-          if (run) requestAnimationFrame(() => run());
+          if (run) {
+            requestAnimationFrame(async () => {
+              const sb = el.problemDetailChatSend;
+              if (sb) sb.disabled = true;
+              try {
+                const r = run();
+                if (r && typeof r.then === 'function') await r;
+              } finally {
+                if (sb) sb.disabled = false;
+              }
+            });
+          }
         }
         if (extracted.intent === 'query') {
           const item = currentProblemDetailItem;
@@ -2924,6 +3012,8 @@ if (el.problemDetailChatMessages) {
           container?.appendChild(parsingBlock);
           container.scrollTop = container.scrollHeight;
           requestAnimationFrame(async () => {
+            const sb = el.problemDetailChatSend;
+            if (sb) sb.disabled = true;
             try {
               const { content, usage, model, durationMs } = await executeQueryIntent(extracted, item);
               parsingBlock.remove();
@@ -2939,6 +3029,8 @@ if (el.problemDetailChatMessages) {
               parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
               parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">查询失败：${escapeHtml(err.message || String(err))}</div>`;
               pushAndSaveProblemDetailChat({ role: 'system', content: '查询失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+            } finally {
+              if (sb) sb.disabled = false;
             }
           });
         }
@@ -2952,6 +3044,8 @@ if (el.problemDetailChatMessages) {
           container?.appendChild(parsingBlock);
           container.scrollTop = container.scrollHeight;
           requestAnimationFrame(async () => {
+            const sb = el.problemDetailChatSend;
+            if (sb) sb.disabled = true;
             try {
               const relatedTaskId = extracted.taskId || 'task1';
               const { content, usage, model, durationMs } = await executeDiscussionIntent(extracted, item, userText);
@@ -2969,6 +3063,8 @@ if (el.problemDetailChatMessages) {
               parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
               parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">讨论失败：${escapeHtml(err.message || String(err))}</div>`;
               pushAndSaveProblemDetailChat({ role: 'system', content: '讨论失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+            } finally {
+              if (sb) sb.disabled = false;
             }
           });
         }
@@ -2988,6 +3084,8 @@ if (el.problemDetailChatMessages) {
           container?.appendChild(parsingBlock);
           container.scrollTop = container.scrollHeight;
           requestAnimationFrame(async () => {
+            const sb = el.problemDetailChatSend;
+            if (sb) sb.disabled = true;
             try {
               let applied = false;
               let usage = {};
@@ -3043,6 +3141,8 @@ if (el.problemDetailChatMessages) {
                 parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
                 parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">修改失败：${escapeHtml(err.message || String(err))}</div>`;
                 pushAndSaveProblemDetailChat({ role: 'system', content: '修改失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+              } finally {
+                if (sb) sb.disabled = false;
               }
             });
         }
@@ -3052,6 +3152,8 @@ if (el.problemDetailChatMessages) {
         if (useBasicInfoParseFlow) {
           const item = currentProblemDetailItem;
           requestAnimationFrame(async () => {
+            const sb = el.problemDetailChatSend;
+            if (sb) sb.disabled = true;
             try {
               const { parsed } = await parseCompanyBasicInfoInput(textToParse);
               problemDetailConfirmedBasicInfo = parsed;
@@ -3079,7 +3181,9 @@ if (el.problemDetailChatMessages) {
               pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
               renderProblemDetailContent();
               maybeShowBmcStartBlock();
+              updateProblemDetailChatHeaderLabel();
             } catch (_) {}
+            finally { if (sb) sb.disabled = false; }
           });
         }
       } catch (_) {}
@@ -3110,6 +3214,7 @@ if (el.problemDetailChatMessages) {
           saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
         }
         renderProblemDetailContent();
+        updateProblemDetailChatHeaderLabel();
         btn.textContent = '已确认';
         btn.disabled = true;
         requestAnimationFrame(() => maybeShowBmcStartBlock());
@@ -5785,6 +5890,7 @@ function getCommunicationsByTask(createdAt) {
   IT_STRATEGY_TASKS.forEach((t) => { byTask[t.id] = []; });
   let lastUserComm = null;
   for (const msg of chats) {
+    if (msg.askMode === true) continue;
     const inferred = inferTaskIdFromMessage(msg);
     if (inferred) currentTask = inferred;
     const isQueryIntentCard = msg.type === 'intentExtractionCard' && msg.data?.intent === 'query';
@@ -5868,6 +5974,7 @@ function isTaskCompleted(item, taskId) {
   if (!item) return false;
   const completed = item.completedStages || [];
   const wfCompleted = item.workflowAlignCompletedStages || [];
+  const itGapCompleted = item.itGapCompletedStages || [];
   switch (taskId) {
     case 'task1': return !!(item.basicInfo);
     case 'task2': return completed.includes(1) || !!(item.bmc);
@@ -5875,8 +5982,31 @@ function isTaskCompleted(item, taskId) {
     case 'task4': return wfCompleted.includes(0) && !!(item.valueStream && !item.valueStream.raw);
     case 'task5': return wfCompleted.includes(1);
     case 'task6': return wfCompleted.includes(2);
+    case 'task7': return itGapCompleted.includes(0);
+    case 'task8': return !!(item.globalItGapAnalysisJson);
+    case 'task9': {
+      const sessions = item.localItGapSessions || [];
+      return sessions.length > 0 && sessions.every((s) => s.analysisJson || s.analysisMarkdown);
+    }
+    case 'task10':
+    case 'task11':
+    case 'task12':
+    case 'task13':
+    case 'task14':
+    case 'task15':
+      return false;
     default: return false;
   }
+}
+
+/** 根据问题单状态推导任务状态：已完成 / 进行中 / 待执行 */
+function getTaskStatusText(item, taskId, allTasks) {
+  if (!item || !taskId || !allTasks?.length) return '—';
+  const completed = isTaskCompleted(item, taskId);
+  if (completed) return '已完成';
+  const firstUncompleted = allTasks.find((t) => !isTaskCompleted(item, t.id));
+  if (firstUncompleted?.id === taskId) return '进行中';
+  return '待执行';
 }
 
 function openTaskTracking(item) {
@@ -6072,6 +6202,21 @@ function openProblemDetail(item) {
   toggleProblemDetailHistory(false);
   saveRouteState('problemDetail', { createdAt: item.createdAt });
   switchView('problemDetail');
+  updateProblemDetailChatHeaderLabel();
+}
+
+/** 更新问题详情对话区标题栏标签：Agent 模式显示当前任务名称，Ask 模式显示「询问讨论模式」 */
+function updateProblemDetailChatHeaderLabel() {
+  const labelEl = el.problemDetailChatHeaderLabel;
+  if (!labelEl) return;
+  if (problemDetailChatMode === 'ask') {
+    labelEl.textContent = '询问讨论模式';
+    return;
+  }
+  const item = currentProblemDetailItem;
+  const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
+  const firstUncompleted = allTasks.find((t) => !isTaskCompleted(item, t.id));
+  labelEl.textContent = firstUncompleted ? firstUncompleted.name : '';
 }
 
 function toggleProblemDetailHistory(open) {
@@ -6095,6 +6240,11 @@ function renderProblemDetailHistory() {
     const taskData = trackingData[task.id] || {};
     const objective = (taskData.objective ?? task.objective) || '—';
     const evaluationCriteria = (taskData.evaluationCriteria ?? task.evaluationCriteria) || '—';
+    const extra = TASK_EXTRA_FIELDS[task.id] || {};
+    const inputDesc = extra.input || '—';
+    const actionDesc = extra.action || '—';
+    const outputDesc = extra.outputFeedback || '—';
+    const taskStatusText = getTaskStatusText(item, task.id, allHistoryTasks);
     const comms = (communications[task.id] || []).slice().sort((a, b) => {
       const ta = (a.time && new Date(a.time).getTime()) || 0;
       const tb = (b.time && new Date(b.time).getTime()) || 0;
@@ -6185,6 +6335,14 @@ function renderProblemDetailHistory() {
             <p>${escapeHtml(objective)}</p>
             <h5>评估标准</h5>
             <p>${escapeHtml(evaluationCriteria)}</p>
+            <h5>输入</h5>
+            <p>${escapeHtml(inputDesc)}</p>
+            <h5>动作</h5>
+            <p>${escapeHtml(actionDesc)}</p>
+            <h5>输出反馈</h5>
+            <p>${escapeHtml(outputDesc)}</p>
+            <h5>任务状态</h5>
+            <p>${escapeHtml(taskStatusText)}</p>
             <h5>任务过程日志</h5>
           </div>
           <div class="problem-detail-history-timeline">${timelineHtml}</div>
@@ -8155,14 +8313,18 @@ function appendProblemDetailChatMessage(container, role, content, options) {
   }
   container.scrollTop = container.scrollHeight;
   if (!options?.noSave) {
-    problemDetailChatMessages.push({ role, content, timestamp: timeStr });
+    const msg = { role, content, timestamp: timeStr };
+    if (problemDetailChatMode === 'ask') msg.askMode = true;
+    problemDetailChatMessages.push(msg);
     saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
   }
   return block;
 }
 
 function pushAndSaveProblemDetailChat(msg) {
-  problemDetailChatMessages.push(msg);
+  const toPush = { ...msg };
+  if (problemDetailChatMode === 'ask') toPush.askMode = true;
+  problemDetailChatMessages.push(toPush);
   saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
 }
 
@@ -8296,9 +8458,11 @@ const MODIFICATION_CLARIFICATION_TEXT = '请明确具体修改需求：您要修
 async function handleProblemDetailChatSend() {
   const input = el.problemDetailChatInput;
   const container = el.problemDetailChatMessages;
+  const sendBtn = el.problemDetailChatSend;
   if (!input || !container) return;
   const text = (input.value || '').trim();
   if (!text) return;
+  if (sendBtn) sendBtn.disabled = true;
   input.value = '';
   appendProblemDetailChatMessage(container, 'user', text);
 
@@ -8326,6 +8490,7 @@ async function handleProblemDetailChatSend() {
     container.appendChild(replyBlock);
     container.scrollTop = container.scrollHeight;
     pushAndSaveProblemDetailChat({ role: 'system', content: msg, timestamp: getTimeStr() });
+    if (sendBtn) sendBtn.disabled = false;
     return;
   }
 
@@ -8416,6 +8581,8 @@ async function handleProblemDetailChatSend() {
     parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
     parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">意图提炼失败：${escapeHtml(err.message || String(err))}</div>`;
     pushAndSaveProblemDetailChat({ role: 'system', content: '意图提炼失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
   }
 }
 

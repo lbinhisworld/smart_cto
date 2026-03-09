@@ -77,11 +77,37 @@
       </div>
       <div class="problem-detail-body" id="problemDetailBody">
         <aside class="problem-detail-chat">
-          <div class="problem-detail-chat-header">对话</div>
+          <div class="problem-detail-chat-header">
+            <span>对话</span>
+            <span id="problemDetailChatHeaderLabel" class="problem-detail-chat-header-label" aria-live="polite"></span>
+          </div>
           <div id="problemDetailChatMessages" class="problem-detail-chat-body"></div>
           <div class="problem-detail-chat-input-wrap">
-            <textarea id="problemDetailChatInput" class="problem-detail-chat-input" placeholder="输入消息…" rows="3"></textarea>
-            <button type="button" id="problemDetailChatSend" class="problem-detail-chat-send" aria-label="发送">↑</button>
+            <div class="problem-detail-chat-mode-row">
+              <div class="problem-detail-chat-mode-trigger-wrap">
+                <button type="button" id="problemDetailChatModeTrigger" class="problem-detail-chat-mode-trigger" aria-haspopup="listbox" aria-expanded="false" aria-label="选择对话模式">
+                  <span class="problem-detail-chat-mode-trigger-icon" id="problemDetailChatModeTriggerIcon" aria-hidden="true">∞</span>
+                  <span class="problem-detail-chat-mode-trigger-text" id="problemDetailChatModeTriggerText">Agent</span>
+                  <span class="problem-detail-chat-mode-trigger-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div id="problemDetailChatModeDropdown" class="problem-detail-chat-mode-dropdown" role="listbox" aria-hidden="true">
+                  <div class="problem-detail-chat-mode-dropdown-item" id="problemDetailChatModeOptionAgent" role="option" data-mode="agent" tabindex="0" aria-selected="true">
+                    <span class="problem-detail-chat-mode-dropdown-icon">∞</span>
+                    <span class="problem-detail-chat-mode-dropdown-label">Agent</span>
+                    <span class="problem-detail-chat-mode-dropdown-check" aria-hidden="true">✓</span>
+                  </div>
+                  <div class="problem-detail-chat-mode-dropdown-item" id="problemDetailChatModeOptionAsk" role="option" data-mode="ask" tabindex="0" aria-selected="false">
+                    <span class="problem-detail-chat-mode-dropdown-icon problem-detail-chat-mode-icon-ask">💬</span>
+                    <span class="problem-detail-chat-mode-dropdown-label">Ask</span>
+                    <span class="problem-detail-chat-mode-dropdown-check" aria-hidden="true">✓</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="problem-detail-chat-input-row">
+              <textarea id="problemDetailChatInput" class="problem-detail-chat-input" placeholder="输入消息或执行操作…" rows="3"></textarea>
+              <button type="button" id="problemDetailChatSend" class="problem-detail-chat-send" aria-label="发送">↑</button>
+            </div>
           </div>
         </aside>
         <main id="problemDetailContent" class="problem-detail-workspace"></main>

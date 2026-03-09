@@ -803,6 +803,15 @@ body {
   font-weight: 600;
   color: var(--text);
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.problem-detail-chat-header-label {
+  font-weight: 400;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
 }
 
 .btn-problem-detail-rollback {
@@ -2288,6 +2297,99 @@ body {
   position: relative;
   padding: 0.5rem 0.75rem;
   border-top: 1px solid var(--border);
+}
+
+.problem-detail-chat-mode-row {
+  margin-bottom: 0.5rem;
+}
+
+.problem-detail-chat-mode-trigger-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.problem-detail-chat-mode-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.problem-detail-chat-mode-trigger:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}
+
+.problem-detail-chat-mode-trigger-icon {
+  font-size: 1rem;
+}
+
+.problem-detail-chat-mode-icon-ask {
+  font-style: normal;
+}
+
+.problem-detail-chat-mode-trigger-chevron {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.problem-detail-chat-mode-dropdown {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 2px;
+  min-width: 140px;
+  padding: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+.problem-detail-chat-mode-dropdown[aria-hidden="true"] {
+  display: none;
+}
+
+.problem-detail-chat-mode-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.problem-detail-chat-mode-dropdown-item:hover {
+  background: var(--bg-secondary);
+}
+
+.problem-detail-chat-mode-dropdown-check {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+
+.problem-detail-chat-mode-dropdown-item[aria-selected="false"] .problem-detail-chat-mode-dropdown-check {
+  visibility: hidden;
+}
+
+.problem-detail-chat-input-row {
+  position: relative;
 }
 
 .problem-detail-chat-input {
