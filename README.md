@@ -84,13 +84,14 @@ npx serve .
 | `js/utils.js` | 工具函数：formatValue、escapeHtml、renderMarkdown、getTimeStr、formatHistoryTime、formatChatTime、slugifyTopicName |
 | `js/api.js` | DeepSeek 大模型调用：DEEPSEEK_API_* 配置、fetchDeepSeekChat、buildLlmMetaHtml |
 | `js/storage.js` | 本地存储封装：存档列表、知识库、数字化问题与问题详情聊天、任务追踪、操作历史等读写（getSavedAnalyses、saveAnalysis、getDigitalProblems、updateDigitalProblemBmc、getProblemDetailChat 等） |
+| `js/communication-history.js` | 沟通历史提取与按任务分段：inferTaskIdFromMessage、shouldIncludeInCommunicationHistory、getCommunicationsByTask(createdAt, chats)、getCommunicationsAsTimeline（不写入存储，仅从聊天记录聚合） |
 | `js/valueStream.js` | 价值流解析与渲染：extractPureStageName、parseValueStreamGraph、renderValueStreamViewHTML、renderEndToEndFlowHTML、getValueStreamList、currentValueStreamList、renderValueStreamList |
 | `js/rendering.js` | 详情与查询结果渲染：buildPageStructureForLLM（供意图提炼的页面结构文本）、renderBasicInfo、renderBMC、renderMetadata、buildDetailHTML（详情页整块 HTML） |
 | `js/navigation.js` | 视图与面板：switchView（home/tools/detail/problemDetail/taskTracking）、renderSavedList、toggleChatPanel、toggleHistoryPanel、toggleProblemDetailHistory；main 需将 openDetail、renderModificationHistory、renderProblemDetailHistory 挂到 window 供其回调 |
 
 ### 脚本加载顺序（index.html）
 
-加载顺序需保证依赖前置：`config.js` → `config.local.js` → `js/config.js` → `js/utils.js` → `js/api.js` → `js/storage.js` → `js/valueStream.js` → `js/rendering.js` → `js/navigation.js` → `main.js`。
+加载顺序需保证依赖前置：`config.js` → `config.local.js` → `js/config.js` → `js/utils.js` → `js/api.js` → `js/storage.js` → `js/communication-history.js` → `js/valueStream.js` → `js/rendering.js` → `js/navigation.js` → `main.js`。
 
 ### 文档
 
