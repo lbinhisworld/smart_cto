@@ -172,6 +172,18 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /** 标记某任务为已完成（用于 task10–task15 等，将 taskId 加入 completedTaskIds） */
+  function updateDigitalProblemCompletedTaskId(createdAt, taskId) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    const completed = item.completedTaskIds || [];
+    if (completed.includes(taskId)) return;
+    list[idx] = { ...item, completedTaskIds: [...completed, taskId].sort() };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
   function updateDigitalProblemGlobalItGapAnalysis(createdAt, analysisJson) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -384,6 +396,7 @@
   global.updateDigitalProblemRequirementLogic = updateDigitalProblemRequirementLogic;
   global.updateDigitalProblemMajorStage = updateDigitalProblemMajorStage;
   global.updateDigitalProblemItGapCompletedStages = updateDigitalProblemItGapCompletedStages;
+  global.updateDigitalProblemCompletedTaskId = updateDigitalProblemCompletedTaskId;
   global.updateDigitalProblemGlobalItGapAnalysis = updateDigitalProblemGlobalItGapAnalysis;
   global.clearDigitalProblemGlobalItGapAnalysis = clearDigitalProblemGlobalItGapAnalysis;
   global.updateDigitalProblemLocalItGapSessions = updateDigitalProblemLocalItGapSessions;

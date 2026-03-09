@@ -998,7 +998,9 @@ body {
 }
 
 .btn-redo-global-itgap,
-.btn-redo-role-permission {
+.btn-redo-role-permission,
+.btn-refine-modify,
+.btn-refine-discuss {
   padding: 0.35rem 0.75rem;
   font-size: 0.8125rem;
   font-family: inherit;
@@ -1011,13 +1013,17 @@ body {
 }
 
 .btn-redo-global-itgap:hover:not(:disabled),
-.btn-redo-role-permission:hover:not(:disabled) {
+.btn-redo-role-permission:hover:not(:disabled),
+.btn-refine-modify:hover:not(:disabled),
+.btn-refine-discuss:hover:not(:disabled) {
   opacity: 0.9;
   border-color: var(--text-muted);
 }
 
 .btn-redo-global-itgap:disabled,
-.btn-redo-role-permission:disabled {
+.btn-redo-role-permission:disabled,
+.btn-refine-modify:disabled,
+.btn-refine-discuss:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -2849,6 +2855,11 @@ body {
   color: #4ade80;
 }
 
+.problem-detail-history-log-type-unsatisfied {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
 .problem-detail-chat-context-block .problem-detail-chat-context-json {
   margin: 0.5rem 0 0;
   padding: 0.5rem 0.75rem;
@@ -3853,8 +3864,9 @@ body {
   gap: 0.5rem;
 }
 
-/* 工作区卡片子标题统一宽度，超长换行 */
+/* 工作区卡片子标题统一宽度，超长换行；子标题字号不小于正文 */
 .problem-detail-label {
+  font-size: 0.9375rem;
   font-weight: 500;
   color: var(--text-muted);
   width: 10em;
@@ -3867,6 +3879,7 @@ body {
 }
 
 .problem-detail-value {
+  font-size: 0.875rem;
   color: var(--text);
   flex: 1;
   min-width: 0;

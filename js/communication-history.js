@@ -32,6 +32,7 @@
     if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionConfirmedLog') return 'task10';
     if (type === 'taskContextBlock') return msg.taskId || null;
     if (type === 'taskCompleteBlock' || type === 'taskCompletionConfirmBlock') return msg.taskId || null;
+    if (type === 'unsatisfiedBlock' || type === 'modificationResponseBlock') return msg.taskId || null;
     return null;
   }
 
@@ -64,6 +65,8 @@
     if (type === 'rolePermissionConfirmedLog') return true;
     if (type === 'taskContextBlock') return true;
     if (type === 'taskCompleteBlock') return true;
+    if (type === 'unsatisfiedBlock') return true;
+    if (type === 'modificationResponseBlock') return true;
     return false;
   }
 
@@ -113,9 +116,10 @@
         continue;
       }
       if (!shouldIncludeInCommunicationHistory(msg)) continue;
-      const speaker = (msg.role === 'user' || msg.type === 'taskCompleteBlock') ? '用户' : '系统大模型';
-      const payload = { role: msg.type === 'taskCompleteBlock' ? 'user' : (msg.role || 'system'), content: msg.content, type: msg.type, timestamp: msg.timestamp };
-      if (msg.type === 'taskCompleteBlock' && msg.taskId) payload.taskId = msg.taskId;
+      const speaker = (msg.role === 'user' || msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock') ? '用户' : '系统大模型';
+      const payload = { role: msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock' ? 'user' : (msg.role || 'system'), content: msg.content, type: msg.type, timestamp: msg.timestamp };
+      if ((msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock' || msg.type === 'modificationResponseBlock') && msg.taskId) payload.taskId = msg.taskId;
+      if (msg.type === 'modificationResponseBlock' && msg.llmMeta) payload.llmMeta = msg.llmMeta;
       if (msg.type === 'taskContextBlock') {
         payload.content = '任务上下文';
         payload.contextJson = msg.contextJson;
@@ -139,8 +143,10 @@
       }
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
-      byTask[currentTask].push(entry);
-      lastUserComm = msg.role === 'user' ? { task: currentTask, entry } : null;
+      /** 任务完成块必须归入其 msg.taskId 对应任务，保证过程日志中“任务完成”出现在正确任务下 */
+      const targetTask = (msg.type === 'taskCompleteBlock' && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
+      byTask[targetTask].push(entry);
+      lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
     return byTask;
   }
@@ -163,12 +169,13 @@
     return flat;
   }
 
-  /** 从沟通记录条目解析日志类型：输入、确认、修改、讨论、上下文、任务完成 */
+  /** 从沟通记录条目解析日志类型：输入、确认、修改、讨论、上下文、任务完成、不满意 */
   function getCommunicationLogType(c) {
     if (c.speaker === '用户') return '输入';
     try {
       const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
       if (parsed?.type === 'taskCompleteBlock') return '任务完成';
+      if (parsed?.type === 'unsatisfiedBlock') return '不满意';
       if (parsed?.type === 'taskContextBlock') return '上下文';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'discussion') return '讨论';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') return '修改';
@@ -178,7 +185,7 @@
     return '确认';
   }
 
-  const LOG_TYPE_CLASS = { '输入': 'input', '确认': 'confirm', '修改': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete' };
+  const LOG_TYPE_CLASS = { '输入': 'input', '确认': 'confirm', '修改': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied' };
   const INTENT_LABELS = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
 
   /** 渲染沟通历史面板：任务详情/过程日志双 Tab、时间线及日志类型标签。deps: { item, getChatsForProblem, getTaskStatusText } */
@@ -262,6 +269,9 @@
               } else if (parsed?.type === 'taskCompleteBlock') {
                 titleLabel = '用户确认任务完成';
                 contentStr = '用户确认任务完成';
+              } else if (parsed?.type === 'unsatisfiedBlock') {
+                titleLabel = '用户表示不满意';
+                contentStr = (typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content || {}, null, 2)).slice(0, 2000) + (String(parsed.content || '').length > 2000 ? '\n…' : '');
               }
             } catch (_) {}
             return `
