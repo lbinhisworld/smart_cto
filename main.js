@@ -978,58 +978,7 @@ function restoreRouteState() {
   } catch (_) {}
 }
 
-function switchView(view) {
-  el.homeView.hidden = view !== 'home';
-  if (el.toolsView) el.toolsView.hidden = view !== 'tools';
-  el.detailView.hidden = view !== 'detail';
-  if (el.problemDetailView) el.problemDetailView.hidden = view !== 'problemDetail';
-  if (el.taskTrackingView) el.taskTrackingView.hidden = view !== 'taskTracking';
-  if (el.navDetailLabel) el.navDetailLabel.hidden = view !== 'detail';
-  if (el.topNav) el.topNav.hidden = (view === 'problemDetail' || view === 'taskTracking');
-}
-
-function renderSavedList() {
-  if (!el.savedListContent) return;
-  const list = getSavedAnalyses();
-  if (!list.length) {
-    el.savedListContent.innerHTML = '<p class="vs-empty">暂无已存储数据</p>';
-    return;
-  }
-  el.savedListContent.innerHTML = list
-    .map(
-      (r, i) =>
-        `<div class="saved-item" data-index="${i}" role="button" tabindex="0">${escapeHtml(r.companyName || '未命名')}</div>`
-    )
-    .join('');
-  el.savedListContent.querySelectorAll('.saved-item').forEach((node, i) => {
-    node.addEventListener('click', () => openDetail(list[i]));
-    node.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        openDetail(list[i]);
-      }
-    });
-  });
-}
-
-function toggleChatPanel(open) {
-  const panel = el.chatPanel;
-  const body = document.querySelector('.detail-body');
-  if (!panel) return;
-  const isOpen = open ?? !panel.classList.contains('chat-panel-open');
-  panel.classList.toggle('chat-panel-open', isOpen);
-  if (body) body.classList.toggle('chat-panel-open', isOpen);
-}
-
-function toggleHistoryPanel(open) {
-  const panel = el.historyPanel;
-  const body = document.querySelector('.detail-body');
-  if (!panel) return;
-  const isOpen = open ?? !panel.classList.contains('history-panel-open');
-  panel.classList.toggle('history-panel-open', isOpen);
-  if (body) body.classList.toggle('history-panel-open', isOpen);
-  if (isOpen) renderModificationHistory();
-}
+/** switchView、renderSavedList、toggleChatPanel、toggleHistoryPanel、toggleProblemDetailHistory 已移至 js/navigation.js */
 
 function renderModificationHistory() {
   if (!el.historyContent) return;
@@ -1060,6 +1009,7 @@ function renderModificationHistory() {
            .join('')}
        </div>`;
 }
+if (typeof window !== 'undefined') window.renderModificationHistory = renderModificationHistory;
 
 /** formatHistoryTime、formatChatTime 已移至 js/utils.js */
 
@@ -1309,6 +1259,7 @@ function openDetail(record) {
   setupDetailValueStreamEvents();
   renderChatMessagesFromHistory();
 }
+if (typeof window !== 'undefined') window.openDetail = openDetail;
 
 function renderChatMessagesFromHistory() {
   if (!el.chatMessages) return;
@@ -5124,15 +5075,6 @@ function updateProblemDetailChatHeaderLabel() {
   labelEl.textContent = firstUncompleted ? firstUncompleted.name : '';
 }
 
-function toggleProblemDetailHistory(open) {
-  const panel = el.problemDetailHistoryPanel;
-  if (!panel) return;
-  const isOpen = open ?? !panel.classList.contains('problem-detail-history-panel-open');
-  panel.classList.toggle('problem-detail-history-panel-open', isOpen);
-  if (panel.setAttribute) panel.setAttribute('aria-hidden', String(!isOpen));
-  if (isOpen) renderProblemDetailHistory();
-}
-
 function renderProblemDetailHistory() {
   const container = el.problemDetailHistoryContent;
   if (!container) return;
@@ -5278,6 +5220,7 @@ function renderProblemDetailHistory() {
     });
   });
 }
+if (typeof window !== 'undefined') window.renderProblemDetailHistory = renderProblemDetailHistory;
 
 function initProblemDetailChat() {
   const container = el.problemDetailChatMessages;

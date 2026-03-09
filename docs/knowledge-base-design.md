@@ -307,4 +307,5 @@
 | 意图分析 | analyzeToolDiscussionIntent | main.js |
 | 讨论回复与修改方案 | fetchToolDiscussionReply、fetchToolModificationUpdates、summarizeToolDiscussionContent | main.js |
 | 知识库 UI 与确认逻辑 | renderToolsKnowledge、renderToolsTopicDetail、handleToolsChatSend（意图确认、讨论/修改/增加/补充/删除流程） | main.js |
+| 全局视图与面板 | switchView、toggleChatPanel、toggleHistoryPanel（知识库入口由 main 调用 switchView('tools')） | js/navigation.js |
 
