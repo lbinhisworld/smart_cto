@@ -1406,13 +1406,6 @@ if (el.btnProblemDetailRollback) {
       container.scrollTop = container.scrollHeight;
     }
     el.problemDetailContent?.querySelectorAll('.modify-target-highlight').forEach((node) => node.classList.remove('modify-target-highlight'));
-    requestAnimationFrame(() => {
-      maybeShowBmcStartBlock();
-      maybeShowRequirementLogicStartBlock();
-      maybeShowValueStreamStartBlock();
-      maybeShowItStatusStartBlock();
-      maybeShowPainPointStartBlock();
-    });
   });
 }
 if (el.btnCloseProblemDetailHistory) {
@@ -1426,7 +1419,6 @@ if (el.problemDetailBody) {
       e.stopPropagation();
       triggerBtn.disabled = true;
       triggerBtn.textContent = '已生成';
-      forceShowLocalItGapStartBlock();
       renderProblemDetailContent();
     }
   });
@@ -1533,7 +1525,6 @@ if (el.problemDetailChatMessages) {
             container.scrollTop = container.scrollHeight;
             renderProblemDetailContent();
             renderProblemDetailHistory();
-            requestAnimationFrame(() => maybeShowGlobalItGapStartBlock());
             return;
           }
           const isPainPointStartBlock = msg?.type === 'painPointStartBlock';
@@ -1586,13 +1577,6 @@ if (el.problemDetailChatMessages) {
           if (msg?.type === 'rolePermissionCard') {
             renderProblemDetailContent();
           }
-          requestAnimationFrame(() => {
-            maybeShowBmcStartBlock();
-            maybeShowRequirementLogicStartBlock();
-            maybeShowValueStreamStartBlock();
-            maybeShowItStatusStartBlock();
-            maybeShowPainPointStartBlock();
-          });
         }
       }
       return;
@@ -1868,8 +1852,6 @@ if (el.problemDetailChatMessages) {
         const allSteps = stages.flatMap((s) => s.steps);
         if (allSteps.length > stepIndex + 1) {
           requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
-        } else {
-          requestAnimationFrame(() => maybeShowItStrategyPlanStartBlock());
         }
       } catch (_) {}
       return;
@@ -1891,7 +1873,6 @@ if (el.problemDetailChatMessages) {
         itStrategyPlanViewingSubstep = 0;
         updateProblemDetailProgressStages(3, 3);
         renderProblemDetailContent();
-        requestAnimationFrame(() => maybeShowRolePermissionStartBlock());
       }
       return;
     }
@@ -2030,10 +2011,6 @@ if (el.problemDetailChatMessages) {
           saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
         }
         renderProblemDetailContent();
-        requestAnimationFrame(() => {
-          maybeShowItStatusStartBlock();
-          maybeShowPainPointStartBlock();
-        });
       } catch (_) {}
       return;
     }
@@ -2063,12 +2040,6 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailContent();
         bmcBtn.textContent = '已确认';
         bmcBtn.disabled = true;
-        requestAnimationFrame(() => {
-          maybeShowRequirementLogicStartBlock();
-          maybeShowValueStreamStartBlock();
-          maybeShowItStatusStartBlock();
-          maybeShowPainPointStartBlock();
-        });
       } catch (_) {}
       return;
     }
@@ -2338,7 +2309,6 @@ if (el.problemDetailChatMessages) {
               setupProblemDetailChatCardToggle(cardBlock);
               pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
               renderProblemDetailContent();
-              maybeShowBmcStartBlock();
               updateProblemDetailChatHeaderLabel();
             } catch (_) {}
             finally { if (sb) sb.disabled = false; }
@@ -2375,7 +2345,6 @@ if (el.problemDetailChatMessages) {
         updateProblemDetailChatHeaderLabel();
         btn.textContent = '已确认';
         btn.disabled = true;
-        requestAnimationFrame(() => maybeShowBmcStartBlock());
       } catch (_) {}
     }
   });
@@ -5069,10 +5038,6 @@ function openProblemDetail(item) {
   updateProblemDetailProgressStages(majorStage, problemDetailViewingMajorStage);
   renderProblemDetailContent();
   initProblemDetailChat();
-  if (problemDetailViewingMajorStage >= 2) {
-    console.log('[局部ITGap] openProblemDetail: 调用 forceShowLocalItGapStartBlock (同步)');
-    forceShowLocalItGapStartBlock();
-  }
   toggleProblemDetailHistory(false);
   saveRouteState('problemDetail', { createdAt: item.createdAt });
   switchView('problemDetail');
@@ -5320,18 +5285,6 @@ function initProblemDetailChat() {
   if (el.problemDetailChatInput) el.problemDetailChatInput.value = '';
   requestAnimationFrame(() => {
     container.scrollTop = container.scrollHeight;
-    maybeShowBmcStartBlock();
-    maybeShowRequirementLogicStartBlock();
-    maybeShowValueStreamStartBlock();
-    maybeShowItStatusStartBlock();
-    maybeShowPainPointStartBlock();
-    maybeShowItGapStartBlock();
-    if (problemDetailViewingMajorStage >= 2) {
-      console.log('[局部ITGap] initProblemDetailChat rAF: 调用 forceShowLocalItGapStartBlock');
-      maybeShowE2eFlowExtractBlock();
-      maybeShowGlobalItGapStartBlock();
-      forceShowLocalItGapStartBlock();
-    }
   });
 }
 
@@ -5466,11 +5419,6 @@ async function runRequirementLogicConstruction() {
     pushAndSaveProblemDetailChat({ type: 'requirementLogicBlock', content: logicStr, parsed, timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
     container.scrollTop = container.scrollHeight;
     renderProblemDetailContent();
-    requestAnimationFrame(() => {
-      maybeShowValueStreamStartBlock();
-      maybeShowItStatusStartBlock();
-      maybeShowPainPointStartBlock();
-    });
   } catch (err) {
     loadingBlock.remove();
     const errBlock = document.createElement('div');
@@ -5479,231 +5427,6 @@ async function runRequirementLogicConstruction() {
     container.appendChild(errBlock);
     pushAndSaveProblemDetailChat({ role: 'system', content: '需求逻辑构建失败：' + (err.message || String(err)), timestamp: getTimeStr() });
   }
-}
-
-function maybeShowBmcStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  if (item.bmc) return;
-  const completedStages = item.completedStages || [];
-  const currentStage = [0, 1, 2].find((i) => !completedStages.includes(i)) ?? 3;
-  if (currentStage !== 1) return;
-  if (!problemDetailConfirmedBasicInfo) return;
-  const hasBmcStart = problemDetailChatMessages.some((m) => m.type === 'bmcStartBlock');
-  if (hasBmcStart) return;
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-start';
-  block.innerHTML = `
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">我将发起商业模式画布 BMC 生成</div>
-      <div class="problem-detail-chat-bmc-start-actions">
-        <button type="button" class="btn-confirm-start-bmc">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  pushAndSaveProblemDetailChat({ type: 'bmcStartBlock', timestamp: getTimeStr() });
-  container.scrollTop = container.scrollHeight;
-}
-
-function maybeShowRequirementLogicStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  if (item.requirementLogic) return;
-  const completedStages = item.completedStages || [];
-  const currentStage = [0, 1, 2].find((i) => !completedStages.includes(i)) ?? 3;
-  if (currentStage !== 2) return;
-  if (!item.bmc || !(item.basicInfo || problemDetailConfirmedBasicInfo)) return;
-  const hasStart = problemDetailChatMessages.some((m) => m.type === 'requirementLogicStartBlock');
-  if (hasStart) return;
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-requirement-logic-start';
-  block.innerHTML = `
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">我即将开始提取需求逻辑</div>
-      <div class="problem-detail-chat-requirement-logic-start-actions">
-        <button type="button" class="btn-confirm-start-requirement-logic">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  pushAndSaveProblemDetailChat({ type: 'requirementLogicStartBlock', timestamp: getTimeStr() });
-  container.scrollTop = container.scrollHeight;
-}
-
-function maybeShowValueStreamStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  if (item.valueStream) return;
-  const currentMajorStage = item.currentMajorStage ?? 0;
-  if (currentMajorStage < 1) return;
-  const wfCompleted = item.workflowAlignCompletedStages || [];
-  const wfCurrent = [0, 1, 2].find((i) => !wfCompleted.includes(i)) ?? 3;
-  if (wfCurrent !== 0) return;
-  const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo;
-  if (!basicInfo || !item.bmc || !item.requirementLogic) return;
-  const hasStart = problemDetailChatMessages.some((m) => m.type === 'valueStreamStartBlock');
-  if (hasStart) return;
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-start';
-  block.innerHTML = `
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">我即将开始需求相关核心价值流图绘制</div>
-      <div class="problem-detail-chat-value-stream-start-actions">
-        <button type="button" class="btn-confirm-start-value-stream">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  pushAndSaveProblemDetailChat({ type: 'valueStreamStartBlock', timestamp: getTimeStr() });
-  container.scrollTop = container.scrollHeight;
-}
-
-function maybeShowItStatusStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  const valueStream = item.valueStream;
-  if (!valueStream || valueStream.raw) return;
-  const hasItStatus = (() => {
-    const rawStages = valueStream.stages ?? valueStream.phases ?? valueStream.nodes ?? [];
-    if (!Array.isArray(rawStages)) return false;
-    for (const s of rawStages) {
-      const steps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
-      for (const st of steps) {
-        if (st && typeof st === 'object' && (st.itStatus || st.it_status)) return true;
-      }
-    }
-    return false;
-  })();
-  if (hasItStatus) return;
-  const currentMajorStage = item.currentMajorStage ?? 0;
-  if (currentMajorStage < 1) return;
-  const wfCompleted = item.workflowAlignCompletedStages || [];
-  const wfCurrent = [0, 1, 2].find((i) => !wfCompleted.includes(i)) ?? 3;
-  if (wfCurrent !== 1) return;
-  if (!item.requirementLogic) return;
-  const hasStart = problemDetailChatMessages.some((m) => m.type === 'itStatusStartBlock');
-  if (hasStart) return;
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-it-status-start';
-  block.innerHTML = `
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">即将开始 IT 现状标注</div>
-      <div class="problem-detail-chat-it-status-start-actions">
-        <button type="button" class="btn-confirm-start-it-status">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  pushAndSaveProblemDetailChat({ type: 'itStatusStartBlock', timestamp: getTimeStr() });
-  container.scrollTop = container.scrollHeight;
-}
-
-function maybeShowPainPointStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  const valueStream = item.valueStream;
-  if (!valueStream || valueStream.raw) return;
-  const hasPainPoint = (() => {
-    const rawStages = valueStream.stages ?? valueStream.phases ?? valueStream.nodes ?? [];
-    if (!Array.isArray(rawStages)) return false;
-    for (const s of rawStages) {
-      const steps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
-      for (const st of steps) {
-        const pp = st?.painPoint ?? st?.pain_point;
-        if (pp && typeof pp === 'string' && pp.trim()) return true;
-      }
-    }
-    return false;
-  })();
-  if (hasPainPoint) return;
-  const currentMajorStage = item.currentMajorStage ?? 0;
-  if (currentMajorStage < 1) return;
-  const wfCompleted = item.workflowAlignCompletedStages || [];
-  const wfCurrent = [0, 1, 2].find((i) => !wfCompleted.includes(i)) ?? 3;
-  if (wfCurrent !== 2) return;
-  if (!item.requirementLogic) return;
-  const hasStart = problemDetailChatMessages.some((m) => m.type === 'painPointStartBlock');
-  if (hasStart) return;
-  pushAndSaveProblemDetailChat({ type: 'painPointStartBlock', timestamp: getTimeStr() });
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-pain-point-start problem-detail-chat-msg-with-delete';
-  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-  block.innerHTML = `
-    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">即将开始价值流图环节节点痛点标注</div>
-      <div class="problem-detail-chat-pain-point-start-actions">
-        <button type="button" class="btn-confirm-start-pain-point">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  container.scrollTop = container.scrollHeight;
-}
-
-function maybeShowE2eFlowExtractBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  const valueStream = item.valueStream;
-  if (!valueStream || valueStream.raw) return;
-  const itGapCompleted = item.itGapCompletedStages || [];
-  const itGapCurrent = [0, 1, 2].find((i) => !itGapCompleted.includes(i)) ?? 3;
-  if (itGapCurrent !== 1) return;
-  const comms = getCommunicationsByTask(item.createdAt);
-  if ((comms.task7 || []).length > 0) return;
-  if (problemDetailChatMessages.some((m) => m.type === 'e2eFlowExtractStartBlock')) return;
-  pushAndSaveProblemDetailChat({ type: 'e2eFlowExtractStartBlock', content: '我先需要提取端到端流程绘制的 json 数据', timestamp: getTimeStr(), confirmed: false });
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-e2e-extract-start problem-detail-chat-msg-with-delete';
-  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-  block.innerHTML = `
-    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">我先需要提取端到端流程绘制的 json 数据</div>
-      <div class="problem-detail-chat-e2e-extract-actions">
-        <button type="button" class="btn-confirm-e2e-extract">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  container.scrollTop = container.scrollHeight;
-}
-
-function maybeShowGlobalItGapStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  const valueStream = item.valueStream;
-  if (!valueStream || valueStream.raw) return;
-  const itGapCompleted = item.itGapCompletedStages || [];
-  const itGapCurrent = [0, 1, 2].find((i) => !itGapCompleted.includes(i)) ?? 3;
-  if (itGapCurrent !== 1) return;
-  const comms = getCommunicationsByTask(item.createdAt);
-  if ((comms.task7 || []).length === 0) return;
-  if (problemDetailChatMessages.some((m) => m.type === 'globalItGapStartBlock')) return;
-  if (item.globalItGapAnalysisJson) return;
-  pushAndSaveProblemDetailChat({ type: 'globalItGapStartBlock', content: '即将针对端到端流程开展全局 ITGap 分析', timestamp: getTimeStr(), confirmed: false });
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-global-itgap-start problem-detail-chat-msg-with-delete';
-  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-  block.innerHTML = `
-    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">即将针对端到端流程开展全局 ITGap 分析</div>
-      <div class="problem-detail-chat-global-itgap-start-actions">
-        <button type="button" class="btn-confirm-start-global-itgap">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-    container.scrollTop = container.scrollHeight;
 }
 
 /** 从问题记录或聊天记录中解析出有效的端到端流程 valueStream（支持 valueStream、valueStreams[0]、e2eFlowGeneratedLog） */
@@ -5755,188 +5478,6 @@ function scrollChatToBlock(container, blockEl) {
   const containerHeight = container.clientHeight;
   const blockHeight = blockEl.offsetHeight;
   container.scrollTop = Math.max(0, blockTop - Math.floor(containerHeight / 3));
-}
-
-/** 强制在聊天区展示局部 ITGap 分析 session 生成块（用于工作区手动触发或刷新后自动弹出，条件更宽松） */
-function forceShowLocalItGapStartBlock() {
-  const LOG_PREFIX = '[局部ITGap]';
-  const item = currentProblemDetailItem;
-  console.log(LOG_PREFIX, 'forceShowLocalItGapStartBlock 被调用', {
-    createdAt: item?.createdAt,
-    problemDetailViewingMajorStage,
-    currentMajorStage: item?.currentMajorStage,
-    itGapCompletedStages: item?.itGapCompletedStages,
-    hasValueStream: !!(item?.valueStream && !item?.valueStream?.raw),
-    hasValueStreams: Array.isArray(item?.valueStreams) && item.valueStreams.length,
-    hasGlobalItGap: !!item?.globalItGapAnalysisJson,
-    localItGapSessionsLen: (item?.localItGapSessions || []).length,
-    localItGapAnalysesLen: (item?.localItGapAnalyses || []).length,
-  });
-  const container = el.problemDetailChatMessages;
-  if (!container || !item?.createdAt) {
-    console.log(LOG_PREFIX, 'return: 无 container 或 item.createdAt', { hasContainer: !!container, hasCreatedAt: !!item?.createdAt });
-    return;
-  }
-  const valueStream = resolveValueStreamForItGap(item);
-  if (!valueStream || valueStream.raw) {
-    console.log(LOG_PREFIX, 'return: 无有效 valueStream', { hasValueStream: !!valueStream, isRaw: valueStream?.raw });
-    return;
-  }
-  if (!item.globalItGapAnalysisJson) {
-    console.log(LOG_PREFIX, 'return: 无 globalItGapAnalysisJson');
-    return;
-  }
-  const itGapCompleted = item.itGapCompletedStages || [];
-  const itGapCurrent = [0, 1, 2].find((i) => !itGapCompleted.includes(i)) ?? 3;
-  if (itGapCurrent !== 2) {
-    console.log(LOG_PREFIX, 'return: itGapCurrent !== 2', { itGapCompleted, itGapCurrent });
-    return;
-  }
-  const { stages } = parseValueStreamGraph(valueStream);
-  const allSteps = stages.flatMap((s) => s.steps);
-  if (allSteps.length === 0) {
-    console.log(LOG_PREFIX, 'return: allSteps.length === 0', { stagesCount: stages.length });
-    return;
-  }
-  const sessions = item.localItGapSessions || [];
-  const analyses = item.localItGapAnalyses || [];
-  if (sessions.length >= allSteps.length || analyses.length >= allSteps.length) {
-    console.log(LOG_PREFIX, 'return: 已全部完成', { sessionsLen: sessions.length, analysesLen: analyses.length, allStepsLen: allSteps.length });
-    return;
-  }
-  const chats = getProblemDetailChats()[item.createdAt] || [];
-  const matchingBlocks = chats.filter((m) => m.type === 'localItGapStartBlock' || m.type === 'localItGapSessionsBlock');
-  const hasBlock = matchingBlocks.length > 0;
-  if (hasBlock) {
-    const blockTypes = matchingBlocks.map((m) => ({ type: m.type, confirmed: m.confirmed, idx: chats.indexOf(m) }));
-    const allTypes = chats.map((m) => m.type || m.role || 'unknown');
-    console.log(LOG_PREFIX, 'return: 聊天中已有 block，故不重复弹出', {
-      blockTypes,
-      blockCount: matchingBlocks.length,
-      chatMsgCount: chats.length,
-      allMsgTypes: allTypes,
-    });
-    const blockEl = container?.querySelector('.problem-detail-chat-local-itgap-start, .problem-detail-chat-local-itgap-sessions-card');
-    if (blockEl) {
-      showLocalItGapExistingBlockBanner(container, blockEl);
-      setTimeout(() => scrollChatToBlock(container, blockEl), 100);
-    } else {
-      console.warn(LOG_PREFIX, '聊天数据中有 block 但 DOM 中未找到，可能需重新渲染');
-    }
-    return;
-  }
-  console.log(LOG_PREFIX, '✓ 展示「即将生成每个环节的 ITGap 分析 session」', { allStepsLen: allSteps.length });
-  pushAndSaveProblemDetailChat({ type: 'localItGapStartBlock', content: '即将生成每个环节的 ITGap 分析 session', timestamp: getTimeStr(), confirmed: false });
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-start problem-detail-chat-msg-with-delete';
-  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-  block.innerHTML = `
-    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">即将生成每个环节的 ITGap 分析 session</div>
-      <div class="problem-detail-chat-local-itgap-start-actions">
-        <button type="button" class="btn-confirm-start-local-itgap">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  container.scrollTop = container.scrollHeight;
-}
-
-function maybeShowLocalItGapStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  const valueStream = resolveValueStreamForItGap(item);
-  if (!valueStream || valueStream.raw) return;
-  if (!item.globalItGapAnalysisJson) return;
-  const itGapCompleted = item.itGapCompletedStages || [];
-  const itGapCurrent = [0, 1, 2].find((i) => !itGapCompleted.includes(i)) ?? 3;
-  if (itGapCurrent !== 2) return;
-  if (problemDetailChatMessages.some((m) => m.type === 'localItGapStartBlock')) return;
-  if (problemDetailChatMessages.some((m) => m.type === 'localItGapSessionsBlock')) return;
-  const { stages } = parseValueStreamGraph(valueStream);
-  const allSteps = stages.flatMap((s) => s.steps);
-  if (allSteps.length === 0) return;
-  const sessions = item.localItGapSessions || [];
-  const analyses = item.localItGapAnalyses || [];
-  if (sessions.length >= allSteps.length || analyses.length >= allSteps.length) return;
-  pushAndSaveProblemDetailChat({ type: 'localItGapStartBlock', content: '即将生成每个环节的 ITGap 分析 session', timestamp: getTimeStr(), confirmed: false });
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-start problem-detail-chat-msg-with-delete';
-  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-  block.innerHTML = `
-    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">即将生成每个环节的 ITGap 分析 session</div>
-      <div class="problem-detail-chat-local-itgap-start-actions">
-        <button type="button" class="btn-confirm-start-local-itgap">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  container.scrollTop = container.scrollHeight;
-}
-
-/** 局部 ITGap 分析全部完成后，展示「即将开始 IT 策略规划」提示块 */
-function maybeShowItStrategyPlanStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  const valueStream = resolveValueStreamForItGap(item);
-  if (!valueStream || valueStream.raw) return;
-  const { stages } = parseValueStreamGraph(valueStream);
-  const allSteps = stages.flatMap((s) => s.steps);
-  if (allSteps.length === 0) return;
-  const analyses = item.localItGapAnalyses || [];
-  const sessions = item.localItGapSessions || [];
-  const completedCount = Math.max(analyses.length, sessions.filter((s) => s.analysisJson).length);
-  if (completedCount < allSteps.length) return;
-  if (problemDetailChatMessages.some((m) => m.type === 'itStrategyPlanStartBlock')) return;
-  if ((item.currentMajorStage ?? 0) >= 3) return;
-  pushAndSaveProblemDetailChat({ type: 'itStrategyPlanStartBlock', content: '即将开始 IT 策略规划', timestamp: getTimeStr(), confirmed: false });
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-it-strategy-plan-start problem-detail-chat-msg-with-delete';
-  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-  block.innerHTML = `
-    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">即将开始 IT 策略规划</div>
-      <div class="problem-detail-chat-it-strategy-plan-start-actions">
-        <button type="button" class="btn-confirm-start-it-strategy-plan btn-confirm-primary">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  container.scrollTop = container.scrollHeight;
-}
-
-function maybeShowRolePermissionStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  if ((item.currentMajorStage ?? 0) !== 3) return;
-  if (itStrategyPlanViewingSubstep !== 0) return;
-  if (problemDetailChatMessages.some((m) => m.type === 'rolePermissionStartBlock')) return;
-  pushAndSaveProblemDetailChat({
-    type: 'rolePermissionStartBlock',
-    content: '即将开始角色与权限模型推演',
-    timestamp: getTimeStr(),
-    confirmed: false,
-  });
-  const block = document.createElement('div');
-  block.className =
-    'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-start';
-  block.innerHTML = `
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">即将开始角色与权限模型推演</div>
-      <div class="problem-detail-chat-role-permission-start-actions">
-        <button type="button" class="btn-confirm-start-role-permission btn-confirm-primary">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  container.scrollTop = container.scrollHeight;
 }
 
 async function runRolePermissionModeling(isRedo) {
@@ -6295,9 +5836,7 @@ async function runLocalItGapAnalysisForNextStep() {
     renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
     container.scrollTop = container.scrollHeight;
     renderProblemDetailHistory();
-    if (nextIndex + 1 >= allSteps.length) {
-      requestAnimationFrame(() => maybeShowItStrategyPlanStartBlock());
-    } else {
+    if (nextIndex + 1 < allSteps.length) {
       requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
     }
   } catch (err) {
@@ -6414,33 +5953,6 @@ async function runGlobalItGapAnalysis(isRedo) {
   }
 }
 
-function maybeShowItGapStartBlock() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  const wfCompleted = item.workflowAlignCompletedStages || [];
-  if (wfCompleted.length < 3 || !wfCompleted.includes(0) || !wfCompleted.includes(1) || !wfCompleted.includes(2)) return;
-  const currentMajorStage = item.currentMajorStage ?? 0;
-  if (currentMajorStage < 1) return;
-  const hasStart = problemDetailChatMessages.some((m) => m.type === 'itGapStartBlock');
-  if (hasStart) return;
-  pushAndSaveProblemDetailChat({ type: 'itGapStartBlock', timestamp: getTimeStr() });
-  const block = document.createElement('div');
-  block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-it-gap-start problem-detail-chat-msg-with-delete';
-  block.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-  block.innerHTML = `
-    <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-    <div class="problem-detail-chat-msg-content-wrap">
-      <div class="problem-detail-chat-msg-content">即将在现有价值流上开始 ITGap 分析</div>
-      <div class="problem-detail-chat-it-gap-start-actions">
-        <button type="button" class="btn-confirm-start-it-gap">确认</button>
-      </div>
-    </div>
-    <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(block);
-  container.scrollTop = container.scrollHeight;
-}
-
 async function runItStatusAnnotation() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -6491,7 +6003,6 @@ async function runItStatusAnnotation() {
     container.appendChild(doneBlock);
     pushAndSaveProblemDetailChat({ role: 'system', content: 'IT 现状标注完成', timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
     container.scrollTop = container.scrollHeight;
-    requestAnimationFrame(() => maybeShowPainPointStartBlock());
   } catch (err) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
@@ -6555,7 +6066,6 @@ async function runPainPointAnnotation(isRerun) {
     container.appendChild(doneBlock);
     pushAndSaveProblemDetailChat({ role: 'system', content: doneText, timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
     container.scrollTop = container.scrollHeight;
-    requestAnimationFrame(() => maybeShowItGapStartBlock());
   } catch (err) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
@@ -7344,11 +6854,6 @@ function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
         problemDetailViewingMajorStage = 1;
         updateProblemDetailProgressStages(1, problemDetailViewingMajorStage);
         renderProblemDetailContent();
-        requestAnimationFrame(() => {
-          maybeShowValueStreamStartBlock();
-          maybeShowItStatusStartBlock();
-          maybeShowPainPointStartBlock();
-        });
       }
     });
   }
@@ -7799,7 +7304,6 @@ function renderProblemDetailContent() {
       </div>`;
     setupItStrategyPlanTaskButtons(container);
     setupProblemDetailCardToggle();
-    requestAnimationFrame(() => maybeShowRolePermissionStartBlock());
     return;
   }
   if (problemDetailViewingMajorStage >= 2) {
@@ -7933,13 +7437,6 @@ function renderProblemDetailContent() {
       setupLocalItGapSubcardToggle();
       setupItGapSubstepClicks(container);
     }
-    requestAnimationFrame(() => {
-      console.log('[局部ITGap] renderProblemDetailContent rAF: 调用 forceShowLocalItGapStartBlock');
-      maybeShowE2eFlowExtractBlock();
-      maybeShowGlobalItGapStartBlock();
-      forceShowLocalItGapStartBlock();
-      maybeShowItStrategyPlanStartBlock();
-    });
     return;
   }
   if (problemDetailViewingMajorStage >= 1) {
@@ -8268,10 +7765,7 @@ function setupProblemDetailCardToggle() {
         if (container) {
           container.innerHTML = '';
           renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
-          requestAnimationFrame(() => {
-            container.scrollTop = container.scrollHeight;
-            maybeShowRequirementLogicStartBlock();
-          });
+          requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
         }
         renderProblemDetailContent();
       });
