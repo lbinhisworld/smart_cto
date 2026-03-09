@@ -1480,6 +1480,24 @@ document.addEventListener('click', () => {
   if (el.problemDetailChatModeDropdown) el.problemDetailChatModeDropdown.setAttribute('aria-hidden', 'true');
   if (el.problemDetailChatModeTrigger) el.problemDetailChatModeTrigger.setAttribute('aria-expanded', 'false');
 });
+const problemDetailChatHeader = el.problemDetailChatHeaderLabel?.parentElement;
+if (problemDetailChatHeader) {
+  problemDetailChatHeader.addEventListener('click', (e) => {
+    const badge = e.target.closest('.problem-detail-chat-current-task-badge');
+    if (!badge) return;
+    const taskId = badge.getAttribute('data-task-id');
+    if (taskId) focusWorkspaceOnCurrentTask(taskId);
+  });
+  problemDetailChatHeader.addEventListener('keydown', (e) => {
+    const badge = e.target.closest('.problem-detail-chat-current-task-badge');
+    if (!badge) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const taskId = badge.getAttribute('data-task-id');
+      if (taskId) focusWorkspaceOnCurrentTask(taskId);
+    }
+  });
+}
 if (el.toolsChatSend) el.toolsChatSend.addEventListener('click', handleToolsChatSend);
 if (el.toolsChatInput) {
   el.toolsChatInput.addEventListener('keydown', (e) => {
@@ -5061,7 +5079,7 @@ function openProblemDetail(item) {
   updateProblemDetailChatHeaderLabel();
 }
 
-/** 更新问题详情对话区标题栏标签：Agent 模式显示当前任务名称，Ask 模式显示「询问讨论模式」 */
+/** 更新问题详情对话区标题栏标签：Agent 模式显示「当前任务：【当前任务名称】」（任务名蓝底白字），Ask 模式显示「询问讨论模式」 */
 function updateProblemDetailChatHeaderLabel() {
   const labelEl = el.problemDetailChatHeaderLabel;
   if (!labelEl) return;
@@ -5072,7 +5090,69 @@ function updateProblemDetailChatHeaderLabel() {
   const item = currentProblemDetailItem;
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   const firstUncompleted = allTasks.find((t) => !isTaskCompleted(item, t.id));
-  labelEl.textContent = firstUncompleted ? firstUncompleted.name : '';
+  const taskName = firstUncompleted ? firstUncompleted.name : '—';
+  labelEl.textContent = '';
+  labelEl.appendChild(document.createTextNode('当前任务：'));
+  const badge = document.createElement('span');
+  badge.className = 'problem-detail-chat-current-task-badge';
+  badge.textContent = taskName;
+  if (firstUncompleted) badge.setAttribute('data-task-id', firstUncompleted.id);
+  badge.setAttribute('role', 'button');
+  badge.setAttribute('tabindex', '0');
+  labelEl.appendChild(badge);
+}
+
+/** 根据 taskId 将工作区切换到对应大阶段并定位到对应内容卡片（用于点击标题栏当前任务标签） */
+function focusWorkspaceOnCurrentTask(taskId) {
+  const container = el.problemDetailContent;
+  if (!container) return;
+  const item = currentProblemDetailItem;
+  if (!item) return;
+  if (!taskId) return;
+  let cardTaskId = taskId;
+  if (['task5', 'task6'].includes(taskId)) cardTaskId = 'task4';
+  else if (taskId === 'task7') cardTaskId = 'e2e-flow';
+  else if (taskId === 'task8') cardTaskId = 'global-itgap';
+  else if (taskId === 'task9') cardTaskId = 'local-itgap';
+  else if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) cardTaskId = taskId;
+  const currentMajorStage = item.currentMajorStage ?? 0;
+  let targetMajorStage = 0;
+  if (['task1', 'task2', 'task3'].includes(taskId)) targetMajorStage = 0;
+  else if (['task4', 'task5', 'task6'].includes(taskId)) targetMajorStage = 1;
+  else if (['task7', 'task8', 'task9'].includes(taskId)) targetMajorStage = 2;
+  else if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) targetMajorStage = 3;
+  else targetMajorStage = 0;
+  if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) {
+    const substepMap = { task10: 0, task11: 1, task12: 2, task13: 3, task14: 4, task15: 5 };
+    itStrategyPlanViewingSubstep = substepMap[taskId];
+  }
+  const stageChanged = problemDetailViewingMajorStage !== targetMajorStage;
+  if (stageChanged) {
+    problemDetailViewingMajorStage = Math.min(targetMajorStage, currentMajorStage);
+    updateProblemDetailProgressStages(currentMajorStage, problemDetailViewingMajorStage);
+  }
+  const needRender = stageChanged || (targetMajorStage === 3 && ['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId));
+  if (needRender) renderProblemDetailContent();
+  requestAnimationFrame(() => {
+    let card = container.querySelector(`.problem-detail-card[data-task-id="${cardTaskId}"]`);
+    if (!card) card = container.querySelector(`.problem-detail-value-stream-card[data-task-id="${cardTaskId}"]`);
+    if (!card && cardTaskId === 'local-itgap') {
+      card = container.querySelector('.problem-detail-card[data-task-id="local-itgap-trigger"]');
+    }
+    if (!card && ['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(cardTaskId)) {
+      const btn = container.querySelector(`button[data-task-id="${cardTaskId}"]`);
+      if (btn) card = container.querySelector('.problem-detail-workspace-scroll');
+    }
+    if (!card) return;
+    const header = card.querySelector('.problem-detail-card-header');
+    const body = card.querySelector('.problem-detail-card-body');
+    if (header && body && body.hidden) {
+      body.hidden = false;
+      header.classList.remove('problem-detail-card-header-collapsed');
+      header.setAttribute('aria-expanded', 'true');
+    }
+    card.scrollIntoView({ block: 'nearest', behavior: 'smooth', inline: 'nearest' });
+  });
 }
 
 function renderProblemDetailHistory() {

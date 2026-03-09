@@ -814,6 +814,22 @@ body {
   color: var(--text-muted);
 }
 
+/* Agent 模式：当前任务名称蓝底白字标签，可点击定位到工作区对应卡片 */
+.problem-detail-chat-current-task-badge {
+  display: inline-block;
+  padding: 0.2em 0.5em;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 6px;
+  margin-left: 0.15em;
+  cursor: pointer;
+}
+.problem-detail-chat-current-task-badge:hover {
+  filter: brightness(1.1);
+}
+
 .btn-problem-detail-rollback {
   flex-shrink: 0;
   padding: 0.35rem 0.75rem;
