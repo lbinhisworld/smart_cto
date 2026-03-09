@@ -947,6 +947,7 @@ body {
 }
 
 .btn-confirm-primary,
+.btn-confirm-task-start,
 .btn-confirm-discussion-response,
 .btn-confirm-modification-response,
 .btn-confirm-start-global-itgap,
@@ -968,6 +969,7 @@ body {
 }
 
 .btn-confirm-primary:hover:not(:disabled),
+.btn-confirm-task-start:hover:not(:disabled),
 .btn-confirm-discussion-response:hover:not(:disabled),
 .btn-confirm-modification-response:hover:not(:disabled),
 .btn-confirm-start-global-itgap:hover:not(:disabled),
@@ -981,6 +983,7 @@ body {
 }
 
 .btn-confirm-primary:disabled,
+.btn-confirm-task-start:disabled,
 .btn-confirm-discussion-response:disabled,
 .btn-confirm-modification-response:disabled,
 .btn-confirm-start-global-itgap:disabled,
@@ -1656,6 +1659,11 @@ body {
 }
 
 /* BMC 发起确认块 */
+.problem-detail-chat-task-start-notification .problem-detail-chat-task-start-notification-actions {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+}
+
 .problem-detail-chat-bmc-start .problem-detail-chat-bmc-start-actions {
   margin-top: 0.5rem;
   padding-top: 0.5rem;
