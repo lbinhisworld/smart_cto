@@ -1,40 +1,9 @@
 /** 常量与任务定义已移至 js/config.js */
 
+/** 工具知识 / 存储相关已移至 js/storage.js，加载时已执行 loadToolKnowledgeItemsFromStorage */
+
 /** 工具知识：当前选中的工具 ID（用于左侧聊天关联到某个工具卡片） */
 let currentToolKnowledgeId = TOOL_KNOWLEDGE_ITEMS[0]?.id || '';
-
-/** 工具知识：从本地存储加载自定义话题列表，覆盖默认列表 */
-function loadToolKnowledgeItemsFromStorage() {
-  try {
-    const raw = localStorage.getItem(TOOL_KNOWLEDGE_ITEMS_STORAGE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return;
-    TOOL_KNOWLEDGE_ITEMS.length = 0;
-    parsed.forEach((item) => {
-      if (!item || !item.id || !item.name) return;
-      TOOL_KNOWLEDGE_ITEMS.push({
-        id: String(item.id),
-        name: String(item.name),
-        description: typeof item.description === 'string' ? item.description : '',
-      });
-    });
-  } catch {
-    // ignore
-  }
-}
-
-/** 工具知识：将当前话题列表写入本地存储 */
-function saveToolKnowledgeItemsToStorage() {
-  try {
-    localStorage.setItem(TOOL_KNOWLEDGE_ITEMS_STORAGE_KEY, JSON.stringify(TOOL_KNOWLEDGE_ITEMS));
-  } catch {
-    // ignore
-  }
-}
-
-// 尝试从本地存储恢复工具知识话题（无记录时保留默认内置话题）
-loadToolKnowledgeItemsFromStorage();
 
 /** 工具/话题讨论意图管理：调用大模型分析用户对话题的意图与对象 */
 async function analyzeToolDiscussionIntent(text) {
@@ -174,6 +143,7 @@ const el = {
   toolsDetailTimeline: document.getElementById('toolsDetailTimeline'),
   toolsDetailTree: document.getElementById('toolsDetailTree'),
 };
+if (typeof window !== 'undefined') window.el = el;
 
 let lastQueriedCompanyName = '';
 let lastQueryResult = null;
@@ -247,49 +217,7 @@ function debugValueStreamButton() {
 }
 
 /** BASIC_INFO_FIELDS、BMC_FIELDS、LABEL_TO_PATH 已移至 js/config.js */
-
-function buildPageStructureForLLM(record) {
-  if (!record) return '';
-  const basicInfo = record.basicInfo || {};
-  const bmc = record.bmc || {};
-  const metadata = record.metadata || {};
-  const valueStreams = record.valueStreams || [];
-  const vsLines = [];
-  if (valueStreams.length > 0) {
-    valueStreams.forEach((vs, i) => {
-      const vsName = formatValue(vs.name ?? vs.title ?? vs.value_stream_name) || `价值流 ${i + 1}`;
-      vsLines.push(`  - [${i}] 价值流名称: ${vsName}`);
-      const { stages } = parseValueStreamGraph(vs);
-      stages.forEach((stage, si) => {
-        vsLines.push(`      阶段: ${stage.name}`);
-        (stage.steps || []).forEach((step, ji) => {
-          vsLines.push(`        节点: ${step.name}`);
-        });
-      });
-    });
-  } else {
-    vsLines.push('  (暂无)');
-  }
-  const lines = [
-    '=== 当前页面详情结构 ===',
-    '',
-    '【基本信息】',
-    ...BASIC_INFO_FIELDS.map((f) => `  - ${f.label}: ${formatValue(basicInfo[f.key]) || '—'}`),
-    '',
-    '【商业画布 BMC】',
-    ...BMC_FIELDS.map((f) => `  - ${f.label}: ${formatValue(bmc[f.key]) || '—'}`),
-    `  - 综合评述: ${formatValue(bmc.comprehensive_review) || '—'}`,
-    '',
-    '【档案元数据】',
-    `  - 档案 ID: ${formatValue(metadata.analysis_id) || '—'}`,
-    `  - 创建时间: ${formatValue(metadata.created_date) || '—'}`,
-    `  - 更新时间: ${formatValue(metadata.updated_date) || '—'}`,
-    '',
-    '【价值流列表】(含阶段与节点名称)',
-    ...vsLines,
-  ];
-  return lines.join('\n');
-}
+/** buildPageStructureForLLM、renderBasicInfo、renderBMC、renderMetadata、buildDetailHTML 已移至 js/rendering.js */
 
 function showLoading(show) {
   if (el.loading) el.loading.hidden = !show;
@@ -309,49 +237,7 @@ function showResult(show) {
   if (show) debugValueStreamButton?.();
 }
 
-/** 工具知识：读取本地存储的工具知识时间线，返回 { [toolId]: Array<{ content, createdAt }> } */
-function getToolKnowledgeState() {
-  try {
-    const raw = localStorage.getItem(TOOL_KNOWLEDGE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveToolKnowledgeState(state) {
-  try {
-    localStorage.setItem(TOOL_KNOWLEDGE_STORAGE_KEY, JSON.stringify(state || {}));
-  } catch {
-    // ignore
-  }
-}
-
-/** 工具知识：保存左侧话题聊天记录（HTML 结构）到本地 */
-function saveToolsChatMessagesToStorage() {
-  try {
-    const container = el.toolsChatMessages;
-    if (!container) return;
-    localStorage.setItem(TOOL_KNOWLEDGE_CHAT_STORAGE_KEY, container.innerHTML || '');
-  } catch {
-    // ignore
-  }
-}
-
-/** 工具知识：从本地恢复左侧话题聊天记录 */
-function restoreToolsChatMessagesFromStorage() {
-  try {
-    const container = el.toolsChatMessages;
-    if (!container) return;
-    const raw = localStorage.getItem(TOOL_KNOWLEDGE_CHAT_STORAGE_KEY);
-    if (!raw) return;
-    container.innerHTML = raw;
-  } catch {
-    // ignore
-  }
-}
+/** getToolKnowledgeState、saveToolKnowledgeState、saveToolsChatMessagesToStorage、restoreToolsChatMessagesFromStorage 已移至 js/storage.js */
 
 function appendToolKnowledge(toolId, content, contentJson, createdAt) {
   if (!toolId || !content) return;
@@ -565,19 +451,6 @@ function renderToolsKnowledge() {
 }
 
 /** formatValue 已移至 js/utils.js */
-
-function renderBasicInfo(data) {
-  if (!data || !el.basicInfoList) return;
-  el.basicInfoList.innerHTML = BASIC_INFO_FIELDS.map(({ key, label }) => {
-    const raw = data[key];
-    const value = formatValue(raw);
-    if (key === 'official_website' && raw) {
-      return `<dt>${label}</dt><dd><a href="${encodeURI(raw)}" target="_blank" rel="noopener">${escapeHtml(value)}</a></dd>`;
-    }
-    return `<dt>${label}</dt><dd>${escapeHtml(value) || '—'}</dd>`;
-  }).join('');
-}
-
 /** escapeHtml、renderMarkdown 已移至 js/utils.js */
 
 /** 从大模型回复中解析结构化修改建议，返回 { position, modification, reason, positionKey, newValue } 或 null */
@@ -891,288 +764,7 @@ function scrollToTargetAndHighlight(positionOrParsed) {
   }
 }
 
-function renderBMC(data) {
-  if (!data) return;
-  el.bmcGrid.innerHTML = BMC_FIELDS.map(({ key, label }) => {
-    const content = formatValue(data[key]);
-    return `
-      <div class="bmc-block">
-        <h4>${escapeHtml(label)}</h4>
-        <div class="content">${escapeHtml(content)}</div>
-      </div>
-    `;
-  }).join('');
-  const review = formatValue(data.comprehensive_review);
-  el.bmcReview.innerHTML = `
-    <h4>综合评述</h4>
-    <div class="content">${escapeHtml(review)}</div>
-  `;
-}
-
-/** 从可能包含「阶段:xxx 节点:xxx」的字符串中提取纯阶段名称 */
-function extractPureStageName(raw) {
-  const s = formatValue(raw);
-  if (!s) return s;
-  if (s.includes('阶段:') && s.includes('节点:')) {
-    const m = s.match(/阶段:\s*([^节点]+?)(?:\s*节点:|$)/);
-    if (m) return m[1].trim();
-  }
-  if (s.startsWith('阶段:')) {
-    const m = s.match(/阶段:\s*(.+?)(?:\s*节点:|$)/);
-    if (m) return m[1].trim();
-  }
-  return s;
-}
-
-/** 从可能包含「名称 (描述)」或「名称（描述）」的字符串中分离名称与描述，支持全角/半角括号 */
-function extractStepNameAndDesc(stepObj) {
-  const nameRaw = stepObj.name ?? stepObj.title ?? stepObj.step_name ?? stepObj.phase_name ?? stepObj.label ?? stepObj.node_name ?? '';
-  const descRaw = stepObj.description ?? stepObj.desc ?? stepObj.content;
-  const name = formatValue(nameRaw);
-  const desc = formatValue(descRaw);
-  if (desc) return { name, desc };
-  const m = name && name.match(/^(.+?)\s*[（(]([^）)]+)[）)]\s*$/);
-  if (m) return { name: m[1].trim(), desc: m[2].trim() };
-  return { name, desc: '' };
-}
-
-/**
- * 从价值流 JSON 解析出阶段(stages)和环节(steps)结构，用于图形渲染
- * 兼容多种字段名与嵌套结构。阶段标题仅显示阶段名，环节内容显示在环节块中。
- */
-function parseValueStreamGraph(data) {
-  if (!data || typeof data !== 'object') return { stages: [] };
-  let rawStages = data.stages ?? data.phases ?? data.nodes ?? data.value_stream?.stages ?? data.data?.stages ?? [];
-  if (!Array.isArray(rawStages) || rawStages.length === 0) {
-    rawStages = [];
-  }
-  const list = rawStages;
-  return {
-    stages: list.map((s, i) => {
-      if (!s) return { name: `阶段${i + 1}`, steps: [] };
-      if (typeof s === 'string') return { name: extractPureStageName(s), steps: [] };
-      const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? s.nodes ?? s.children ?? [];
-      const steps = Array.isArray(rawSteps) ? rawSteps : [];
-      const rawStageName = s.name ?? s.title ?? s.stage_name ?? s.phase_name ?? s.label ?? s.node_name ?? s.node_label ?? `阶段${i + 1}`;
-      const stageName = extractPureStageName(rawStageName);
-      return {
-        name: stageName,
-        steps: steps.map((st, j) => {
-          if (typeof st === 'string') {
-            const { name: stepName, desc: stepDesc } = extractStepNameAndDesc({ name: st });
-            return { name: stepName || st, desc: stepDesc, role: '', duration: '', itStatusLabel: '', painPoint: '' };
-          }
-          const { name: stepName, desc: stepDesc } = extractStepNameAndDesc(st);
-          const role = formatValue(st.role ?? st.executor ?? st.执行角色) || '';
-          const duration = formatValue(st.duration ?? st.lead_time ?? st.预估耗时 ?? st.提前期) || '';
-          const itStatus = st.itStatus ?? st.it_status;
-          const itStatusLabel = itStatus && typeof itStatus === 'object'
-            ? (itStatus.type === '手工' ? `手工-${itStatus.detail || '—'}` : itStatus.type === '系统' ? `系统-${itStatus.detail || '—'}` : '')
-            : (typeof itStatus === 'string' ? itStatus : '');
-          const rawPainPoint = formatValue(st.painPoint ?? st.pain_point) || '';
-          const trimmed = rawPainPoint.trim();
-          const isNoPainPoint = /^(无明显痛点|无痛点|暂无|无)$/i.test(trimmed) || /^无明显痛点/i.test(trimmed);
-          const painPoint = isNoPainPoint ? '' : rawPainPoint;
-          return {
-            name: stepName || `环节${j + 1}`,
-            desc: stepDesc,
-            role,
-            duration,
-            itStatusLabel: itStatusLabel || '',
-            painPoint,
-          };
-        }),
-      };
-    }),
-  };
-}
-
-/**
- * 渲染价值流图形视图 HTML：阶段→阶段（箭头），阶段内 环节→环节（箭头）
- */
-function renderValueStreamViewHTML(item) {
-  const { stages } = parseValueStreamGraph(item);
-  if (stages.length === 0) {
-    return '<p class="vs-view-placeholder">暂无阶段数据，无法渲染图形</p>';
-  }
-
-  const stagesHtml = stages.map((stage, si) => {
-    const stepsHtml = stage.steps.length === 0
-      ? '<div class="vs-step-node vs-step-empty">—</div>'
-      : stage.steps.map((step, ji) => {
-          const roleDurationHtml = (step.role || step.duration)
-            ? `<div class="vs-step-meta">
-                ${step.role ? `<span class="vs-step-meta-chip vs-step-meta-role">${escapeHtml(step.role)}</span>` : ''}
-                ${step.duration ? `<span class="vs-step-meta-chip vs-step-meta-duration">${escapeHtml(step.duration)}</span>` : ''}
-              </div>`
-            : '';
-          const itStatusHtml = step.itStatusLabel
-            ? `<div class="vs-step-meta"><span class="vs-step-meta-chip vs-step-meta-it-status">IT现状：${escapeHtml(step.itStatusLabel)}</span></div>`
-            : '';
-          const painPointHtml = step.painPoint
-            ? `<div class="vs-step-meta"><div class="vs-step-pain-point-card">${escapeHtml(step.painPoint)}</div></div>`
-            : '';
-          return `
-          <div class="vs-step-node" data-vs-step-name="${escapeHtml(step.name)}">
-            <span class="vs-step-name">${escapeHtml(step.name)}</span>
-            ${step.desc ? `<span class="vs-step-desc">${escapeHtml(step.desc)}</span>` : ''}
-            ${roleDurationHtml}
-            ${itStatusHtml}
-            ${painPointHtml}
-          </div>
-          ${ji < stage.steps.length - 1 ? '<div class="vs-arrow-inner" aria-hidden="true">↓</div>' : ''}
-        `;
-        }).join('');
-
-    return `
-      <div class="vs-graph-stage" data-stage="${si}" data-vs-stage-name="${escapeHtml(stage.name)}">
-        <div class="vs-stage-node" data-vs-stage-name="${escapeHtml(stage.name)}">
-          <div class="vs-stage-name">${escapeHtml(stage.name)}</div>
-          <div class="vs-steps-chain">${stepsHtml}</div>
-        </div>
-      </div>
-      ${si < stages.length - 1 ? '<div class="vs-arrow-outer" aria-hidden="true">→</div>' : ''}
-    `;
-  }).join('');
-
-  return `<div class="vs-graph">${stagesHtml}</div>`;
-}
-
-/**
- * 渲染端到端工作流图：读取价值流 JSON，按环节发生顺序从左到右排列圆角矩形卡片，卡片风格与价值流图一致
- */
-function renderEndToEndFlowHTML(valueStream) {
-  const { stages } = parseValueStreamGraph(valueStream);
-  const allSteps = stages.flatMap((s) => s.steps);
-  if (allSteps.length === 0) {
-    return '<p class="vs-view-placeholder">暂无环节数据，无法渲染端到端流程</p>';
-  }
-  const stepCardsHtml = allSteps.map((step, i) => {
-    const roleDurationHtml = (step.role || step.duration)
-      ? `<div class="vs-step-meta">
-          ${step.role ? `<span class="vs-step-meta-chip vs-step-meta-role">${escapeHtml(step.role)}</span>` : ''}
-          ${step.duration ? `<span class="vs-step-meta-chip vs-step-meta-duration">${escapeHtml(step.duration)}</span>` : ''}
-        </div>`
-      : '';
-    const itStatusHtml = step.itStatusLabel
-      ? `<div class="vs-step-meta"><span class="vs-step-meta-chip vs-step-meta-it-status">IT现状：${escapeHtml(step.itStatusLabel)}</span></div>`
-      : '';
-    const painPointHtml = step.painPoint
-      ? `<div class="vs-step-meta"><div class="vs-step-pain-point-card">${escapeHtml(step.painPoint)}</div></div>`
-      : '';
-    return `
-      <div class="vs-e2e-step-card vs-step-node" data-vs-step-index="${i}">
-        <div class="vs-e2e-step-name-block">
-          <span class="vs-e2e-step-name-text">${escapeHtml(step.name)}</span>
-        </div>
-        ${step.desc ? `<span class="vs-step-desc">${escapeHtml(step.desc)}</span>` : ''}
-        ${roleDurationHtml}
-        ${itStatusHtml}
-        ${painPointHtml}
-      </div>
-      ${i < allSteps.length - 1 ? '<div class="vs-arrow-outer vs-e2e-arrow" aria-hidden="true">→</div>' : ''}
-    `;
-  }).join('');
-  return `<div class="vs-e2e-flow">${stepCardsHtml}</div>`;
-}
-
-/**
- * 将 API 返回解析为价值流列表（数组，每项含 name 及完整 JSON）
- */
-function getValueStreamList(data) {
-  if (data == null) return [];
-  if (Array.isArray(data)) return data;
-  const raw = data.value_streams ?? data.streams ?? data.list ?? data.data;
-  if (Array.isArray(raw)) return raw;
-  if (data.stages != null || data.phases != null) return [data];
-  if (raw != null && typeof raw === 'object') return [raw];
-  return [];
-}
-
-/** 当前价值流列表，用于展开时按索引渲染对应项的 view */
-let currentValueStreamList = [];
-
-/**
- * 渲染价值流列表：可展开卡片，展开时按索引惰性渲染 view，确保每项使用正确数据
- */
-function renderValueStreamList(list) {
-  const container = el.valueStreamContent;
-  currentValueStreamList = list || [];
-  if (!list || list.length === 0) {
-    container.innerHTML = '<p class="vs-empty">暂无价值流数据</p>';
-    return;
-  }
-  container.innerHTML = list.map((item, i) => {
-    const name = formatValue(item.name ?? item.title ?? item.value_stream_name ?? `价值流 ${i + 1}`);
-    const jsonStr = JSON.stringify(item, null, 2);
-    return `
-      <div class="vs-card" data-index="${i}">
-        <button type="button" class="vs-card-header" aria-expanded="false" aria-controls="vs-body-${i}">
-          <span class="vs-card-name">${escapeHtml(name)}</span>
-          <span class="vs-card-chevron" aria-hidden="true">▼</span>
-        </button>
-        <div class="vs-card-body" id="vs-body-${i}" hidden>
-          <div class="vs-tabs">
-            <button type="button" class="vs-tab vs-tab-active" data-tab="view">view</button>
-            <button type="button" class="vs-tab" data-tab="json">json</button>
-          </div>
-          <div class="vs-tab-panel vs-tab-panel-view" data-panel="view" data-rendered="false">
-            <p class="vs-view-placeholder">展开后加载…</p>
-          </div>
-          <div class="vs-tab-panel vs-tab-panel-json" data-panel="json" hidden>
-            <pre class="vs-json">${escapeHtml(jsonStr)}</pre>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  container.querySelectorAll('.vs-card-header').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const card = btn.closest('.vs-card');
-      const body = card.querySelector('.vs-card-body');
-      const expanded = body.hidden;
-      body.hidden = !expanded;
-      btn.setAttribute('aria-expanded', String(!expanded));
-      card.classList.toggle('vs-card-expanded', !expanded);
-
-      if (expanded) {
-        const viewPanel = card.querySelector('.vs-tab-panel-view');
-        if (viewPanel && viewPanel.dataset.rendered !== 'true') {
-          const idx = parseInt(card.dataset.index, 10);
-          const item = currentValueStreamList[idx];
-          if (item) {
-            viewPanel.innerHTML = renderValueStreamViewHTML(item);
-            viewPanel.dataset.rendered = 'true';
-          }
-        }
-      }
-    });
-  });
-
-  container.querySelectorAll('.vs-tab').forEach((tab) => {
-    tab.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const card = tab.closest('.vs-card');
-      const targetTab = tab.dataset.tab;
-      card.querySelectorAll('.vs-tab').forEach((t) => t.classList.remove('vs-tab-active'));
-      card.querySelectorAll('.vs-tab-panel').forEach((p) => { p.hidden = p.dataset.panel !== targetTab; });
-      tab.classList.add('vs-tab-active');
-
-      if (targetTab === 'view') {
-        const viewPanel = card.querySelector('.vs-tab-panel-view');
-        if (viewPanel) {
-          const idx = parseInt(card.dataset.index, 10);
-          const item = currentValueStreamList[idx];
-          if (item) {
-            viewPanel.innerHTML = renderValueStreamViewHTML(item);
-            viewPanel.dataset.rendered = 'true';
-          }
-        }
-      }
-    });
-  });
-}
+/** extractPureStageName、extractStepNameAndDesc、parseValueStreamGraph、renderValueStreamViewHTML、renderEndToEndFlowHTML、getValueStreamList、currentValueStreamList、renderValueStreamList 已移至 js/valueStream.js */
 
 async function loadValueStreamList() {
   if (!lastQueriedCompanyName) return;
@@ -1201,19 +793,6 @@ async function loadValueStreamList() {
   } finally {
     el.btnValueStreamList.disabled = false;
   }
-}
-
-function renderMetadata(data) {
-  if (!data) return;
-  const items = [
-    { key: 'analysis_id', label: '档案 ID' },
-    { key: 'created_date', label: '创建时间' },
-    { key: 'updated_date', label: '更新时间' },
-  ];
-  el.metadataList.innerHTML = items.map(({ key, label }) => {
-    const value = formatValue(data[key]);
-    return `<dt>${label}</dt><dd>${escapeHtml(value) || '—'}</dd>`;
-  }).join('');
 }
 
 async function query() {
@@ -1334,22 +913,7 @@ function selectSuggestion(record) {
   openDetail(record);
 }
 
-function getSavedAnalyses() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveAnalysis(record) {
-  const list = getSavedAnalyses();
-  const idx = list.findIndex((r) => (r.companyName || '').trim() === (record.companyName || '').trim());
-  if (idx >= 0) list[idx] = record;
-  else list.push(record);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-}
+/** getSavedAnalyses、saveAnalysis 已移至 js/storage.js */
 
 function saveCurrent() {
   if (!lastQueryResult) {
@@ -1374,11 +938,7 @@ function saveCurrent() {
   alert('已存储成功');
 }
 
-function saveRouteState(view, params) {
-  try {
-    sessionStorage.setItem(ROUTE_STORAGE_KEY, JSON.stringify({ view, params: params || {} }));
-  } catch (_) {}
-}
+/** saveRouteState 已移至 js/storage.js */
 
 function restoreRouteState() {
   try {
@@ -1546,7 +1106,8 @@ function expandAndRefreshValueStreamCard(vsIndex) {
 
 function setupDetailValueStreamEvents() {
   if (!el.detailResult) return;
-  currentValueStreamList = currentDetailRecord?.valueStreams || [];
+  currentValueStreamList.length = 0;
+  (currentDetailRecord?.valueStreams || []).forEach((x) => currentValueStreamList.push(x));
   el.detailResult.querySelectorAll('.vs-card-header').forEach((btn) => {
     btn.addEventListener('click', () => {
       const card = btn.closest('.vs-card');
@@ -1773,106 +1334,6 @@ function saveChatToRecord() {
     currentDetailRecord.chatHistory = [...chatHistory];
     saveAnalysis(currentDetailRecord);
   }
-}
-
-function buildDetailHTML(record) {
-  const basicInfo = record.basicInfo || {};
-  const bmc = record.bmc || {};
-  const metadata = record.metadata || {};
-  const valueStreams = record.valueStreams || [];
-
-  const basicHtml = BASIC_INFO_FIELDS.map(({ key, label }) => {
-    const raw = basicInfo[key];
-    const value = formatValue(raw);
-    const ddContent = key === 'official_website' && raw
-      ? `<a href="${encodeURI(raw)}" target="_blank" rel="noopener">${escapeHtml(value)}</a>`
-      : escapeHtml(value) || '—';
-    return `<div class="info-grid-cell" data-modify-target="${escapeHtml(label)}"><dt>${label}</dt><dd>${ddContent}</dd></div>`;
-  }).join('');
-
-  const bmcHtml = BMC_FIELDS.map(({ key, label }) => {
-    const content = formatValue(bmc[key]);
-    return `<div class="bmc-block" data-modify-target="${escapeHtml(label)}"><h4>${escapeHtml(label)}</h4><div class="content">${escapeHtml(content)}</div></div>`;
-  }).join('');
-  const review = formatValue(bmc.comprehensive_review);
-
-  const bmcReviewHtml = `<div class="bmc-review" data-modify-target="综合评述"><h4>综合评述</h4><div class="content">${escapeHtml(review)}</div></div>`;
-
-  const metaHtml = [
-    { key: 'analysis_id', label: '档案 ID' },
-    { key: 'created_date', label: '创建时间' },
-    { key: 'updated_date', label: '更新时间' },
-  ]
-    .map(({ key, label }) => {
-      const value = formatValue(metadata[key]);
-      return `<dt>${label}</dt><dd>${escapeHtml(value) || '—'}</dd>`;
-    })
-    .join('');
-
-  let valueStreamHtml = '<p class="vs-empty">暂无价值流数据</p>';
-  if (valueStreams.length > 0) {
-    valueStreamHtml = valueStreams
-      .map((item, i) => {
-        const name = formatValue(item.name ?? item.title ?? item.value_stream_name ?? `价值流 ${i + 1}`);
-        const jsonStr = JSON.stringify(item, null, 2);
-        return `
-          <div class="vs-card" data-index="${i}" data-vs-index="${i}" data-vs-name="${escapeHtml(name)}">
-            <button type="button" class="vs-card-header" aria-expanded="false">
-              <span class="vs-card-name">${escapeHtml(name)}</span>
-              <span class="vs-card-chevron" aria-hidden="true">▼</span>
-            </button>
-            <div class="vs-card-body" hidden>
-              <div class="vs-tabs">
-                <button type="button" class="vs-tab vs-tab-active" data-tab="view">view</button>
-                <button type="button" class="vs-tab" data-tab="json">json</button>
-              </div>
-              <div class="vs-tab-panel vs-tab-panel-view" data-panel="view" data-rendered="false">
-                <p class="vs-view-placeholder">展开后加载…</p>
-              </div>
-              <div class="vs-tab-panel vs-tab-panel-json" data-panel="json" hidden>
-                <div class="vs-json-toolbar">
-                  <button type="button" class="vs-json-edit-btn">编辑</button>
-                  <div class="vs-json-edit-actions" hidden>
-                    <button type="button" class="vs-json-undo-btn">撤回</button>
-                    <button type="button" class="vs-json-save-btn">保存</button>
-                    <button type="button" class="vs-json-cancel-btn">取消</button>
-                  </div>
-                </div>
-                <pre class="vs-json">${escapeHtml(jsonStr)}</pre>
-                <textarea class="vs-json-edit" hidden spellcheck="false"></textarea>
-                <p class="vs-json-error" hidden></p>
-              </div>
-            </div>
-          </div>`;
-      })
-      .join('');
-  }
-
-  return `
-    <section class="basic-info section-card">
-      <div class="basic-info-header">
-        <h2>基本信息</h2>
-        <button type="button" class="btn-basic-info-json">生成 JSON</button>
-      </div>
-      <div class="info-grid">${basicHtml}</div>
-    </section>
-    <section class="bmc-section section-card">
-      <div class="bmc-section-header">
-        <h2>商业画布 (BMC)</h2>
-        <button type="button" class="btn-bmc-json">生成 JSON</button>
-      </div>
-      <div class="bmc-grid">${bmcHtml}</div>
-      ${bmcReviewHtml}
-    </section>
-    <section class="value-stream-section section-card">
-      <h2>价值流列表</h2>
-      <div class="value-stream-content">${valueStreamHtml}</div>
-    </section>
-    <section class="metadata section-card muted">
-      <h3>档案元数据</h3>
-      <dl class="info-grid compact">${metaHtml}</dl>
-    </section>
-  `;
 }
 
 if (el.btnQuery) el.btnQuery.addEventListener('click', query);
@@ -5267,281 +4728,7 @@ async function handleParseClick() {
   }
 }
 
-function getDigitalProblems() {
-  try {
-    const raw = localStorage.getItem(DIGITAL_PROBLEMS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveDigitalProblem(item) {
-  const list = getDigitalProblems();
-  list.unshift({ ...item, createdAt: new Date().toISOString() });
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function removeDigitalProblem(index) {
-  const list = getDigitalProblems();
-  if (index < 0 || index >= list.length) return;
-  list.splice(index, 1);
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemBasicInfo(createdAt, basicInfo) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const completed = item.completedStages || [];
-  if (!completed.includes(0)) completed.push(0);
-  completed.sort((a, b) => a - b);
-  list[idx] = { ...item, basicInfo, completedStages: completed };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemBmc(createdAt, bmc) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const completed = item.completedStages || [];
-  if (!completed.includes(1)) completed.push(1);
-  completed.sort((a, b) => a - b);
-  list[idx] = { ...item, bmc, completedStages: completed };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemRequirementLogic(createdAt, requirementLogic) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const completed = item.completedStages || [];
-  if (!completed.includes(2)) completed.push(2);
-  completed.sort((a, b) => a - b);
-  list[idx] = { ...item, requirementLogic, completedStages: completed };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemMajorStage(createdAt, majorStage) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  list[idx] = { ...item, currentMajorStage: majorStage };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemItGapCompletedStages(createdAt, stages) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  list[idx] = { ...item, itGapCompletedStages: stages };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemGlobalItGapAnalysis(createdAt, analysisJson) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const itGapCompleted = item.itGapCompletedStages || [];
-  if (!itGapCompleted.includes(1)) itGapCompleted.push(1);
-  itGapCompleted.sort((a, b) => a - b);
-  list[idx] = { ...item, globalItGapAnalysisJson: analysisJson, itGapCompletedStages: itGapCompleted };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-/** 清除全局 ITGap 分析及所有局部 ITGap 分析（工作区卡片及任务过程日志），流程状态重置到全局 ITGap 分析阶段 */
-function clearDigitalProblemGlobalItGapAnalysis(createdAt) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const itGapCompleted = (item.itGapCompletedStages || []).filter((x) => x !== 1 && x !== 2).sort((a, b) => a - b);
-  const { globalItGapAnalysisJson, localItGapAnalyses, localItGapSessions, ...rest } = item;
-  list[idx] = { ...rest, itGapCompletedStages: itGapCompleted };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-/** 保存局部 ITGap 分析 sessions 到问题记录 */
-function updateDigitalProblemLocalItGapSessions(createdAt, sessions) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  list[idx] = { ...item, localItGapSessions: sessions };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-/** 追加局部 ITGap 分析到工作区并更新 itGapCompletedStages；同时更新 localItGapSessions 中对应 session */
-function updateDigitalProblemLocalItGapAnalysis(createdAt, stepName, stepIndex, analysisJson, analysisMarkdown) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const analyses = item.localItGapAnalyses || [];
-  const existing = analyses.findIndex((a) => a.stepIndex === stepIndex);
-  const entry = { stepName, stepIndex, analysisJson };
-  const newAnalyses = existing >= 0 ? analyses.map((a, i) => (i === existing ? entry : a)) : [...analyses, entry].sort((a, b) => a.stepIndex - b.stepIndex);
-  const itGapCompleted = item.itGapCompletedStages || [];
-  if (!itGapCompleted.includes(2)) itGapCompleted.push(2);
-  itGapCompleted.sort((a, b) => a - b);
-  const sessions = item.localItGapSessions || [];
-  if (sessions.length > 0) {
-    const newSessions = sessions.map((s) =>
-      s.stepIndex === stepIndex ? { ...s, analysisJson, analysisMarkdown: analysisMarkdown || s.analysisMarkdown } : s
-    );
-    list[idx] = { ...item, localItGapAnalyses: newAnalyses, localItGapSessions: newSessions, itGapCompletedStages: itGapCompleted };
-  } else {
-    list[idx] = { ...item, localItGapAnalyses: newAnalyses, itGapCompletedStages: itGapCompleted };
-  }
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemValueStream(createdAt, valueStream) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const wfCompleted = item.workflowAlignCompletedStages || [];
-  if (!wfCompleted.includes(0)) wfCompleted.push(0);
-  wfCompleted.sort((a, b) => a - b);
-  list[idx] = { ...item, valueStream, workflowAlignCompletedStages: wfCompleted };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemValueStreamItStatus(createdAt, valueStream) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const wfCompleted = item.workflowAlignCompletedStages || [];
-  if (!wfCompleted.includes(0)) wfCompleted.push(0);
-  if (!wfCompleted.includes(1)) wfCompleted.push(1);
-  wfCompleted.sort((a, b) => a - b);
-  list[idx] = { ...item, valueStream, workflowAlignCompletedStages: wfCompleted };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function updateDigitalProblemValueStreamPainPoint(createdAt, valueStream) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const wfCompleted = item.workflowAlignCompletedStages || [];
-  if (!wfCompleted.includes(0)) wfCompleted.push(0);
-  if (!wfCompleted.includes(1)) wfCompleted.push(1);
-  if (!wfCompleted.includes(2)) wfCompleted.push(2);
-  wfCompleted.sort((a, b) => a - b);
-  list[idx] = { ...item, valueStream, workflowAlignCompletedStages: wfCompleted };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-/** 撤销痛点标注：移除价值流图中的痛点，并将需求单状态回退至 IT 现状标注 */
-function rollbackValueStreamPainPoint(createdAt) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const valueStream = item.valueStream;
-  if (!valueStream || valueStream.raw) return;
-  const rawStages = valueStream.stages ?? valueStream.phases ?? valueStream.nodes ?? [];
-  if (!Array.isArray(rawStages)) return;
-  const stages = rawStages.map((s) => {
-    if (!s || typeof s !== 'object') return s;
-    const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
-    const steps = rawSteps.map((st) => {
-      if (typeof st !== 'object' || st == null) return st;
-      const { painPoint, pain_point, ...rest } = st;
-      return rest;
-    });
-    return { ...s, steps };
-  });
-  const vsWithoutPain = { ...valueStream, stages };
-  const wfCompleted = (item.workflowAlignCompletedStages || []).filter((x) => x !== 2).sort((a, b) => a - b);
-  list[idx] = { ...item, valueStream: vsWithoutPain, workflowAlignCompletedStages: wfCompleted };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function deleteDigitalProblemRequirementLogic(createdAt) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  const item = list[idx];
-  const { requirementLogic, ...rest } = item;
-  const completedStages = (item.completedStages || []).filter((x) => x !== 2).sort((a, b) => a - b);
-  list[idx] = { ...rest, completedStages };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function getProblemDetailChats() {
-  try {
-    const raw = localStorage.getItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveProblemDetailChat(createdAt, messages) {
-  const chats = getProblemDetailChats();
-  chats[createdAt] = messages;
-  localStorage.setItem(PROBLEM_DETAIL_CHATS_STORAGE_KEY, JSON.stringify(chats));
-}
-
-function getOperationHistory() {
-  try {
-    const raw = localStorage.getItem(OPERATION_HISTORY_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function pushOperationToHistory(createdAt, type, snapshot, chatLengthBefore) {
-  const all = getOperationHistory();
-  if (!all[createdAt]) all[createdAt] = [];
-  all[createdAt].push({ type, timestamp: Date.now(), snapshot, chatLengthBefore });
-  localStorage.setItem(OPERATION_HISTORY_STORAGE_KEY, JSON.stringify(all));
-}
-
-function popOperationFromHistory(createdAt) {
-  const all = getOperationHistory();
-  const stack = all[createdAt];
-  if (!Array.isArray(stack) || stack.length === 0) return null;
-  const entry = stack.pop();
-  all[createdAt] = stack;
-  localStorage.setItem(OPERATION_HISTORY_STORAGE_KEY, JSON.stringify(all));
-  return entry;
-}
-
-/** 将快照还原到数字化问题列表 */
-function restoreItemFromSnapshot(createdAt, snapshot) {
-  const list = getDigitalProblems();
-  const idx = list.findIndex((it) => it.createdAt === createdAt);
-  if (idx < 0) return;
-  list[idx] = { ...snapshot, createdAt };
-  localStorage.setItem(DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
-}
-
-function getTaskTrackingData() {
-  try {
-    const raw = localStorage.getItem(TASK_TRACKING_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveTaskTrackingData(createdAt, data) {
-  const all = getTaskTrackingData();
-  all[createdAt] = data;
-  localStorage.setItem(TASK_TRACKING_STORAGE_KEY, JSON.stringify(all));
-}
+/** getDigitalProblems、saveDigitalProblem、removeDigitalProblem、updateDigitalProblem*、getProblemDetailChats、saveProblemDetailChat、getOperationHistory、pushOperationToHistory、popOperationFromHistory、restoreItemFromSnapshot、getTaskTrackingData、saveTaskTrackingData 已移至 js/storage.js */
 
 /** 根据聊天消息类型推断所属任务 */
 function inferTaskIdFromMessage(msg) {

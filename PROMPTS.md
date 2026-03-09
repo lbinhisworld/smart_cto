@@ -61,8 +61,9 @@
 ## 3. 企业信息与商业画布修改助手
 
 **触发入口**：需求理解页「客户基本信息」或「商业模式画布 BMC」卡片详情中，用户点击「修改」按钮后，在对话输入框发送消息  
-**函数**：`fetchModificationFromLLM()`  
-**用途**：根据用户修改需求，分析当前页面结构，输出结构化的修改建议（JSON 格式）。
+**函数**：`fetchModificationFromLLM()`（main.js）  
+**用途**：根据用户修改需求，分析当前页面结构，输出结构化的修改建议（JSON 格式）。  
+**代码参考**：「当前页面详情结构」由 `js/rendering.js` 的 `buildPageStructureForLLM(record)` 生成。
 
 ### System Prompt
 
@@ -572,7 +573,7 @@ ${tasksDesc}
 ${context}
 ```
 
-其中 `context` 由 `buildIntentExtractionContext()` 构建，包含【沟通历史】与【当前页面内容结构】。
+其中 `context` 由 main.js 的 `buildIntentExtractionContext()` 构建，包含【沟通历史】与【当前页面内容结构】；【当前页面内容结构】由 `js/rendering.js` 的 `buildPageStructureForLLM(currentDetailRecord)` 生成。
 
 ### 业务规则
 

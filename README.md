@@ -65,20 +65,41 @@ npx serve .
 
 ---
 
-## 文件说明
+## 文件说明与前端模块
+
+### 核心文件
 
 | 文件 | 说明 |
 |------|------|
 | `index.html` | 页面结构：首页录入、画布搜索与结果、列表、问题详情（工作区 + 聊天区）、任务追踪等 |
 | `styles.css` | 样式与 BMC 九宫格、价值流、工作区卡片、沟通历史任务标题栏颜色（已完成=绿色、进行中=蓝色）等布局 |
-| `js/config.js` | 常量、API 地址、存储键、任务定义（FOLLOW_TASKS、ITGAP_HISTORY_TASKS、IT_STRATEGY_TASKS、TASK_EXTRA_FIELDS 等） |
+| `config.js` / `config.local.js` | 根目录配置：`config.local.js` 中配置 DEEPSEEK_API_KEY 等（已 gitignore） |
+| `main.js` | 入口：路由、业务逻辑、意图提炼、工作区与聊天区、任务阶段与过程日志、沟通历史渲染等（渲染细节已拆至 js 子模块） |
+
+### JS 模块（`js/` 目录）
+
+| 文件 | 说明 |
+|------|------|
+| `js/config.js` | 常量、API 地址、存储键、任务定义（FOLLOW_TASKS、ITGAP_HISTORY_TASKS、IT_STRATEGY_TASKS、TASK_EXTRA_FIELDS、BASIC_INFO_FIELDS、BMC_FIELDS、LABEL_TO_PATH 等） |
 | `js/utils.js` | 工具函数：formatValue、escapeHtml、renderMarkdown、getTimeStr、formatHistoryTime、formatChatTime、slugifyTopicName |
 | `js/api.js` | DeepSeek 大模型调用：DEEPSEEK_API_* 配置、fetchDeepSeekChat、buildLlmMetaHtml |
-| `main.js` | 路由、业务逻辑、意图提炼、工作区与聊天区、任务阶段与过程日志、沟通历史渲染等 |
+| `js/storage.js` | 本地存储封装：存档列表、知识库、数字化问题与问题详情聊天、任务追踪、操作历史等读写（getSavedAnalyses、saveAnalysis、getDigitalProblems、updateDigitalProblemBmc、getProblemDetailChat 等） |
+| `js/valueStream.js` | 价值流解析与渲染：extractPureStageName、parseValueStreamGraph、renderValueStreamViewHTML、renderEndToEndFlowHTML、getValueStreamList、currentValueStreamList、renderValueStreamList |
+| `js/rendering.js` | 详情与查询结果渲染：buildPageStructureForLLM（供意图提炼的页面结构文本）、renderBasicInfo、renderBMC、renderMetadata、buildDetailHTML（详情页整块 HTML） |
+
+### 脚本加载顺序（index.html）
+
+加载顺序需保证依赖前置：`config.js` → `config.local.js` → `js/config.js` → `js/utils.js` → `js/api.js` → `js/storage.js` → `js/valueStream.js` → `js/rendering.js` → `main.js`。
+
+### 文档
+
+| 文件 | 说明 |
+|------|------|
 | `README.md` | 本说明 |
 | `PROMPTS.md` | 所有大模型提示词汇总（解析、BMC、需求逻辑、价值流、IT 现状/痛点、ITGap、意图提炼等） |
 | `对话模型管理.md` | 意图类型、过程日志纳入/展示规则、ITGap 流程与代码位置 |
 | `数字化问题跟进阶段设计.md` | 大阶段与任务定义、评价体系、阶段切换与聊天区提示块设计 |
+| `docs/knowledge-base-design.md` | 知识库功能设计（话题、时间线、意图与存储） |
 
 ---
 
@@ -87,3 +108,4 @@ npx serve .
 - 大模型提示词与 API 配置：[PROMPTS.md](./PROMPTS.md)
 - 意图类型与过程日志：[对话模型管理.md](./对话模型管理.md)
 - 阶段与任务设计：[数字化问题跟进阶段设计.md](./数字化问题跟进阶段设计.md)
+- 知识库功能设计：[docs/knowledge-base-design.md](./docs/knowledge-base-design.md)

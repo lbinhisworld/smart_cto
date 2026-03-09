@@ -294,3 +294,17 @@
   - 增加搜索与过滤能力（按话题名、内容关键字、时间范围等）。
   - 将知识库导出为 Markdown / JSON，方便在外部文档中复用。
 
+---
+
+### 8. 相关代码位置
+
+| 功能 | 模块/函数 | 文件 |
+|------|-----------|------|
+| 存储键与话题常量 | TOOL_KNOWLEDGE_STORAGE_KEY、TOOL_KNOWLEDGE_ITEMS_STORAGE_KEY、TOOL_KNOWLEDGE_CHAT_STORAGE_KEY、TOOL_KNOWLEDGE_ITEMS | js/config.js |
+| 知识库底层存储 | getToolKnowledgeState、saveToolKnowledgeState、saveToolKnowledgeItemsToStorage、loadToolKnowledgeItemsFromStorage；restoreToolsChatMessagesFromStorage、saveToolsChatMessagesToStorage | js/storage.js |
+| 话题名称 slug | slugifyTopicName | js/utils.js |
+| 时间线追加与修改应用 | appendToolKnowledge、applyToolKnowledgeUpdates | main.js |
+| 意图分析 | analyzeToolDiscussionIntent | main.js |
+| 讨论回复与修改方案 | fetchToolDiscussionReply、fetchToolModificationUpdates、summarizeToolDiscussionContent | main.js |
+| 知识库 UI 与确认逻辑 | renderToolsKnowledge、renderToolsTopicDetail、handleToolsChatSend（意图确认、讨论/修改/增加/补充/删除流程） | main.js |
+
