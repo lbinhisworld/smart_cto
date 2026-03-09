@@ -1734,14 +1734,6 @@ if (el.problemDetailChatMessages) {
             confirmed: true,
           };
           saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
-          const rolePermissionModelJson = parseRolePermissionModel(content);
-          pushAndSaveProblemDetailChat({
-            type: 'rolePermissionConfirmedLog',
-            role: 'system',
-            content: '已确认角色与权限模型推演',
-            timestamp: getTimeStr(),
-            rolePermissionModelJson,
-          });
           renderProblemDetailContent();
           requestAnimationFrame(() => showNextTaskStartNotification());
         }
@@ -1828,7 +1820,6 @@ if (el.problemDetailChatMessages) {
         confirmE2eJsonBtn.disabled = true;
         confirmE2eJsonBtn.textContent = '已确认';
         pushAndSaveProblemDetailChat({ role: 'user', content: '确认', timestamp: getTimeStr() });
-        pushAndSaveProblemDetailChat({ type: 'e2eFlowGeneratedLog', content: '已生成端到端流程 JSON 数据', timestamp: getTimeStr(), taskLabel: '端到端流程绘制', valueStreamJson: valueStream });
         const container = el.problemDetailChatMessages;
         container.innerHTML = '';
         renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
@@ -1882,7 +1873,6 @@ if (el.problemDetailChatMessages) {
         confirmGlobalItGapStructuredBtn.textContent = '已确认';
         updateDigitalProblemGlobalItGapAnalysis(item.createdAt, analysisJson);
         currentProblemDetailItem = { ...item, globalItGapAnalysisJson: analysisJson };
-        pushAndSaveProblemDetailChat({ type: 'globalItGapAnalysisLog', content: '已生成全局 ITGap 分析', timestamp: getTimeStr(), taskLabel: '全局 ITGap 分析', analysisJson });
         renderProblemDetailContent();
         const container = el.problemDetailChatMessages;
         container.innerHTML = '';
@@ -1964,7 +1954,6 @@ if (el.problemDetailChatMessages) {
         const list = getDigitalProblems();
         const updated = list.find((it) => it.createdAt === item.createdAt);
         if (updated) currentProblemDetailItem = updated;
-        pushAndSaveProblemDetailChat({ type: 'localItGapAnalysisLog', content: `已生成环节「${stepName}」的局部 ITGap 分析`, timestamp: getTimeStr(), taskLabel: '局部 ITGap 分析', stepName, stepIndex, analysisJson });
         renderProblemDetailContent();
         const container = el.problemDetailChatMessages;
         container.innerHTML = '';
@@ -6007,7 +5996,6 @@ async function runLocalItGapAnalysisForNextStep() {
       <div class="problem-detail-chat-local-itgap-card-meta">${llmMetaHtml}</div>`;
     container.appendChild(cardBlock);
     pushAndSaveProblemDetailChat({ type: 'localItGapAnalysisCard', data: analysisJson, stepName, stepIndex: nextIndex, timestamp: getTimeStr(), confirmed: true, llmMeta });
-    pushAndSaveProblemDetailChat({ type: 'localItGapAnalysisLog', content: `已生成环节「${stepName}」的局部 ITGap 分析`, timestamp: getTimeStr(), taskLabel: '局部 ITGap 分析', stepName, stepIndex: nextIndex, analysisJson, llmMeta });
     container.scrollTop = container.scrollHeight;
     renderProblemDetailContent();
     container.innerHTML = '';
