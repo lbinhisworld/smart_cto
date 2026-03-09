@@ -2586,6 +2586,42 @@ body {
   margin-bottom: 0.5rem;
 }
 
+/* 任务详情 / 过程日志 双 tab */
+.problem-detail-history-task-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0.25rem 1rem 0;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.problem-detail-history-tab {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.problem-detail-history-tab:hover {
+  color: var(--text);
+}
+
+.problem-detail-history-tab.problem-detail-history-tab-active {
+  color: var(--accent, #63b3ed);
+  border-bottom-color: var(--accent, #63b3ed);
+  font-weight: 600;
+}
+
+.problem-detail-history-tab-panel {
+  padding: 0 0 0.5rem;
+}
+
 .problem-detail-history-task-children .problem-detail-history-timeline {
   padding: 0 1rem 1rem;
 }
@@ -2743,6 +2779,34 @@ body {
   font-size: 0.75rem;
   color: var(--text-muted);
   min-width: 4.5em;
+}
+
+.problem-detail-history-log-type-tag {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.problem-detail-history-log-type-input {
+  background: rgba(99, 179, 237, 0.25);
+  color: #93c5fd;
+}
+
+.problem-detail-history-log-type-confirm {
+  background: rgba(34, 197, 94, 0.25);
+  color: #86efac;
+}
+
+.problem-detail-history-log-type-modify {
+  background: rgba(234, 179, 8, 0.25);
+  color: #fde047;
+}
+
+.problem-detail-history-log-type-discuss {
+  background: rgba(168, 85, 247, 0.25);
+  color: #e9d5ff;
 }
 
 .problem-detail-history-timeline-speaker {

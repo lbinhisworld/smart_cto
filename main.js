@@ -5150,6 +5150,18 @@ function focusWorkspaceOnCurrentTask(taskId) {
   });
 }
 
+/** 从沟通记录条目解析日志类型：输入、确认、修改、讨论 */
+function getCommunicationLogType(c) {
+  if (c.speaker === '用户') return '输入';
+  try {
+    const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
+    if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'discussion') return '讨论';
+    if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') return '修改';
+    if (c.speaker === '系统提炼') return '讨论';
+  } catch (_) {}
+  return '确认';
+}
+
 function renderProblemDetailHistory() {
   const container = el.problemDetailHistoryContent;
   if (!container) return;
@@ -5178,6 +5190,7 @@ function renderProblemDetailHistory() {
       ? '<p class="problem-detail-history-comm-empty">暂无沟通记录</p>'
       : comms.map((c, i) => {
           const timeStr = c.time ? formatChatTime(c.time) : '—';
+          const logType = getCommunicationLogType(c);
           let contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
           let titleLabel = c.speaker;
           try {
@@ -5222,7 +5235,7 @@ function renderProblemDetailHistory() {
             }
           } catch (_) {}
           return `
-          <div class="problem-detail-history-timeline-node" data-index="${i}">
+          <div class="problem-detail-history-timeline-node" data-index="${i}" data-log-type="${escapeHtml(logType)}">
             <div class="problem-detail-history-timeline-dot-wrap">
               <div class="problem-detail-history-timeline-dot"></div>
             </div>
@@ -5230,7 +5243,7 @@ function renderProblemDetailHistory() {
               <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
                 <span class="problem-detail-history-timeline-expand">▸</span>
                 <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
-                <span class="problem-detail-history-timeline-speaker">${escapeHtml(titleLabel)}</span>
+                <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-${logType === '输入' ? 'input' : logType === '确认' ? 'confirm' : logType === '修改' ? 'modify' : 'discuss'}">${escapeHtml(logType)}</span>
               </button>
               <div class="problem-detail-history-timeline-detail" hidden>
                 <div class="problem-detail-history-timeline-detail-meta">
@@ -5243,6 +5256,23 @@ function renderProblemDetailHistory() {
           </div>`;
         }).join('');
     const statusClass = taskStatusText === '已完成' ? 'problem-detail-history-task-done' : taskStatusText === '进行中' ? 'problem-detail-history-task-current' : '';
+    const taskInfoHtml = `
+      <div class="problem-detail-history-task-info">
+        <h5>归属阶段</h5>
+        <p>${escapeHtml(task.stage)}</p>
+        <h5>任务目标</h5>
+        <p>${escapeHtml(objective)}</p>
+        <h5>评估标准</h5>
+        <p>${escapeHtml(evaluationCriteria)}</p>
+        <h5>输入</h5>
+        <p>${escapeHtml(inputDesc)}</p>
+        <h5>动作</h5>
+        <p>${escapeHtml(actionDesc)}</p>
+        <h5>输出反馈</h5>
+        <p>${escapeHtml(outputDesc)}</p>
+        <h5>任务状态</h5>
+        <p>${escapeHtml(taskStatusText)}</p>
+      </div>`;
     return `
       <div class="problem-detail-history-task-root ${statusClass}" data-task-id="${task.id}" data-status="${escapeHtml(taskStatusText)}">
         <button type="button" class="problem-detail-history-task-node" data-task-id="${task.id}" role="button">
@@ -5251,24 +5281,12 @@ function renderProblemDetailHistory() {
           ${commCount > 0 ? `<span class="task-node-badge">${commCount} 条</span>` : ''}
         </button>
         <div class="problem-detail-history-task-children" hidden>
-          <div class="problem-detail-history-task-info">
-            <h5>归属阶段</h5>
-            <p>${escapeHtml(task.stage)}</p>
-            <h5>任务目标</h5>
-            <p>${escapeHtml(objective)}</p>
-            <h5>评估标准</h5>
-            <p>${escapeHtml(evaluationCriteria)}</p>
-            <h5>输入</h5>
-            <p>${escapeHtml(inputDesc)}</p>
-            <h5>动作</h5>
-            <p>${escapeHtml(actionDesc)}</p>
-            <h5>输出反馈</h5>
-            <p>${escapeHtml(outputDesc)}</p>
-            <h5>任务状态</h5>
-            <p>${escapeHtml(taskStatusText)}</p>
-            <h5>任务过程日志</h5>
+          <div class="problem-detail-history-task-tabs" role="tablist">
+            <button type="button" class="problem-detail-history-tab problem-detail-history-tab-active" role="tab" aria-selected="true" data-tab="detail">任务详情</button>
+            <button type="button" class="problem-detail-history-tab" role="tab" aria-selected="false" data-tab="log">过程日志</button>
           </div>
-          <div class="problem-detail-history-timeline">${timelineHtml}</div>
+          <div class="problem-detail-history-tab-panel" role="tabpanel" data-tab="detail">${taskInfoHtml}</div>
+          <div class="problem-detail-history-tab-panel" role="tabpanel" data-tab="log" hidden><div class="problem-detail-history-timeline">${timelineHtml}</div></div>
         </div>
       </div>`;
   }).join('');
@@ -5280,6 +5298,22 @@ function renderProblemDetailHistory() {
       const expanded = !children.hidden;
       children.hidden = expanded;
       btn.classList.toggle('expanded', !expanded);
+    });
+  });
+  container.querySelectorAll('.problem-detail-history-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const root = tab.closest('.problem-detail-history-task-children');
+      if (!root) return;
+      const tabKey = tab.getAttribute('data-tab');
+      root.querySelectorAll('.problem-detail-history-tab').forEach((t) => {
+        t.classList.remove('problem-detail-history-tab-active');
+        t.setAttribute('aria-selected', 'false');
+      });
+      tab.classList.add('problem-detail-history-tab-active');
+      tab.setAttribute('aria-selected', 'true');
+      root.querySelectorAll('.problem-detail-history-tab-panel').forEach((panel) => {
+        panel.hidden = panel.getAttribute('data-tab') !== tabKey;
+      });
     });
   });
   container.querySelectorAll('.problem-detail-history-timeline-head').forEach((btn) => {
