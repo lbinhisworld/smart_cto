@@ -1022,6 +1022,29 @@ body {
   cursor: default;
 }
 
+/* 任务完工确认「还不行」与重做按钮同风格 */
+.btn-task-complete-not-yet {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-task-complete-not-yet:hover:not(:disabled) {
+  opacity: 0.9;
+  border-color: var(--text-muted);
+}
+
+.btn-task-complete-not-yet:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* 与按钮区左边缘对齐：与 .problem-detail-substeps 的 padding 一致 */
 .problem-detail-role-permission-wrap {
   display: flex;
@@ -1558,6 +1581,13 @@ body {
 .problem-detail-basic-info-card-actions {
   padding-top: 0.5rem;
   border-top: 1px solid var(--border);
+}
+
+/* 聊天区所有内容块：内容与按钮之间统一分割线 */
+.problem-detail-chat-msg [class*="-actions"] {
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 /* 意图提炼确认卡片 */
@@ -2809,6 +2839,28 @@ body {
   color: #e9d5ff;
 }
 
+.problem-detail-history-log-type-context {
+  background: rgba(100, 116, 139, 0.35);
+  color: #cbd5e1;
+}
+
+.problem-detail-history-log-type-complete {
+  background: rgba(22, 163, 74, 0.3);
+  color: #4ade80;
+}
+
+.problem-detail-chat-context-block .problem-detail-chat-context-json {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .problem-detail-history-timeline-speaker {
   flex-shrink: 0;
   font-weight: 600;
@@ -3406,6 +3458,9 @@ body {
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 .tools-discussion-response-actions .btn-confirm-discussion-response {
@@ -3475,6 +3530,9 @@ body {
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 .tools-modification-response-actions .btn-confirm-modification-response {

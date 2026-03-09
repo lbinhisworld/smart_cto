@@ -1501,6 +1501,39 @@ if (el.toolsChatInput) {
 }
 if (el.problemDetailChatMessages) {
   el.problemDetailChatMessages.addEventListener('click', (e) => {
+    const taskCompleteDoneBtn = e.target.closest('.btn-task-complete-done');
+    if (taskCompleteDoneBtn && !taskCompleteDoneBtn.disabled) {
+      const taskId = taskCompleteDoneBtn.getAttribute('data-task-id') || '';
+      const taskName = taskCompleteDoneBtn.getAttribute('data-task-name') || taskId;
+      pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId, content: '用户确认任务完成', timestamp: getTimeStr() });
+      taskCompleteDoneBtn.textContent = '已完成';
+      taskCompleteDoneBtn.disabled = true;
+      const notYetBtn = taskCompleteDoneBtn.closest('.problem-detail-chat-task-completion-actions')?.querySelector('.btn-task-complete-not-yet');
+      if (notYetBtn) notYetBtn.disabled = true;
+      const container = el.problemDetailChatMessages;
+      if (container) {
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+      }
+      renderProblemDetailHistory();
+      return;
+    }
+    const taskCompleteNotYetBtn = e.target.closest('.btn-task-complete-not-yet');
+    if (taskCompleteNotYetBtn && !taskCompleteNotYetBtn.disabled) {
+      const container = el.problemDetailChatMessages;
+      const tipBlock = document.createElement('div');
+      tipBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+      tipBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请您进一步反馈修改意见</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container?.appendChild(tipBlock);
+      container.scrollTop = container.scrollHeight;
+      pushAndSaveProblemDetailChat({ role: 'system', content: '请您进一步反馈修改意见', timestamp: getTimeStr() });
+      taskCompleteNotYetBtn.textContent = '已反馈';
+      taskCompleteNotYetBtn.disabled = true;
+      const doneBtn = taskCompleteNotYetBtn.closest('.problem-detail-chat-task-completion-actions')?.querySelector('.btn-task-complete-done');
+      if (doneBtn) doneBtn.disabled = true;
+      return;
+    }
     const deleteBtn = e.target.closest('.btn-delete-chat-msg');
     if (deleteBtn) {
       const msgBlock = deleteBtn.closest('[data-msg-index]');
@@ -1592,6 +1625,15 @@ if (el.problemDetailChatMessages) {
       }
       confirmTaskStartBtn.disabled = true;
       confirmTaskStartBtn.textContent = '已确认';
+      const contextJson = buildTaskContextJson(taskId, item);
+      pushAndSaveProblemDetailChat({ type: 'taskContextBlock', taskId, contextJson, timestamp: getTimeStr() });
+      const chatContainer = el.problemDetailChatMessages;
+      if (chatContainer) {
+        chatContainer.innerHTML = '';
+        renderProblemDetailChatFromStorage(chatContainer, problemDetailChatMessages);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+      renderProblemDetailHistory();
       if (taskId === 'task1') {
         pushAndSaveProblemDetailChat({ role: 'system', content: '请提供或确认企业基本信息以完成企业背景洞察', timestamp: getTimeStr() });
         renderProblemDetailContent();
@@ -1728,14 +1770,27 @@ if (el.problemDetailChatMessages) {
         if (idx >= 0) {
           const realIdx = problemDetailChatMessages.length - 1 - idx;
           const msg = problemDetailChatMessages[realIdx];
-          const content = msg?.content || '';
           problemDetailChatMessages[realIdx] = {
             ...msg,
             confirmed: true,
           };
           saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+          const currentMajorStage = item.currentMajorStage ?? 0;
+          const targetMajorStage = 3;
+          if (currentMajorStage < targetMajorStage) {
+            currentProblemDetailItem = { ...item, currentMajorStage: targetMajorStage };
+            updateDigitalProblemMajorStage(item.createdAt, targetMajorStage);
+          }
+          problemDetailViewingMajorStage = targetMajorStage;
+          itStrategyPlanViewingSubstep = 0;
+          updateProblemDetailProgressStages(Math.max(currentMajorStage, targetMajorStage), problemDetailViewingMajorStage);
           renderProblemDetailContent();
-          requestAnimationFrame(() => showNextTaskStartNotification());
+          requestAnimationFrame(() => {
+            const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+            if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            showTaskCompletionConfirm('task10', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task10')?.name) || '角色与权限模型');
+            showNextTaskStartNotification();
+          });
         }
       }
       return;
@@ -1825,7 +1880,10 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
         container.scrollTop = container.scrollHeight;
         renderProblemDetailHistory();
-        requestAnimationFrame(() => showNextTaskStartNotification());
+        requestAnimationFrame(() => {
+          showTaskCompletionConfirm('task7', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task7')?.name) || '端到端流程绘制');
+          showNextTaskStartNotification();
+        });
       } catch (_) {}
       return;
     }
@@ -1879,7 +1937,10 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
         container.scrollTop = container.scrollHeight;
         renderProblemDetailHistory();
-        requestAnimationFrame(() => showNextTaskStartNotification());
+        requestAnimationFrame(() => {
+          showTaskCompletionConfirm('task8', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task8')?.name) || '全局 ITGap 分析');
+          showNextTaskStartNotification();
+        });
       } catch (_) {}
       return;
     }
@@ -1927,7 +1988,10 @@ if (el.problemDetailChatMessages) {
       container.scrollTop = container.scrollHeight;
       renderProblemDetailContent();
       renderProblemDetailHistory();
-      requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
+      requestAnimationFrame(() => {
+        showTaskCompletionConfirm('task9', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task9')?.name) || '局部 ITGap 分析');
+        runLocalItGapAnalysisForNextStep();
+      });
       return;
     }
     const continueLocalItGapSessionsBtn = e.target.closest('.btn-continue-local-itgap-sessions');
@@ -1960,12 +2024,19 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
         container.scrollTop = container.scrollHeight;
         renderProblemDetailHistory();
+        const taskNameTask9 = (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task9')?.name) || '局部 ITGap 分析';
         const { stages } = parseValueStreamGraph(item.valueStream);
         const allSteps = stages.flatMap((s) => s.steps);
         if (allSteps.length > stepIndex + 1) {
-          requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
+          requestAnimationFrame(() => {
+            showTaskCompletionConfirm('task9', taskNameTask9);
+            runLocalItGapAnalysisForNextStep();
+          });
         } else {
-          requestAnimationFrame(() => showNextTaskStartNotification());
+          requestAnimationFrame(() => {
+            showTaskCompletionConfirm('task9', taskNameTask9);
+            showNextTaskStartNotification();
+          });
         }
       } catch (_) {}
       return;
@@ -2106,6 +2177,7 @@ if (el.problemDetailChatMessages) {
           pushAndSaveProblemDetailChat({ type: 'drawValueStreamStartBlock', data: valueStream, timestamp: getTimeStr() });
           el.problemDetailChatMessages.scrollTop = el.problemDetailChatMessages.scrollHeight;
         }
+        showTaskCompletionConfirm('task4', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task4')?.name) || '绘制价值流');
       } catch (_) {}
       return;
     }
@@ -2127,7 +2199,10 @@ if (el.problemDetailChatMessages) {
           saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
         }
         renderProblemDetailContent();
-        requestAnimationFrame(() => showNextTaskStartNotification());
+        requestAnimationFrame(() => {
+          showTaskCompletionConfirm('task4', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task4')?.name) || '绘制价值流');
+          showNextTaskStartNotification();
+        });
       } catch (_) {}
       return;
     }
@@ -2157,7 +2232,10 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailContent();
         bmcBtn.textContent = '已确认';
         bmcBtn.disabled = true;
-        requestAnimationFrame(() => showNextTaskStartNotification());
+        requestAnimationFrame(() => {
+          showTaskCompletionConfirm('task2', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task2')?.name) || '商业画布加载');
+          showNextTaskStartNotification();
+        });
       } catch (_) {}
       return;
     }
@@ -2218,6 +2296,11 @@ if (el.problemDetailChatMessages) {
         intentBtn.textContent = '已确认';
         intentBtn.disabled = true;
         renderProblemDetailHistory();
+        const taskIdForConfirm = extracted.taskId || 'task1';
+        const taskNameForConfirm = (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || [])).find((t) => t.id === taskIdForConfirm)?.name || taskIdForConfirm;
+        if (extracted.intent !== 'query' && extracted.intent !== 'discussion' && extracted.intent !== 'execute') {
+          showTaskCompletionConfirm(taskIdForConfirm, taskNameForConfirm);
+        }
         if (problemDetailChatMode === 'ask' && (extracted.intent === 'modification' || extracted.intent === 'execute')) {
           const container = el.problemDetailChatMessages;
           const tipBlock = document.createElement('div');
@@ -2463,7 +2546,10 @@ if (el.problemDetailChatMessages) {
         updateProblemDetailChatHeaderLabel();
         btn.textContent = '已确认';
         btn.disabled = true;
-        requestAnimationFrame(() => showNextTaskStartNotification());
+        requestAnimationFrame(() => {
+          showTaskCompletionConfirm('task1', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task1')?.name) || '企业背景洞察');
+          showNextTaskStartNotification();
+        });
       } catch (_) {}
     }
   });
@@ -5057,6 +5143,56 @@ function getFirstUncompletedTask(item) {
   return allTasks.find((t) => !isTaskCompleted(item, t.id)) || null;
 }
 
+/** 根据《数字化问题跟进阶段设计》1.3 各任务输入数据，从当前问题记录（不含聊天区内容）合成该任务的上下文 JSON，供沟通历史「上下文」块展示 */
+function buildTaskContextJson(taskId, item) {
+  if (!item) return {};
+  const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || null;
+  const bmc = item.bmc || null;
+  const requirementLogic = item.requirementLogic || null;
+  const valueStream = item.valueStream && !item.valueStream.raw ? item.valueStream : null;
+  const preliminaryReq = {
+    customerName: item.customerName ?? item.customer_name ?? '',
+    customerNeedsOrChallenges: item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
+    customerItStatus: item.customerItStatus ?? item.customer_it_status ?? '',
+    projectTimeRequirement: item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+  };
+  const globalItGapAnalysisJson = item.globalItGapAnalysisJson || null;
+  const localItGapSessions = item.localItGapSessions || null;
+  switch (taskId) {
+    case 'task1':
+      return basicInfo ? { basicInfo } : { note: '尚无企业基本信息' };
+    case 'task2':
+      return basicInfo || bmc ? { basicInfo: basicInfo || undefined, bmc: bmc || undefined } : { note: '尚无企业基本信息' };
+    case 'task3':
+      return { preliminaryReq, basicInfo: basicInfo || undefined, bmc: bmc || undefined };
+    case 'task4':
+      return { basicInfo: basicInfo || undefined, bmc: bmc || undefined, requirementLogic: requirementLogic || undefined };
+    case 'task5':
+    case 'task6':
+      return { valueStream: valueStream || undefined, requirementLogic: requirementLogic || undefined };
+    case 'task7':
+      return valueStream ? { valueStream } : { note: '尚无已绘制价值流图' };
+    case 'task8': {
+      const enterpriseContext = basicInfo || requirementLogic || preliminaryReq.customerName || preliminaryReq.customerNeedsOrChallenges
+        ? { basicInfo: basicInfo || undefined, requirementLogic: requirementLogic || undefined, preliminary: preliminaryReq }
+        : undefined;
+      return { enterpriseContext, businessCanvas: bmc || undefined, fullProcessVsm: valueStream || undefined };
+    }
+    case 'task9':
+      return { valueStream: valueStream || undefined, globalItGapAnalysisJson: globalItGapAnalysisJson || undefined };
+    case 'task10':
+      return valueStream ? { valueStream } : { note: '尚无价值流图' };
+    case 'task11':
+    case 'task12':
+    case 'task13':
+    case 'task14':
+    case 'task15':
+      return { valueStream: valueStream || undefined, globalItGapAnalysisJson: globalItGapAnalysisJson || undefined, localItGapSessions: (localItGapSessions && localItGapSessions.length) ? localItGapSessions : undefined };
+    default:
+      return {};
+  }
+}
+
 /** 若聊天中尚无该任务的任务启动通知，则在聊天区展示统一任务启动通知（任务通知：我即将开始【任务名称】任务 + 确认按钮） */
 function showTaskStartNotificationIfNeeded(taskId) {
   const container = el.problemDetailChatMessages;
@@ -5150,186 +5286,33 @@ function focusWorkspaceOnCurrentTask(taskId) {
   });
 }
 
-/** 从沟通记录条目解析日志类型：输入、确认、修改、讨论 */
-function getCommunicationLogType(c) {
-  if (c.speaker === '用户') return '输入';
-  try {
-    const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
-    if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'discussion') return '讨论';
-    if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') return '修改';
-    if (c.speaker === '系统提炼') return '讨论';
-  } catch (_) {}
-  return '确认';
-}
-
+/** 沟通历史页面更新：委托 js/communication-history.js 渲染，main 仅传入容器与依赖 */
 function renderProblemDetailHistory() {
   const container = el.problemDetailHistoryContent;
   if (!container) return;
-  const item = currentProblemDetailItem;
-  const createdAt = item?.createdAt;
-  const trackingData = createdAt ? (getTaskTrackingData()[createdAt] || {}) : {};
-  const communications = createdAt ? getCommunicationsByTask(createdAt, getChatsForProblem(createdAt)) : {};
-  const allHistoryTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
-  container.innerHTML = allHistoryTasks.map((task) => {
-    const taskData = trackingData[task.id] || {};
-    const objective = (taskData.objective ?? task.objective) || '—';
-    const evaluationCriteria = (taskData.evaluationCriteria ?? task.evaluationCriteria) || '—';
-    const extra = TASK_EXTRA_FIELDS[task.id] || {};
-    const inputDesc = extra.input || '—';
-    const actionDesc = extra.action || '—';
-    const outputDesc = extra.outputFeedback || '—';
-    const taskStatusText = getTaskStatusText(item, task.id, allHistoryTasks);
-    const comms = (communications[task.id] || []).slice().sort((a, b) => {
-      const ta = (a.time && new Date(a.time).getTime()) || 0;
-      const tb = (b.time && new Date(b.time).getTime()) || 0;
-      return ta - tb;
+  const render = typeof window.renderCommunicationHistoryPanel === 'function' ? window.renderCommunicationHistoryPanel : null;
+  if (render) {
+    render(container, {
+      item: currentProblemDetailItem,
+      getChatsForProblem,
+      getTaskStatusText,
     });
-    const commCount = comms.length;
-    const intentLabels = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
-    const timelineHtml = comms.length === 0
-      ? '<p class="problem-detail-history-comm-empty">暂无沟通记录</p>'
-      : comms.map((c, i) => {
-          const timeStr = c.time ? formatChatTime(c.time) : '—';
-          const logType = getCommunicationLogType(c);
-          let contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
-          let titleLabel = c.speaker;
-          try {
-            const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
-            if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent != null) {
-              const intentLabel = intentLabels[parsed.data.intent] || parsed.data.intent || '—';
-              titleLabel = `用户意图提炼：${intentLabel}`;
-            } else if (parsed?.type === 'e2eFlowExtractStartBlock') {
-              titleLabel = parsed.content || '我先需要提取端到端流程绘制的 json 数据';
-            } else if (parsed?.type === 'e2eFlowJsonBlock') {
-              titleLabel = '端到端流程 JSON 数据';
-              if (parsed.valueStreamJson) {
-                contentStr = '【端到端流程 JSON 数据】\n' + JSON.stringify(parsed.valueStreamJson, null, 2);
-              }
-            } else if (parsed?.type === 'e2eFlowGeneratedLog') {
-              titleLabel = parsed.content || '已生成端到端流程 JSON 数据';
-              if (parsed.valueStreamJson) {
-                contentStr = parsed.content + '\n\n【端到端流程 JSON 数据】\n' + JSON.stringify(parsed.valueStreamJson, null, 2);
-              }
-            } else if (parsed?.type === 'globalItGapStartBlock') {
-              titleLabel = parsed.content || '即将针对端到端流程开展全局 ITGap 分析';
-            } else if (parsed?.type === 'globalItGapAnalysisCard') {
-              titleLabel = '全局 ITGap 分析';
-              if (parsed.analysisJson) {
-                contentStr = '【全局 ITGap 分析 JSON】\n' + JSON.stringify(parsed.analysisJson, null, 2);
-              }
-            } else if (parsed?.type === 'globalItGapAnalysisLog') {
-              titleLabel = parsed.content || '已生成全局 ITGap 分析';
-              if (parsed.analysisJson) {
-                contentStr = (parsed.content || '') + '\n\n【全局 ITGap 分析 JSON】\n' + JSON.stringify(parsed.analysisJson, null, 2);
-              }
-            } else if (parsed?.type === 'rolePermissionCard') {
-              titleLabel = '角色与权限模型推演';
-              if (parsed.rolePermissionModelJson) {
-                contentStr = '【角色与权限模型推演 JSON】\n' + JSON.stringify(parsed.rolePermissionModelJson, null, 2);
-              }
-            } else if (parsed?.type === 'rolePermissionConfirmedLog') {
-              titleLabel = parsed.content || '已确认角色与权限模型推演';
-              if (parsed.rolePermissionModelJson) {
-                contentStr = (parsed.content || '') + '\n\n【角色与权限模型推演 JSON】\n' + JSON.stringify(parsed.rolePermissionModelJson, null, 2);
-              }
-            }
-          } catch (_) {}
-          return `
-          <div class="problem-detail-history-timeline-node" data-index="${i}" data-log-type="${escapeHtml(logType)}">
-            <div class="problem-detail-history-timeline-dot-wrap">
-              <div class="problem-detail-history-timeline-dot"></div>
-            </div>
-            <div class="problem-detail-history-timeline-body">
-              <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
-                <span class="problem-detail-history-timeline-expand">▸</span>
-                <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
-                <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-${logType === '输入' ? 'input' : logType === '确认' ? 'confirm' : logType === '修改' ? 'modify' : 'discuss'}">${escapeHtml(logType)}</span>
-              </button>
-              <div class="problem-detail-history-timeline-detail" hidden>
-                <div class="problem-detail-history-timeline-detail-meta">
-                  <span>${escapeHtml(titleLabel)}</span>
-                  <span>${escapeHtml(timeStr)}</span>
-                </div>
-                <pre class="problem-detail-history-timeline-detail-content">${escapeHtml(contentStr)}</pre>
-              </div>
-            </div>
-          </div>`;
-        }).join('');
-    const statusClass = taskStatusText === '已完成' ? 'problem-detail-history-task-done' : taskStatusText === '进行中' ? 'problem-detail-history-task-current' : '';
-    const taskInfoHtml = `
-      <div class="problem-detail-history-task-info">
-        <h5>归属阶段</h5>
-        <p>${escapeHtml(task.stage)}</p>
-        <h5>任务目标</h5>
-        <p>${escapeHtml(objective)}</p>
-        <h5>评估标准</h5>
-        <p>${escapeHtml(evaluationCriteria)}</p>
-        <h5>输入</h5>
-        <p>${escapeHtml(inputDesc)}</p>
-        <h5>动作</h5>
-        <p>${escapeHtml(actionDesc)}</p>
-        <h5>输出反馈</h5>
-        <p>${escapeHtml(outputDesc)}</p>
-        <h5>任务状态</h5>
-        <p>${escapeHtml(taskStatusText)}</p>
-      </div>`;
-    return `
-      <div class="problem-detail-history-task-root ${statusClass}" data-task-id="${task.id}" data-status="${escapeHtml(taskStatusText)}">
-        <button type="button" class="problem-detail-history-task-node" data-task-id="${task.id}" role="button">
-          <span class="task-node-expand">▸</span>
-          <span class="task-node-name">${escapeHtml(task.id.charAt(0).toUpperCase() + task.id.slice(1) + '｜' + task.name)}</span>
-          ${commCount > 0 ? `<span class="task-node-badge">${commCount} 条</span>` : ''}
-        </button>
-        <div class="problem-detail-history-task-children" hidden>
-          <div class="problem-detail-history-task-tabs" role="tablist">
-            <button type="button" class="problem-detail-history-tab problem-detail-history-tab-active" role="tab" aria-selected="true" data-tab="detail">任务详情</button>
-            <button type="button" class="problem-detail-history-tab" role="tab" aria-selected="false" data-tab="log">过程日志</button>
-          </div>
-          <div class="problem-detail-history-tab-panel" role="tabpanel" data-tab="detail">${taskInfoHtml}</div>
-          <div class="problem-detail-history-tab-panel" role="tabpanel" data-tab="log" hidden><div class="problem-detail-history-timeline">${timelineHtml}</div></div>
-        </div>
-      </div>`;
-  }).join('');
-  container.querySelectorAll('.problem-detail-history-task-node').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const root = btn.closest('.problem-detail-history-task-root');
-      const children = root?.querySelector('.problem-detail-history-task-children');
-      if (!children) return;
-      const expanded = !children.hidden;
-      children.hidden = expanded;
-      btn.classList.toggle('expanded', !expanded);
-    });
-  });
-  container.querySelectorAll('.problem-detail-history-tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const root = tab.closest('.problem-detail-history-task-children');
-      if (!root) return;
-      const tabKey = tab.getAttribute('data-tab');
-      root.querySelectorAll('.problem-detail-history-tab').forEach((t) => {
-        t.classList.remove('problem-detail-history-tab-active');
-        t.setAttribute('aria-selected', 'false');
-      });
-      tab.classList.add('problem-detail-history-tab-active');
-      tab.setAttribute('aria-selected', 'true');
-      root.querySelectorAll('.problem-detail-history-tab-panel').forEach((panel) => {
-        panel.hidden = panel.getAttribute('data-tab') !== tabKey;
-      });
-    });
-  });
-  container.querySelectorAll('.problem-detail-history-timeline-head').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const body = btn.closest('.problem-detail-history-timeline-body');
-      const detail = body?.querySelector('.problem-detail-history-timeline-detail');
-      if (!detail) return;
-      const isExpanded = !detail.hidden;
-      detail.hidden = isExpanded;
-      btn.classList.toggle('expanded', !isExpanded);
-      btn.setAttribute('aria-expanded', !isExpanded);
-      btn.querySelector('.problem-detail-history-timeline-expand')?.classList.toggle('expanded', !isExpanded);
-    });
-  });
+  }
 }
 if (typeof window !== 'undefined') window.renderProblemDetailHistory = renderProblemDetailHistory;
+
+/** 用户点击「确认」认可大模型输出后，发送任务完工确认块：【当前任务名称】是否视为完成？带「已完成」「还不行」按钮 */
+function showTaskCompletionConfirm(taskId, taskName) {
+  if (!taskId || !taskName) return;
+  const content = `【${taskName}】是否视为完成？`;
+  pushAndSaveProblemDetailChat({ type: 'taskCompletionConfirmBlock', taskId, taskName, content, timestamp: getTimeStr() });
+  const container = el.problemDetailChatMessages;
+  if (container) {
+    container.innerHTML = '';
+    renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+    container.scrollTop = container.scrollHeight;
+  }
+}
 
 function initProblemDetailChat() {
   const container = el.problemDetailChatMessages;
@@ -6277,6 +6260,45 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
+    } else if (msg.type === 'taskContextBlock') {
+      const ctxJson = msg.contextJson && typeof msg.contextJson === 'object' ? JSON.stringify(msg.contextJson, null, 2) : (msg.contextJson != null ? String(msg.contextJson) : '{}');
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-context-block';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-context">上下文</span>
+          <pre class="problem-detail-chat-context-json">${escapeHtml(ctxJson)}</pre>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'taskCompletionConfirmBlock') {
+      const taskId = msg.taskId || '';
+      const taskName = msg.taskName || (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === taskId)?.name) || taskId;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-task-completion-confirm';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || `【${taskName}】是否视为完成？`)}</div>
+          <div class="problem-detail-chat-task-completion-actions">
+            <button type="button" class="btn-task-complete-done btn-confirm-primary" data-task-id="${escapeHtml(taskId)}" data-task-name="${escapeHtml(taskName)}">已完成</button>
+            <button type="button" class="btn-task-complete-not-yet">还不行</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'taskCompleteBlock') {
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-task-complete';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-complete">任务完成</span>
+          <div class="problem-detail-chat-msg-content">用户确认任务完成</div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
     } else if (msg.type === 'requirementLogicStartBlock') {
       if (item?.requirementLogic) return;
       const block = document.createElement('div');
@@ -6938,7 +6960,11 @@ function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
         updateProblemDetailProgressStages(1, problemDetailViewingMajorStage);
         renderProblemDetailContent();
       }
-      requestAnimationFrame(() => showNextTaskStartNotification());
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => {
+        showTaskCompletionConfirm('task3', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task3')?.name) || '需求逻辑构建');
+        showNextTaskStartNotification();
+      });
     });
   }
 }
