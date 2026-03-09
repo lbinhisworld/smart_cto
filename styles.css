@@ -3471,6 +3471,11 @@ body {
   font-size: 0.7rem;
 }
 
+/* 需求理解页可点击子步骤（点击滚动到对应卡片并展开） */
+.problem-detail-substep[data-task-id] {
+  cursor: pointer;
+}
+
 /* 按钮形式的子步骤（IT 策略规划任务栏与 ITGap 共用 .problem-detail-substep 样式） */
 .problem-detail-substeps button.problem-detail-substep {
   cursor: pointer;

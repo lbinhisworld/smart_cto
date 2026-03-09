@@ -7737,6 +7737,7 @@ function renderProblemDetailContent() {
       currentProblemDetailItem = { ...item, itGapCompletedStages: itGapCompleted };
     }
     const itGapCurrent = [0, 1, 2].find((i) => !itGapCompleted.includes(i)) ?? 3;
+    const itGapSubstepTaskIds = ['e2e-flow', 'global-itgap', 'local-itgap'];
     const itGapSubstepsHtml = itGapSubsteps.map((name, i) => {
       const done = itGapCompleted.includes(i);
       const current = i === itGapCurrent;
@@ -7744,7 +7745,8 @@ function renderProblemDetailContent() {
       if (done) cls += ' problem-detail-substep-done';
       else if (current) cls += ' problem-detail-substep-current';
       const icon = done ? ' <span class="problem-detail-substep-check">✅</span>' : '';
-      return `<span class="${cls}">${escapeHtml(name)}${icon}</span>`;
+      const taskId = itGapSubstepTaskIds[i];
+      return `<span class="${cls}" data-task-id="${taskId}" role="button" tabindex="0">${escapeHtml(name)}${icon}</span>`;
     }).join('<span class="problem-detail-substep-sep">→</span>');
     let workspaceContent = '';
     if (valueStream && !valueStream.raw) {
@@ -7849,6 +7851,7 @@ function renderProblemDetailContent() {
     if (valueStream && !valueStream.raw) {
       setupProblemDetailCardToggle();
       setupLocalItGapSubcardToggle();
+      setupItGapSubstepClicks(container);
     }
     requestAnimationFrame(() => {
       console.log('[局部ITGap] renderProblemDetailContent rAF: 调用 forceShowLocalItGapStartBlock');
@@ -7935,7 +7938,8 @@ function renderProblemDetailContent() {
     else if (current) cls += ' problem-detail-substep-current';
     const icon = done ? ' <span class="problem-detail-substep-check">✅</span>' : '';
     const label = withTaskNumberPrefix(subStepTaskIds[i], name);
-    return `<span class="${cls}">${escapeHtml(label)}${icon}</span>`;
+    const taskId = subStepTaskIds[i];
+    return `<span class="${cls}" data-task-id="${taskId}" role="button" tabindex="0">${escapeHtml(label)}${icon}</span>`;
   }).join('<span class="problem-detail-substep-sep">→</span>');
   const basicInfoLabels = [
     { key: 'company_name', label: '公司名称' },
@@ -8053,6 +8057,66 @@ function renderProblemDetailContent() {
     <div class="problem-detail-workspace-cards">${cardsHtml}</div>
   </div>`;
   setupProblemDetailCardToggle();
+  setupRequirementUnderstandingSubstepClicks(container);
+}
+
+/** 需求理解页：点击子步骤（企业背景洞察/商业画布加载/需求逻辑构建）时滚动到对应卡片并展开 */
+function setupRequirementUnderstandingSubstepClicks(container) {
+  if (!container) return;
+  container.querySelectorAll('.problem-detail-substep[data-task-id]').forEach((substep) => {
+    const taskId = substep.getAttribute('data-task-id');
+    if (!taskId) return;
+    const onClick = () => {
+      const card = container.querySelector(`.problem-detail-card[data-task-id="${taskId}"]`);
+      if (!card) return;
+      const header = card.querySelector('.problem-detail-card-header');
+      const body = card.querySelector('.problem-detail-card-body');
+      if (body?.hidden && header) {
+        body.hidden = false;
+        header.classList.remove('problem-detail-card-header-collapsed');
+        header.setAttribute('aria-expanded', 'true');
+      }
+      card.scrollIntoView({ block: 'nearest', behavior: 'smooth', inline: 'nearest' });
+    };
+    substep.addEventListener('click', onClick);
+    substep.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onClick();
+      }
+    });
+  });
+}
+
+/** ITGap 分析页：点击子步骤（端到端流程绘制/全局 ITGap 分析/局部 ITGap 分析）时滚动到对应卡片并展开 */
+function setupItGapSubstepClicks(container) {
+  if (!container) return;
+  container.querySelectorAll('.problem-detail-substep[data-task-id]').forEach((substep) => {
+    const taskId = substep.getAttribute('data-task-id');
+    if (!taskId) return;
+    const onClick = () => {
+      let card = container.querySelector(`.problem-detail-card[data-task-id="${taskId}"]`);
+      if (!card && taskId === 'local-itgap') {
+        card = container.querySelector('.problem-detail-card[data-task-id="local-itgap-trigger"]');
+      }
+      if (!card) return;
+      const header = card.querySelector('.problem-detail-card-header');
+      const body = card.querySelector('.problem-detail-card-body');
+      if (body?.hidden && header) {
+        body.hidden = false;
+        header.classList.remove('problem-detail-card-header-collapsed');
+        header.setAttribute('aria-expanded', 'true');
+      }
+      card.scrollIntoView({ block: 'nearest', behavior: 'smooth', inline: 'nearest' });
+    };
+    substep.addEventListener('click', onClick);
+    substep.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onClick();
+      }
+    });
+  });
 }
 
 /** IT 策略规划页：任务按钮栏点击切换当前任务并刷新工作区内容 */
