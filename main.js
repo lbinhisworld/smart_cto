@@ -1633,6 +1633,7 @@ if (el.problemDetailChatModeOptionAgent) {
     updateProblemDetailChatInputForMode();
     const next = getFirstUncompletedTask(currentProblemDetailItem);
     if (next) {
+      if (typeof hasUnconfirmedOutputCardBeforeTask === 'function' && hasUnconfirmedOutputCardBeforeTask(problemDetailChatMessages, next.id)) return;
       focusWorkspaceOnCurrentTask(next.id);
       requestAnimationFrame(() => {
         showTaskStartNotificationIfNeeded(next.id);
@@ -1768,7 +1769,7 @@ if (el.problemDetailChatMessages) {
       const taskId = taskCompleteDoneBtn.getAttribute('data-task-id') || '';
       const taskName = taskCompleteDoneBtn.getAttribute('data-task-name') || taskId;
       const item = currentProblemDetailItem;
-      const alreadyCompleted = item && typeof isTaskCompleted === 'function' && isTaskCompleted(item, taskId);
+      const alreadyCompleted = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some((m) => m.type === 'taskCompleteBlock' && m.taskId === taskId);
       if (!alreadyCompleted) {
         pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId, content: '用户确认任务完成', timestamp: getTimeStr() });
         const createdAt = item?.createdAt;
@@ -2514,6 +2515,24 @@ if (el.problemDetailChatMessages) {
       }
       return;
     }
+    const redoRequirementLogicBtn = e.target.closest('.btn-redo-requirement-logic');
+    if (redoRequirementLogicBtn && !redoRequirementLogicBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const logicIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'requirementLogicBlock');
+      if (logicIdx >= 0 && item?.createdAt) {
+        problemDetailChatMessages.splice(logicIdx, 1);
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        const chatContainer = el.problemDetailChatMessages;
+        if (chatContainer) {
+          chatContainer.innerHTML = '';
+          renderProblemDetailChatFromStorage(chatContainer, problemDetailChatMessages);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        renderProblemDetailHistory();
+        requestAnimationFrame(() => runRequirementLogicConstruction());
+      }
+      return;
+    }
     const bmcBtn = e.target.closest('.btn-confirm-bmc');
     if (bmcBtn && bmcBtn.dataset.json) {
       try {
@@ -2537,6 +2556,13 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailContent();
         bmcBtn.textContent = '已确认';
         bmcBtn.disabled = true;
+        const chatContainer = el.problemDetailChatMessages;
+        if (chatContainer) {
+          chatContainer.innerHTML = '';
+          renderProblemDetailChatFromStorage(chatContainer, problemDetailChatMessages);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        renderProblemDetailHistory();
         requestAnimationFrame(() => {
           showTaskCompletionConfirm('task2', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task2')?.name) || '商业画布加载');
         });
@@ -5430,6 +5456,13 @@ async function handleParseClick() {
 
 /** getDigitalProblems、saveDigitalProblem、... 已移至 js/storage.js；inferTaskIdFromMessage、shouldIncludeInCommunicationHistory、getCommunicationsByTask、getCommunicationsAsTimeline 已移至 js/communication-history.js */
 
+/** 是否为重置后状态（仅保留初步需求，所有任务视为尚未开始，任务启动通知/已完成·还不行 按钮应可点击） */
+function isProblemResetState(item) {
+  if (!item) return false;
+  const first = getFirstUncompletedTask(item);
+  return first?.id === 'task1' && !item.basicInfo;
+}
+
 /** 判断任务是否已完成（基于 problem 状态） */
 function isTaskCompleted(item, taskId) {
   if (!item) return false;
@@ -5916,6 +5949,23 @@ function showTaskStartNotificationIfNeeded(taskId, forceShow) {
   container.scrollTop = container.scrollHeight;
 }
 
+/** 检查聊天中是否存在「下一任务」之前的未确认输出卡片（有则不下发下一任务启动通知） */
+function hasUnconfirmedOutputCardBeforeTask(messages, nextTaskId) {
+  if (!Array.isArray(messages)) return false;
+  const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
+  const nextIdx = allTasks.findIndex((t) => t.id === nextTaskId);
+  if (nextIdx <= 0) return false;
+  const taskIdsToCheck = allTasks.slice(0, nextIdx).map((t) => t.id);
+  const cardByTask = { task1: 'basicInfoCard', task2: 'bmcCard', task3: 'requirementLogicBlock' };
+  for (const tid of taskIdsToCheck) {
+    const cardType = cardByTask[tid];
+    if (!cardType) continue;
+    const hasUnconfirmed = messages.some((m) => m.type === cardType && !m.confirmed);
+    if (hasUnconfirmed) return true;
+  }
+  return false;
+}
+
 /** 自动触发当前第一个未完成任务的任务启动通知（上一任务结束后或页面刷新时调用） */
 function showNextTaskStartNotification() {
   const item = currentProblemDetailItem;
@@ -5926,7 +5976,8 @@ function showNextTaskStartNotification() {
   const dataItem = latest || item;
   const next = getFirstUncompletedTask(dataItem);
   if (!next) return;
-  // 打开详情/刷新时强制展示当前任务通知，避免回退后聊天里旧的「已确认」导致不再展示
+  // 若聊天中存在未确认的输出卡片（如 BMC、需求逻辑），不下发下一任务启动通知，等用户先确认
+  if (hasUnconfirmedOutputCardBeforeTask(problemDetailChatMessages, next.id)) return;
   showTaskStartNotificationIfNeeded(next.id, true);
 }
 
@@ -6164,6 +6215,7 @@ async function runBmcGeneration() {
     container.appendChild(cardBlock);
     setupProblemDetailBmcCardToggle(cardBlock);
     container.scrollTop = container.scrollHeight;
+    renderProblemDetailHistory();
   } catch (err) {
     loading2.classList.remove('problem-detail-chat-msg-parsing');
     loading2.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">生成失败：${escapeHtml(err.message || String(err))}</div>`;
@@ -6228,7 +6280,10 @@ async function runRequirementLogicConstruction() {
       <div class="problem-detail-basic-info-card" role="button" tabindex="0">
         <div class="problem-detail-basic-info-card-body">${rows}</div>
         <div class="problem-detail-basic-info-card-actions">
-          <button type="button" class="btn-confirm-requirement-logic">确认</button>
+          <button type="button" class="btn-confirm-requirement-logic btn-confirm-primary">确认</button>
+          <button type="button" class="btn-redo-requirement-logic">重做</button>
+          <button type="button" class="btn-refine-modify" data-task-id="task3">修正</button>
+          <button type="button" class="btn-refine-discuss" data-task-id="task3">讨论</button>
         </div>
       </div>
       <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
@@ -7025,7 +7080,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
     const _taskId = inferTaskId(msg) || '';
     if (msg.type === 'taskStartNotification') {
       const taskName = msg.taskName || (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === msg.taskId)?.name) || msg.taskId;
-      const confirmed = !!msg.confirmed;
+      const confirmed = (typeof isProblemResetState === 'function' && isProblemResetState(item)) ? false : !!msg.confirmed;
       const block = document.createElement('div');
       block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-task-start-notification';
       block.dataset.msgIndex = String(idx);
@@ -7053,7 +7108,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'taskCompletionConfirmBlock') {
       const taskId = msg.taskId || '';
       const taskName = msg.taskName || (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === taskId)?.name) || taskId;
-      const taskAlreadyDone = item && typeof isTaskCompleted === 'function' && isTaskCompleted(item, taskId);
+      const taskAlreadyDone = Array.isArray(messages) && messages.some((m) => m.type === 'taskCompleteBlock' && m.taskId === taskId);
       const block = document.createElement('div');
       block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-task-completion-confirm';
       block.dataset.msgIndex = String(idx);
@@ -7264,9 +7319,10 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-basic-info-card" role="button" tabindex="0">
           <div class="problem-detail-basic-info-card-body">${rows}</div>
           <div class="problem-detail-basic-info-card-actions">
-            <button type="button" class="btn-confirm-requirement-logic" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
-            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
+            <button type="button" class="btn-confirm-requirement-logic btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-redo-requirement-logic" ${confirmed ? 'disabled' : ''}>重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task3" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task3" ${confirmed ? 'disabled' : ''}>讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -7767,13 +7823,13 @@ function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
   const card = cardBlock?.querySelector('.problem-detail-basic-info-card');
   if (!card) return;
   card.addEventListener('click', (e) => {
-    if (e.target.closest('.btn-confirm-requirement-logic')) return;
+    if (e.target.closest('.btn-confirm-requirement-logic') || e.target.closest('.btn-redo-requirement-logic') || e.target.closest('.btn-refine-modify') || e.target.closest('.btn-refine-discuss')) return;
     cardBlock.classList.toggle('problem-detail-chat-card-expanded');
   });
   card.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      if (!e.target.closest('.btn-confirm-requirement-logic')) {
+      if (!e.target.closest('.btn-confirm-requirement-logic') && !e.target.closest('.btn-redo-requirement-logic') && !e.target.closest('.btn-refine-modify') && !e.target.closest('.btn-refine-discuss')) {
         cardBlock.classList.toggle('problem-detail-chat-card-expanded');
       }
     }
