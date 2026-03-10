@@ -118,39 +118,54 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
-  function updateDigitalProblemBasicInfo(createdAt, basicInfo) {
+  /** @param {boolean} [markTaskComplete=true] 为 false 时仅保存数据，不更新 completedStages（等用户点击「已完成」后再更新） */
+  function updateDigitalProblemBasicInfo(createdAt, basicInfo, markTaskComplete) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
     if (idx < 0) return;
     const item = list[idx];
-    const completed = item.completedStages || [];
-    if (!completed.includes(0)) completed.push(0);
-    completed.sort((a, b) => a - b);
-    list[idx] = { ...item, basicInfo, completedStages: completed };
+    if (markTaskComplete !== false) {
+      const completed = item.completedStages || [];
+      if (!completed.includes(0)) completed.push(0);
+      completed.sort((a, b) => a - b);
+      list[idx] = { ...item, basicInfo, completedStages: completed };
+    } else {
+      list[idx] = { ...item, basicInfo };
+    }
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
-  function updateDigitalProblemBmc(createdAt, bmc) {
+  /** @param {boolean} [markTaskComplete=true] 为 false 时仅保存数据，不更新 completedStages（等用户点击「已完成」后再更新） */
+  function updateDigitalProblemBmc(createdAt, bmc, markTaskComplete) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
     if (idx < 0) return;
     const item = list[idx];
-    const completed = item.completedStages || [];
-    if (!completed.includes(1)) completed.push(1);
-    completed.sort((a, b) => a - b);
-    list[idx] = { ...item, bmc, completedStages: completed };
+    if (markTaskComplete !== false) {
+      const completed = item.completedStages || [];
+      if (!completed.includes(1)) completed.push(1);
+      completed.sort((a, b) => a - b);
+      list[idx] = { ...item, bmc, completedStages: completed };
+    } else {
+      list[idx] = { ...item, bmc };
+    }
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
-  function updateDigitalProblemRequirementLogic(createdAt, requirementLogic) {
+  /** @param {boolean} [markTaskComplete=true] 为 false 时仅保存数据，不更新 completedStages（等用户点击「已完成」后再更新） */
+  function updateDigitalProblemRequirementLogic(createdAt, requirementLogic, markTaskComplete) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
     if (idx < 0) return;
     const item = list[idx];
-    const completed = item.completedStages || [];
-    if (!completed.includes(2)) completed.push(2);
-    completed.sort((a, b) => a - b);
-    list[idx] = { ...item, requirementLogic, completedStages: completed };
+    if (markTaskComplete !== false) {
+      const completed = item.completedStages || [];
+      if (!completed.includes(2)) completed.push(2);
+      completed.sort((a, b) => a - b);
+      list[idx] = { ...item, requirementLogic, completedStages: completed };
+    } else {
+      list[idx] = { ...item, requirementLogic };
+    }
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
@@ -379,6 +394,57 @@
     localStorage.setItem(global.TASK_TRACKING_STORAGE_KEY, JSON.stringify(all));
   }
 
+  /** 回退到上一个任务阶段：清空上一阶段所有数据，将 currentMajorStage 设为上一阶段，并返回更新后的问题单；若已在阶段 0 则返回 null */
+  function rollbackDigitalProblemToPreviousStage(createdAt) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return null;
+    const item = list[idx];
+    const currentMajorStage = item.currentMajorStage ?? 0;
+    if (currentMajorStage <= 0) return null;
+    const targetStage = currentMajorStage - 1;
+    let nextItem = { ...item, currentMajorStage: targetStage };
+    if (targetStage === 0) {
+      nextItem = {
+        ...nextItem,
+        completedStages: [],
+        basicInfo: undefined,
+        bmc: undefined,
+        requirementLogic: undefined,
+        workflowAlignCompletedStages: [],
+        itGapCompletedStages: [],
+        valueStream: undefined,
+        globalItGapAnalysisJson: undefined,
+        localItGapSessions: undefined,
+        localItGapAnalyses: undefined,
+        completedTaskIds: [],
+      };
+    } else if (targetStage === 1) {
+      nextItem = {
+        ...nextItem,
+        workflowAlignCompletedStages: [],
+        valueStream: undefined,
+        itGapCompletedStages: [],
+        globalItGapAnalysisJson: undefined,
+        localItGapSessions: undefined,
+        localItGapAnalyses: undefined,
+        completedTaskIds: [],
+      };
+    } else if (targetStage === 2) {
+      nextItem = {
+        ...nextItem,
+        itGapCompletedStages: [],
+        globalItGapAnalysisJson: undefined,
+        localItGapSessions: undefined,
+        localItGapAnalyses: undefined,
+        completedTaskIds: [],
+      };
+    }
+    list[idx] = nextItem;
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+    return nextItem;
+  }
+
   /** 重置问题为仅保留初步需求：删除除 customerName/customerNeedsOrChallenges/customerItStatus/projectTimeRequirement 外的所有数据 */
   function resetDigitalProblemToPreliminary(createdAt) {
     const list = getDigitalProblems();
@@ -406,6 +472,7 @@
     return resetItem;
   }
 
+  global.rollbackDigitalProblemToPreviousStage = rollbackDigitalProblemToPreviousStage;
   global.resetDigitalProblemToPreliminary = resetDigitalProblemToPreliminary;
   global.getSavedAnalyses = getSavedAnalyses;
   global.saveAnalysis = saveAnalysis;

@@ -850,18 +850,21 @@ body {
 
 .btn-problem-detail-rollback {
   flex-shrink: 0;
+  margin-left: 0.5rem;
   padding: 0.35rem 0.75rem;
   font-size: 0.8125rem;
   font-family: inherit;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border);
+  color: #fff;
+  background: #ea580c;
+  border: 1px solid #ea580c;
   border-radius: 6px;
   cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
 }
 .btn-problem-detail-rollback:hover {
-  background: var(--bg-secondary);
-  color: var(--text);
+  background: #c2410c;
+  border-color: #c2410c;
+  color: #fff;
 }
 
 .btn-problem-detail-history {
@@ -1018,6 +1021,7 @@ body {
 .btn-redo-global-itgap,
 .btn-redo-role-permission,
 .btn-redo-basic-info,
+.btn-redo-bmc,
 .btn-refine-modify,
 .btn-refine-discuss {
   padding: 0.35rem 0.75rem;
@@ -1034,6 +1038,7 @@ body {
 .btn-redo-global-itgap:hover:not(:disabled),
 .btn-redo-role-permission:hover:not(:disabled),
 .btn-redo-basic-info:hover:not(:disabled),
+.btn-redo-bmc:hover:not(:disabled),
 .btn-refine-modify:hover:not(:disabled),
 .btn-refine-discuss:hover:not(:disabled) {
   opacity: 0.9;
@@ -1043,6 +1048,7 @@ body {
 .btn-redo-global-itgap:disabled,
 .btn-redo-role-permission:disabled,
 .btn-redo-basic-info:disabled,
+.btn-redo-bmc:disabled,
 .btn-refine-modify:disabled,
 .btn-refine-discuss:disabled {
   opacity: 0.5;
@@ -2598,6 +2604,109 @@ body {
   padding: 0.5rem 0;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+/* 回退任务选择弹窗 */
+.rollback-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+}
+
+.rollback-modal-overlay.rollback-modal-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.rollback-modal-dialog {
+  background: var(--card-bg, #1e1b24);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  min-width: 320px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.rollback-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.rollback-modal-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text, #e8e4ef);
+}
+
+.rollback-modal-close {
+  padding: 0.25rem 0.5rem;
+  font-size: 1.25rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.rollback-modal-close:hover {
+  color: var(--text);
+}
+
+.rollback-modal-hint {
+  margin: 0;
+  padding: 0.75rem 1.25rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.rollback-modal-task-list {
+  padding: 0 1rem 1rem;
+  overflow-y: auto;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.rollback-modal-option {
+  display: block;
+  width: 100%;
+  padding: 0.65rem 1rem;
+  text-align: left;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.rollback-modal-option:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(234, 88, 12, 0.5);
+}
+
+.rollback-modal-option:focus {
+  outline: none;
+  border-color: #ea580c;
+  box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.3);
 }
 
 /* 历史 - 任务目录树 */
