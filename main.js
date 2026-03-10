@@ -100,6 +100,7 @@ const el = {
   problemDetailChatModeOptionAgent: document.getElementById('problemDetailChatModeOptionAgent'),
   problemDetailChatModeOptionAsk: document.getElementById('problemDetailChatModeOptionAsk'),
   btnProblemDetailBack: document.getElementById('btnProblemDetailBack'),
+  btnProblemDetailReset: document.getElementById('btnProblemDetailReset'),
   problemDetailBody: document.getElementById('problemDetailBody'),
   btnProblemDetailRollback: document.getElementById('btnProblemDetailRollback'),
   btnProblemDetailHistory: document.getElementById('btnProblemDetailHistory'),
@@ -1371,6 +1372,41 @@ if (el.btnProblemDetailBack) {
     saveRouteState('home');
     switchView('home');
     renderProblemFollowList();
+  });
+}
+if (el.btnProblemDetailReset) {
+  el.btnProblemDetailReset.addEventListener('click', () => {
+    const item = currentProblemDetailItem;
+    if (!item?.createdAt) return;
+    if (!confirm('是否要重置？')) return;
+    const resetItem = typeof resetDigitalProblemToPreliminary === 'function' ? resetDigitalProblemToPreliminary(item.createdAt) : null;
+    if (!resetItem) return;
+    currentProblemDetailItem = resetItem;
+    problemDetailConfirmedBasicInfo = null;
+    problemDetailViewingMajorStage = 0;
+    problemDetailWaitingForFeedback = null;
+    lastModificationClarification = null;
+    const task1 = (FOLLOW_TASKS || []).concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task1');
+    const task1Name = task1?.name || '企业背景洞察';
+    const startBlock = {
+      type: 'taskStartNotification',
+      taskId: 'task1',
+      taskName: task1Name,
+      timestamp: getTimeStr(),
+      confirmed: false,
+    };
+    problemDetailChatMessages = [startBlock];
+    saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+    updateProblemDetailProgressStages(0, 0);
+    renderProblemDetailContent();
+    const container = el.problemDetailChatMessages;
+    if (container) {
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+    }
+    renderProblemDetailHistory();
+    updateProblemDetailChatHeaderLabel();
   });
 }
 if (el.btnTaskTrackingBack) {

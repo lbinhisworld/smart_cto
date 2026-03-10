@@ -702,6 +702,24 @@ body {
   background: rgba(37, 99, 235, 0.06);
 }
 
+.btn-problem-detail-reset {
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  color: #fff;
+  background: #dc2626;
+  border: 1px solid #dc2626;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s, background 0.2s;
+}
+
+.btn-problem-detail-reset:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  opacity: 0.95;
+}
+
 .problem-detail-progress-sep {
   flex-shrink: 0;
   color: var(--text-muted);

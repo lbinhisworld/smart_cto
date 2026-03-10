@@ -379,6 +379,34 @@
     localStorage.setItem(global.TASK_TRACKING_STORAGE_KEY, JSON.stringify(all));
   }
 
+  /** 重置问题为仅保留初步需求：删除除 customerName/customerNeedsOrChallenges/customerItStatus/projectTimeRequirement 外的所有数据 */
+  function resetDigitalProblemToPreliminary(createdAt) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return false;
+    const item = list[idx];
+    const resetItem = {
+      createdAt,
+      customerName: item.customerName ?? item.customer_name ?? '',
+      customerNeedsOrChallenges: item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
+      customerItStatus: item.customerItStatus ?? item.customer_it_status ?? '',
+      projectTimeRequirement: item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+    };
+    list[idx] = resetItem;
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+    const chats = getProblemDetailChats();
+    delete chats[createdAt];
+    localStorage.setItem(global.PROBLEM_DETAIL_CHATS_STORAGE_KEY, JSON.stringify(chats));
+    const opHistory = getOperationHistory();
+    delete opHistory[createdAt];
+    localStorage.setItem(global.OPERATION_HISTORY_STORAGE_KEY, JSON.stringify(opHistory));
+    const tracking = getTaskTrackingData();
+    delete tracking[createdAt];
+    localStorage.setItem(global.TASK_TRACKING_STORAGE_KEY, JSON.stringify(tracking));
+    return resetItem;
+  }
+
+  global.resetDigitalProblemToPreliminary = resetDigitalProblemToPreliminary;
   global.getSavedAnalyses = getSavedAnalyses;
   global.saveAnalysis = saveAnalysis;
   global.saveRouteState = saveRouteState;
