@@ -1017,6 +1017,7 @@ body {
 
 .btn-redo-global-itgap,
 .btn-redo-role-permission,
+.btn-redo-basic-info,
 .btn-refine-modify,
 .btn-refine-discuss {
   padding: 0.35rem 0.75rem;
@@ -1032,6 +1033,7 @@ body {
 
 .btn-redo-global-itgap:hover:not(:disabled),
 .btn-redo-role-permission:hover:not(:disabled),
+.btn-redo-basic-info:hover:not(:disabled),
 .btn-refine-modify:hover:not(:disabled),
 .btn-refine-discuss:hover:not(:disabled) {
   opacity: 0.9;
@@ -1040,6 +1042,7 @@ body {
 
 .btn-redo-global-itgap:disabled,
 .btn-redo-role-permission:disabled,
+.btn-redo-basic-info:disabled,
 .btn-refine-modify:disabled,
 .btn-refine-discuss:disabled {
   opacity: 0.5;
@@ -2851,6 +2854,11 @@ body {
 .problem-detail-history-log-type-confirm {
   background: rgba(34, 197, 94, 0.25);
   color: #86efac;
+}
+
+.problem-detail-history-log-type-output {
+  background: rgba(59, 130, 246, 0.25);
+  color: #93c5fd;
 }
 
 .problem-detail-history-log-type-modify {

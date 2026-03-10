@@ -77,8 +77,9 @@
     const isOpen = open ?? !panel.classList.contains('problem-detail-history-panel-open');
     panel.classList.toggle('problem-detail-history-panel-open', isOpen);
     if (panel.setAttribute) panel.setAttribute('aria-hidden', String(!isOpen));
+    console.log('[沟通历史] toggleProblemDetailHistory', { isOpen, hasOpenClass: panel.classList.contains('problem-detail-history-panel-open') });
     if (isOpen && typeof global.renderProblemDetailHistory === 'function') {
-      global.renderProblemDetailHistory();
+      setTimeout(() => global.renderProblemDetailHistory(), 0);
     }
   }
 

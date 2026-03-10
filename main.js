@@ -203,9 +203,29 @@ function buildTaskTimelineContextForLLM(createdAt, taskId, chats) {
 /** 根据过程日志与用户修改/讨论反馈请求大模型重新生成内容 */
 async function requestRefinementFromFeedback(taskId, createdAt, timelineContext, userFeedback, type) {
   const isModification = type === 'modification';
-  const systemPrompt = isModification
-    ? `你是一位数字化问题跟进助手。用户对当前任务的某次大模型输出表示不满意，并给出了修改意见。请根据【当前任务过程日志时间线】与【用户修改意见】，综合理解后重新生成或修正输出。要求：直接给出修正后的内容（可为 Markdown、JSON 或结构化文本），便于用户确认；不要重复过程日志原文。`
-    : `你是一位数字化问题跟进助手。用户希望就当前任务进一步讨论。请根据【当前任务过程日志时间线】与【用户问题】，给出有针对性的回复（可为说明、建议或补充内容）。`;
+  const isBasicInfoMod = isModification && taskId === 'task1';
+  let systemPrompt;
+  if (isBasicInfoMod) {
+    systemPrompt = `你是一位企业信息提取助手。用户对客户基本信息表示不满意并给出了修改意见。请根据【当前任务过程日志时间线】与【用户修改意见】，修正客户基本信息。
+要求：只返回一个 JSON 对象，不要有 markdown 代码块包裹。字段如下：
+{
+  "company_name": "企业名称/公司名称",
+  "credit_code": "统一社会信用代码",
+  "legal_representative": "法定代表人",
+  "established_date": "成立日期",
+  "registered_capital": "注册资本",
+  "is_listed": "是否上市",
+  "listing_location": "上市地点",
+  "business_scope": "经营范围",
+  "core_qualifications": "核心资质",
+  "official_website": "官网"
+}
+无法推断的字段填 "" 或 "—"。`;
+  } else if (isModification) {
+    systemPrompt = `你是一位数字化问题跟进助手。用户对当前任务的某次大模型输出表示不满意，并给出了修改意见。请根据【当前任务过程日志时间线】与【用户修改意见】，综合理解后重新生成或修正输出。要求：直接给出修正后的内容（可为 Markdown、JSON 或结构化文本），便于用户确认；不要重复过程日志原文。`;
+  } else {
+    systemPrompt = `你是一位数字化问题跟进助手。用户希望就当前任务进一步讨论。请根据【当前任务过程日志时间线】与【用户问题】，给出有针对性的回复（可为说明、建议或补充内容）。`;
+  }
   const userContent = `【当前任务过程日志时间线】\n${timelineContext || '(无)'}\n\n【用户${isModification ? '修改意见' : '问题'}】\n${userFeedback || ''}`;
   const { content, usage, model, durationMs } = await fetchDeepSeekChat([
     { role: 'system', content: systemPrompt },
@@ -1482,6 +1502,36 @@ if (el.btnProblemDetailRollback) {
 if (el.btnCloseProblemDetailHistory) {
   el.btnCloseProblemDetailHistory.addEventListener('click', () => toggleProblemDetailHistory(false));
 }
+if (el.problemDetailHistoryPanel) {
+  el.problemDetailHistoryPanel.addEventListener('click', (e) => {
+    console.log('[沟通历史] panel click', {
+      target: e.target,
+      targetClass: e.target?.className,
+      targetTag: e.target?.tagName,
+      panelOpen: el.problemDetailHistoryPanel?.classList?.contains('problem-detail-history-panel-open'),
+    });
+    const btn = e.target.closest('.problem-detail-history-task-node');
+    if (!btn) {
+      console.log('[沟通历史] 未命中 task-node，忽略');
+      return;
+    }
+    console.log('[沟通历史] 命中 task-node', { taskId: btn.getAttribute('data-task-id') });
+    e.preventDefault();
+    e.stopPropagation();
+    const root = btn.closest('.problem-detail-history-task-root');
+    const children = root?.querySelector('.problem-detail-history-task-children');
+    if (!children) {
+      console.log('[沟通历史] 未找到 task-children', { root: !!root });
+      return;
+    }
+    const wasHidden = !!children.hidden;
+    const willShow = wasHidden;
+    console.log('[沟通历史] toggle', { wasHidden, willShow, childrenHiddenAttr: children.getAttribute('hidden') });
+    children.hidden = !willShow;
+    btn.classList.toggle('expanded', willShow);
+    console.log('[沟通历史] 已执行', { childrenHiddenNow: children.hidden, btnExpanded: btn.classList.contains('expanded') });
+  });
+}
 if (el.problemDetailBody) {
   el.problemDetailBody.addEventListener('click', (e) => {
     const triggerBtn = e.target.closest('.btn-trigger-local-itgap-session');
@@ -1643,7 +1693,6 @@ if (el.problemDetailChatMessages) {
             renderProblemDetailHistory();
             const taskName = (FOLLOW_TASKS || []).concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === taskId)?.name || taskId;
             showTaskCompletionConfirm(taskId, taskName);
-            showNextTaskStartNotification();
           }
         }
       }
@@ -1667,6 +1716,7 @@ if (el.problemDetailChatMessages) {
         container.scrollTop = container.scrollHeight;
       }
       renderProblemDetailHistory();
+      requestAnimationFrame(() => showNextTaskStartNotification());
       return;
     }
     const taskCompleteNotYetBtn = e.target.closest('.btn-task-complete-not-yet');
@@ -1946,7 +1996,6 @@ if (el.problemDetailChatMessages) {
             const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
             if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             showTaskCompletionConfirm('task10', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task10')?.name) || '角色与权限模型');
-            showNextTaskStartNotification();
           });
         }
       }
@@ -2039,7 +2088,6 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailHistory();
         requestAnimationFrame(() => {
           showTaskCompletionConfirm('task7', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task7')?.name) || '端到端流程绘制');
-          showNextTaskStartNotification();
         });
       } catch (_) {}
       return;
@@ -2096,7 +2144,6 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailHistory();
         requestAnimationFrame(() => {
           showTaskCompletionConfirm('task8', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task8')?.name) || '全局 ITGap 分析');
-          showNextTaskStartNotification();
         });
       } catch (_) {}
       return;
@@ -2192,7 +2239,6 @@ if (el.problemDetailChatMessages) {
         } else {
           requestAnimationFrame(() => {
             showTaskCompletionConfirm('task9', taskNameTask9);
-            showNextTaskStartNotification();
           });
         }
       } catch (_) {}
@@ -2358,7 +2404,6 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailContent();
         requestAnimationFrame(() => {
           showTaskCompletionConfirm('task4', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task4')?.name) || '绘制价值流');
-          showNextTaskStartNotification();
         });
       } catch (_) {}
       return;
@@ -2391,7 +2436,6 @@ if (el.problemDetailChatMessages) {
         bmcBtn.disabled = true;
         requestAnimationFrame(() => {
           showTaskCompletionConfirm('task2', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task2')?.name) || '商业画布加载');
-          showNextTaskStartNotification();
         });
       } catch (_) {}
       return;
@@ -2662,10 +2706,12 @@ if (el.problemDetailChatMessages) {
                 const value = (parsed[key] != null ? String(parsed[key]).trim() : '') || '—';
                 return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(value)}</span></div>`;
               }).join('');
-              cardBlock.innerHTML = `<div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info" data-json="${String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+              cardBlock.innerHTML = `<div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">进一步讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
               el.problemDetailChatMessages?.appendChild(cardBlock);
-              setupProblemDetailChatCardToggle(cardBlock);
               pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
+              cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+              cardBlock.dataset.taskId = 'task1';
+              setupProblemDetailChatCardToggle(cardBlock);
               renderProblemDetailContent();
               updateProblemDetailChatHeaderLabel();
             } catch (_) {}
@@ -2673,6 +2719,48 @@ if (el.problemDetailChatMessages) {
           });
         }
       } catch (_) {}
+      return;
+    }
+    const redoBasicInfoBtn = e.target.closest('.btn-redo-basic-info');
+    if (redoBasicInfoBtn && !redoBasicInfoBtn.disabled) {
+      const card = redoBasicInfoBtn.closest('[data-msg-index]');
+      const item = currentProblemDetailItem;
+      if (!card || !item?.createdAt || !DEEPSEEK_API_KEY) return;
+      const idx = parseInt(card.getAttribute('data-msg-index'), 10);
+      if (isNaN(idx) || idx < 0 || idx >= problemDetailChatMessages.length) return;
+      let textToParse = '';
+      for (let i = idx - 1; i >= 0; i--) {
+        const m = problemDetailChatMessages[i];
+        if (m.role === 'user') { textToParse = (m.content || '').trim(); break; }
+        if (m.type === 'intentExtractionCard' && m.userText) { textToParse = (m.userText || '').trim(); break; }
+      }
+      if (!textToParse) return;
+      redoBasicInfoBtn.disabled = true;
+      const labels = [
+        { key: 'company_name', label: '公司名称' }, { key: 'credit_code', label: '信用代码' }, { key: 'legal_representative', label: '法人' },
+        { key: 'established_date', label: '成立时间' }, { key: 'registered_capital', label: '注册资本' }, { key: 'is_listed', label: '是否上市' },
+        { key: 'listing_location', label: '上市地' }, { key: 'business_scope', label: '经营范围' }, { key: 'core_qualifications', label: '核心资质' }, { key: 'official_website', label: '官方网站' },
+      ];
+      requestAnimationFrame(async () => {
+        try {
+          const { parsed } = await parseCompanyBasicInfoInput(textToParse);
+          problemDetailConfirmedBasicInfo = null;
+          const messages = problemDetailChatMessages;
+          if (idx >= 0 && idx < messages.length && messages[idx].type === 'basicInfoCard') {
+            messages[idx] = { ...messages[idx], data: parsed, confirmed: false };
+            saveProblemDetailChat(item.createdAt, messages);
+          }
+          const container = el.problemDetailChatMessages;
+          if (container) {
+            container.innerHTML = '';
+            renderProblemDetailChatFromStorage(container, messages);
+            container.scrollTop = container.scrollHeight;
+          }
+          renderProblemDetailContent();
+          updateProblemDetailChatHeaderLabel();
+        } catch (_) {}
+        finally { redoBasicInfoBtn.disabled = false; }
+      });
       return;
     }
     const btn = e.target.closest('.btn-confirm-basic-info');
@@ -2701,11 +2789,11 @@ if (el.problemDetailChatMessages) {
         }
         renderProblemDetailContent();
         updateProblemDetailChatHeaderLabel();
+        renderProblemDetailHistory();
         btn.textContent = '已确认';
         btn.disabled = true;
         requestAnimationFrame(() => {
           showTaskCompletionConfirm('task1', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task1')?.name) || '企业背景洞察');
-          showNextTaskStartNotification();
         });
       } catch (_) {}
     }
@@ -6514,16 +6602,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
     } else if (msg.type === 'taskCompleteBlock') {
-      const block = document.createElement('div');
-      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-task-complete';
-      block.dataset.msgIndex = String(idx);
-      block.innerHTML = `
-        <div class="problem-detail-chat-msg-content-wrap">
-          <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-complete">任务完成</span>
-          <div class="problem-detail-chat-msg-content">用户确认任务完成</div>
-        </div>
-        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
-      container.appendChild(block);
+      // 任务完成仅写入过程日志，不在聊天区展示
+      return;
     } else if (msg.type === 'modificationResponseBlock') {
       const taskId = msg.taskId || '';
       const taskName = (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === taskId) || {}).name || taskId;
@@ -6539,8 +6619,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-msg-content markdown-body">${renderMarkdown(msg.content || '')}</div>
           <div class="problem-detail-modification-response-actions">
             <button type="button" class="btn-confirm-modification-response btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
@@ -6687,8 +6767,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-bmc-card-expand-hint">点击展开</div>
           <div class="problem-detail-bmc-card-actions">
             <button type="button" class="btn-confirm-bmc" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
@@ -6715,8 +6795,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-basic-info-card-body">${rows}</div>
           <div class="problem-detail-basic-info-card-actions">
             <button type="button" class="btn-confirm-requirement-logic" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -6734,8 +6814,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-msg-content">开始绘制价值流图</div>
           <div class="problem-detail-chat-draw-value-stream-start-actions">
             <button type="button" class="btn-confirm-draw-value-stream" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -6756,8 +6836,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
           <div class="problem-detail-chat-value-stream-card-actions">
             <button type="button" class="btn-confirm-value-stream" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
@@ -6790,9 +6870,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
               <button type="button" class="btn-confirm-role-permission btn-confirm-primary" ${
                 msg.confirmed ? 'disabled' : ''
               }>${msg.confirmed ? '已确认' : '确认'}</button>
-              <button type="button" class="btn-refine-modify">修改</button>
-              <button type="button" class="btn-refine-discuss">进一步讨论</button>
-              <button type="button" class="btn-redo-role-permission">重做</button>
+              <button type="button" class="btn-refine-modify" ${msg.confirmed ? 'disabled' : ''}>修正</button>
+              <button type="button" class="btn-refine-discuss" ${msg.confirmed ? 'disabled' : ''}>进一步讨论</button>
+              <button type="button" class="btn-redo-role-permission" ${msg.confirmed ? 'disabled' : ''}>重做</button>
             </div>
           </div>
         </div>
@@ -6843,8 +6923,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <pre class="problem-detail-chat-json-pre">${jsonStr}</pre>
           <div class="problem-detail-chat-e2e-json-actions">
             <button type="button" class="btn-confirm-e2e-json" data-json="${dataAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -6901,8 +6981,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-global-itgap-card-body">${bodyContent}</div>
           <div class="problem-detail-chat-global-itgap-card-actions">
             ${confirmBtn}
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
             <button type="button" class="btn-redo-global-itgap" ${confirmed ? 'disabled' : ''}>重做</button>
           </div>
         </div>
@@ -7001,8 +7081,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-local-itgap-card-body">${structuredHtml}</div>
           <div class="problem-detail-chat-local-itgap-card-actions">
             <button type="button" class="btn-confirm-local-itgap btn-confirm-primary" data-json="${dataAttr}" data-step-name="${escapeHtml(stepName)}" data-step-index="${stepIndex}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
@@ -7059,8 +7139,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-basic-info-card-body">${rowsHtml}</div>
           <div class="problem-detail-basic-info-card-actions">
             <button type="button" class="btn-confirm-intent-extraction" data-extracted="${dataAttr}" data-user-text="${userTextAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
             ${rejectBtnHtml}
           </div>
         </div>
@@ -7094,14 +7174,28 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-basic-info-card" role="button" tabindex="0">
           <div class="problem-detail-basic-info-card-body">${rows}</div>
           <div class="problem-detail-basic-info-card-actions">
-            <button type="button" class="btn-confirm-basic-info" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify">修改</button>
-            <button type="button" class="btn-refine-discuss">进一步讨论</button>
+            <button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-redo-basic-info" ${confirmed ? 'disabled' : ''}>重做</button>
+            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>进一步讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${msg.timestamp || ''}</div>`;
       container.appendChild(cardBlock);
       setupProblemDetailChatCardToggle(cardBlock);
+    } else if (msg.type === 'unsatisfiedBlock') {
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-unsatisfied problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.dataset.taskId = msg.taskId || '';
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-unsatisfied">不满意</span>
+          <div class="problem-detail-chat-msg-content">用户表示不满意，请描述修改意见（输入后发送）</div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
     } else {
       const block = document.createElement('div');
       const collapsibleClass = msg.role === 'user' ? ' problem-detail-chat-msg-collapsible' : '';
@@ -7166,13 +7260,13 @@ function setupProblemDetailChatCardToggle(cardBlock) {
   const card = cardBlock?.querySelector('.problem-detail-basic-info-card');
   if (!card) return;
   card.addEventListener('click', (e) => {
-    if (e.target.closest('.btn-confirm-basic-info') || e.target.closest('.btn-confirm-requirement-logic')) return;
+    if (e.target.closest('.btn-confirm-basic-info') || e.target.closest('.btn-confirm-requirement-logic') || e.target.closest('.btn-redo-basic-info') || e.target.closest('.btn-refine-modify') || e.target.closest('.btn-refine-discuss')) return;
     cardBlock.classList.toggle('problem-detail-chat-card-expanded');
   });
   card.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      if (!e.target.closest('.btn-confirm-basic-info') && !e.target.closest('.btn-confirm-requirement-logic')) {
+      if (!e.target.closest('.btn-confirm-basic-info') && !e.target.closest('.btn-confirm-requirement-logic') && !e.target.closest('.btn-redo-basic-info') && !e.target.closest('.btn-refine-modify') && !e.target.closest('.btn-refine-discuss')) {
         cardBlock.classList.toggle('problem-detail-chat-card-expanded');
       }
     }
@@ -7239,7 +7333,6 @@ function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
       renderProblemDetailHistory();
       requestAnimationFrame(() => {
         showTaskCompletionConfirm('task3', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task3')?.name) || '需求逻辑构建');
-        showNextTaskStartNotification();
       });
     });
   }
@@ -7289,6 +7382,13 @@ async function handleProblemDetailChatSend() {
   if (problemDetailWaitingForFeedback) {
     const { taskId, createdAt, type } = problemDetailWaitingForFeedback;
     problemDetailWaitingForFeedback = null;
+    if (type === 'modification' && problemDetailChatMessages.length > 0) {
+      const lastMsg = problemDetailChatMessages[problemDetailChatMessages.length - 1];
+      if (lastMsg && lastMsg.role === 'user') {
+        lastMsg._logType = 'modify';
+        saveProblemDetailChat(createdAt, problemDetailChatMessages);
+      }
+    }
     const parsingBlock = document.createElement('div');
     parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
     parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在根据您的反馈${type === 'modification' ? '重新生成' : '讨论'}…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -7300,6 +7400,29 @@ async function handleProblemDetailChatSend() {
       const { content, usage, model, durationMs } = await requestRefinementFromFeedback(taskId, createdAt, timelineContext, text, type);
       parsingBlock.remove();
       const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+      if (taskId === 'task1' && type === 'modification') {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        const jsonStr = jsonMatch ? jsonMatch[0] : content;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          if (parsed && typeof parsed === 'object' && (parsed.company_name != null || parsed.credit_code != null || parsed.business_scope != null)) {
+            pushAndSaveProblemDetailChat({
+              role: 'system',
+              type: 'basicInfoCard',
+              data: parsed,
+              timestamp: getTimeStr(),
+              confirmed: false,
+              llmMeta: { usage, model, durationMs },
+            });
+            container.innerHTML = '';
+            renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+            container.scrollTop = container.scrollHeight;
+            renderProblemDetailHistory();
+            if (sendBtn) sendBtn.disabled = false;
+            return;
+          }
+        } catch (_) {}
+      }
       pushAndSaveProblemDetailChat({
         type: 'modificationResponseBlock',
         taskId,
@@ -7350,6 +7473,53 @@ async function handleProblemDetailChatSend() {
     return;
   }
 
+  const item = currentProblemDetailItem;
+  const firstUncompleted = getFirstUncompletedTask(item);
+  const isTask1Stage = firstUncompleted?.id === 'task1' && !problemDetailConfirmedBasicInfo;
+
+  if (isTask1Stage) {
+    const task1ParsingBlock = document.createElement('div');
+    task1ParsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    task1ParsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在提炼客户基本信息</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(task1ParsingBlock);
+    container.scrollTop = container.scrollHeight;
+    try {
+      if (!DEEPSEEK_API_KEY) {
+        throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
+      }
+      const { parsed } = await parseCompanyBasicInfoInput(text);
+      task1ParsingBlock.remove();
+      const labels = [
+        { key: 'company_name', label: '公司名称' }, { key: 'credit_code', label: '信用代码' }, { key: 'legal_representative', label: '法人' },
+        { key: 'established_date', label: '成立时间' }, { key: 'registered_capital', label: '注册资本' }, { key: 'is_listed', label: '是否上市' },
+        { key: 'listing_location', label: '上市地' }, { key: 'business_scope', label: '经营范围' }, { key: 'core_qualifications', label: '核心资质' }, { key: 'official_website', label: '官方网站' },
+      ];
+      const rows = labels.map(({ key, label }) => {
+        const value = (parsed[key] != null ? String(parsed[key]).trim() : '') || '—';
+        return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(value)}</span></div>`;
+      }).join('');
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
+      cardBlock.dataset.taskId = 'task1';
+      const jsonAttr = String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      cardBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${jsonAttr}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">进一步讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(cardBlock);
+      pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
+      setupProblemDetailChatCardToggle(cardBlock);
+      renderProblemDetailContent();
+      updateProblemDetailChatHeaderLabel();
+      renderProblemDetailHistory();
+    } catch (err) {
+      task1ParsingBlock.classList.remove('problem-detail-chat-msg-parsing');
+      task1ParsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">客户基本信息提炼失败：${escapeHtml(err.message || String(err))}</div>`;
+      pushAndSaveProblemDetailChat({ role: 'system', content: '客户基本信息提炼失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+    }
+    container.scrollTop = container.scrollHeight;
+    if (sendBtn) sendBtn.disabled = false;
+    return;
+  }
+
   const parsingBlock = document.createElement('div');
   parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
   parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在提炼意图</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -7359,7 +7529,6 @@ async function handleProblemDetailChatSend() {
     if (!DEEPSEEK_API_KEY) {
       throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
     }
-    const item = currentProblemDetailItem;
     const createdAt = item?.createdAt;
     const { context: contextStr, currentTask } = buildIntentExtractionContext(createdAt, item);
     let textForExtraction = text;

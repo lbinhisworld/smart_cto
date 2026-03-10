@@ -50,7 +50,8 @@
       if (msg.data?.intent === 'discussion') return false; // 请教讨论：意图卡片本身不纳入，用户消息与系统回复已单独处理
       return !!msg.confirmed;
     }
-    if (type === 'basicInfoCard' || type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard') return true;
+    if (type === 'basicInfoCard') return true;
+    if (type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard') return true;
     if (type === 'e2eFlowGeneratedLog') return true;
     if (type === 'e2eFlowExtractStartBlock') return !!msg.confirmed;
     if (type === 'e2eFlowJsonBlock') return !!msg.confirmed;
@@ -65,7 +66,7 @@
     if (type === 'rolePermissionConfirmedLog') return true;
     if (type === 'taskContextBlock') return true;
     if (type === 'taskCompleteBlock') return true;
-    if (type === 'unsatisfiedBlock') return true;
+    if (type === 'unsatisfiedBlock') return false; // 用户点击「修正」时不向过程日志推送该块
     if (type === 'modificationResponseBlock') return true;
     return false;
   }
@@ -118,6 +119,7 @@
       if (!shouldIncludeInCommunicationHistory(msg)) continue;
       const speaker = (msg.role === 'user' || msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock') ? '用户' : '系统大模型';
       const payload = { role: msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock' ? 'user' : (msg.role || 'system'), content: msg.content, type: msg.type, timestamp: msg.timestamp };
+      if (msg._logType) payload._logType = msg._logType;
       if ((msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock' || msg.type === 'modificationResponseBlock') && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'modificationResponseBlock' && msg.llmMeta) payload.llmMeta = msg.llmMeta;
       if (msg.type === 'taskContextBlock') {
@@ -126,6 +128,7 @@
         payload.taskId = msg.taskId;
       }
       if (msg.data) payload.data = msg.data;
+      if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard'].includes(msg.type)) payload.confirmed = !!msg.confirmed;
       if (msg.parsed) payload.parsed = msg.parsed;
       if (msg.type === 'intentExtractionCard' && msg.userText) payload.userText = msg.userText;
       if (msg.type === 'e2eFlowGeneratedLog' && msg.valueStreamJson) payload.valueStreamJson = msg.valueStreamJson;
@@ -169,8 +172,13 @@
     return flat;
   }
 
-  /** 从沟通记录条目解析日志类型：输入、确认、修改、讨论、上下文、任务完成、不满意 */
+  /** 从沟通记录条目解析日志类型：输入、输出、确认、修正、讨论、上下文、任务完成、不满意 */
   function getCommunicationLogType(c) {
+    try {
+      const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
+      if (parsed?._logType === 'modify') return '修正';
+      if (parsed?.type === 'taskCompleteBlock') return '任务完成';
+    } catch (_) {}
     if (c.speaker === '用户') return '输入';
     try {
       const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
@@ -178,19 +186,99 @@
       if (parsed?.type === 'unsatisfiedBlock') return '不满意';
       if (parsed?.type === 'taskContextBlock') return '上下文';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'discussion') return '讨论';
-      if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') return '修改';
+      if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') {
+        const target = String(parsed?.data?.modificationTarget || '');
+        const taskId = parsed?.data?.taskId || '';
+        if (taskId === 'task1' && (target.includes('企业基本信息') || target.includes('基本信息') || !target)) return '确认';
+        return '修正';
+      }
       if (parsed?.type === 'intentExtractionCard' && (parsed?.data?.intent === 'query' || parsed?.data?.intent === 'execute')) return '上下文';
       if (c.speaker === '系统提炼') return '讨论';
+      if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard'].includes(parsed?.type)) {
+        return parsed?.data && parsed?.confirmed !== false ? '确认' : '输出';
+      }
     } catch (_) {}
     return '确认';
   }
 
-  const LOG_TYPE_CLASS = { '输入': 'input', '确认': 'confirm', '修改': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied' };
+  const LOG_TYPE_CLASS = { '输入': 'input', '输出': 'output', '确认': 'confirm', '修正': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied' };
   const INTENT_LABELS = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
+
+  /** 在重新渲染前采集当前展开状态，刷新后恢复，避免沟通历史面板更新时折叠已展开的任务/时间线 */
+  function captureHistoryExpandedState(container) {
+    const state = {};
+    if (!container) return state;
+    container.querySelectorAll('.problem-detail-history-task-root').forEach((root) => {
+      const taskId = root.getAttribute('data-task-id');
+      if (!taskId) return;
+      const children = root.querySelector('.problem-detail-history-task-children');
+      const taskNode = root.querySelector('.problem-detail-history-task-node');
+      const expanded = children && !children.hidden;
+      let activeTab = 'detail';
+      const activeTabEl = root.querySelector('.problem-detail-history-tab.problem-detail-history-tab-active');
+      if (activeTabEl) activeTab = activeTabEl.getAttribute('data-tab') || 'detail';
+      const expandedTimelineIndices = [];
+      if (expanded && activeTab === 'log') {
+        root.querySelectorAll('.problem-detail-history-timeline-node').forEach((node) => {
+          const idx = node.getAttribute('data-index');
+          const detail = node.querySelector('.problem-detail-history-timeline-detail');
+          if (detail && !detail.hidden && idx != null) expandedTimelineIndices.push(parseInt(idx, 10));
+        });
+      }
+      state[taskId] = { expanded, activeTab, expandedTimelineIndices };
+    });
+    return state;
+  }
+
+  /** 根据采集的展开状态恢复 UI */
+  function restoreHistoryExpandedState(container, state) {
+    if (!container || !state || typeof state !== 'object') return;
+    Object.keys(state).forEach((taskId) => {
+      const s = state[taskId];
+      if (!s) return;
+      const root = container.querySelector(`.problem-detail-history-task-root[data-task-id="${taskId}"]`);
+      if (!root) return;
+      const children = root.querySelector('.problem-detail-history-task-children');
+      const taskNode = root.querySelector('.problem-detail-history-task-node');
+      if (s.expanded && children && taskNode) {
+        children.hidden = false;
+        taskNode.classList.add('expanded');
+      }
+      if (s.activeTab === 'log' && children) {
+        const tabs = children.querySelector('.problem-detail-history-task-tabs');
+        if (tabs) {
+          tabs.querySelectorAll('.problem-detail-history-tab').forEach((t) => {
+            const isLog = t.getAttribute('data-tab') === 'log';
+            t.classList.toggle('problem-detail-history-tab-active', isLog);
+            t.setAttribute('aria-selected', String(isLog));
+          });
+          children.querySelectorAll('.problem-detail-history-tab-panel').forEach((p) => {
+            p.hidden = p.getAttribute('data-tab') !== 'log';
+          });
+        }
+      }
+      if (s.expandedTimelineIndices && s.expandedTimelineIndices.length > 0) {
+        root.querySelectorAll('.problem-detail-history-timeline-node').forEach((node) => {
+          const idx = parseInt(node.getAttribute('data-index'), 10);
+          if (!s.expandedTimelineIndices.includes(idx)) return;
+          const detail = node.querySelector('.problem-detail-history-timeline-detail');
+          const head = node.querySelector('.problem-detail-history-timeline-head');
+          const expandSpan = node.querySelector('.problem-detail-history-timeline-expand');
+          if (detail) detail.hidden = false;
+          if (head) {
+            head.classList.add('expanded');
+            head.setAttribute('aria-expanded', 'true');
+          }
+          if (expandSpan) expandSpan.classList.add('expanded');
+        });
+      }
+    });
+  }
 
   /** 渲染沟通历史面板：任务详情/过程日志双 Tab、时间线及日志类型标签。deps: { item, getChatsForProblem, getTaskStatusText } */
   function renderProblemDetailHistory(container, deps) {
     if (!container) return;
+    const expandedState = captureHistoryExpandedState(container);
     const item = deps?.item;
     const getChatsForProblem = deps?.getChatsForProblem;
     const getTaskStatusText = deps?.getTaskStatusText;
@@ -224,8 +312,20 @@
             try {
               const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
               if (parsed?.role === 'user') {
-                titleLabel = '用户输入';
+                titleLabel = parsed?._logType === 'modify' ? '用户修正意见' : '用户输入';
                 contentStr = (parsed?.content != null ? String(parsed.content).trim() : '') || '(空)';
+              } else if (parsed?.type === 'basicInfoCard') {
+                titleLabel = parsed?.confirmed ? '客户基本信息（已确认）' : '客户基本信息（大模型输出）';
+                contentStr = parsed?.data != null ? JSON.stringify(parsed.data, null, 2) : (contentStr || '(空)');
+              } else if (parsed?.type === 'bmcCard') {
+                titleLabel = parsed?.confirmed ? 'BMC（已确认）' : 'BMC（大模型输出）';
+                contentStr = parsed?.data != null ? JSON.stringify(parsed.data, null, 2) : (contentStr || '(空)');
+              } else if (parsed?.type === 'requirementLogicBlock') {
+                titleLabel = parsed?.confirmed ? '需求逻辑（已确认）' : '需求逻辑（大模型输出）';
+                contentStr = parsed?.data != null ? JSON.stringify(parsed.data, null, 2) : (parsed?.content != null ? String(parsed.content) : '(空)');
+              } else if (parsed?.type === 'valueStreamCard') {
+                titleLabel = parsed?.confirmed ? '价值流图（已确认）' : '价值流图（大模型输出）';
+                contentStr = parsed?.data != null ? JSON.stringify(parsed.data, null, 2) : (contentStr || '(空)');
               } else if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent != null) {
                 const intentLabel = INTENT_LABELS[parsed.data.intent] || parsed.data.intent || '—';
                 titleLabel = `用户意图提炼：${intentLabel}`;
@@ -330,16 +430,7 @@
         </div>
       </div>`;
     }).join('');
-    container.querySelectorAll('.problem-detail-history-task-node').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const root = btn.closest('.problem-detail-history-task-root');
-        const children = root?.querySelector('.problem-detail-history-task-children');
-        if (!children) return;
-        const expanded = !children.hidden;
-        children.hidden = expanded;
-        btn.classList.toggle('expanded', !expanded);
-      });
-    });
+    /* 任务节点展开由 main.js 在 problemDetailHistoryPanel 上的事件委托处理 */
     container.querySelectorAll('.problem-detail-history-tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         const root = tab.closest('.problem-detail-history-task-children');
@@ -368,6 +459,9 @@
         btn.querySelector('.problem-detail-history-timeline-expand')?.classList.toggle('expanded', !isExpanded);
       });
     });
+    restoreHistoryExpandedState(container, expandedState);
+    const taskNodeCount = container.querySelectorAll('.problem-detail-history-task-node').length;
+    console.log('[沟通历史] 渲染完成', { taskNodeCount, hasPanel: !!container.closest('.problem-detail-history-panel') });
   }
 
   global.inferTaskIdFromMessage = inferTaskIdFromMessage;
