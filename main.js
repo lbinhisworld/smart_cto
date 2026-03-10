@@ -1507,6 +1507,10 @@ function applyRollbackToTask(targetTaskId) {
   if (!item?.createdAt || !targetTaskId) return;
   const updated = buildItemAfterRollbackToTaskId(item, targetTaskId);
   if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
+  const chats = typeof getProblemDetailChats === 'function' ? (getProblemDetailChats()[item.createdAt] || problemDetailChatMessages) : problemDetailChatMessages;
+  const filteredChats = filterChatMessagesAfterRollback(Array.isArray(chats) ? chats : [], targetTaskId);
+  if (typeof saveProblemDetailChat === 'function') saveProblemDetailChat(item.createdAt, filteredChats);
+  problemDetailChatMessages = filteredChats;
   const list = getDigitalProblems();
   const fromStorage = list.find((p) => String(p.createdAt) === String(item.createdAt));
   const finalItem = fromStorage || updated;
@@ -2432,7 +2436,6 @@ if (el.problemDetailChatMessages) {
           problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: valueStream, confirmed: true };
           saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
         }
-        pushAndSaveProblemDetailChat({ type: 'valueStreamConfirmLog', taskId: 'task4', data: valueStream, timestamp: getTimeStr() });
         valueStreamBtn.textContent = '已确认';
         valueStreamBtn.disabled = true;
         renderProblemDetailContent();
@@ -5784,6 +5787,28 @@ function buildItemAfterRollbackToTaskId(item, targetTaskId) {
   return next;
 }
 
+/** 回退到某任务时，从沟通历史中移除该任务及之后所有任务的过程日志；返回截断后的消息数组 */
+function filterChatMessagesAfterRollback(messages, targetTaskId) {
+  if (!Array.isArray(messages) || messages.length === 0 || !targetTaskId) return messages;
+  const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
+  const targetIdx = allTasks.findIndex((t) => t.id === targetTaskId);
+  if (targetIdx < 0) return messages;
+  const inferTaskId = typeof window.inferTaskIdFromMessage === 'function' ? window.inferTaskIdFromMessage : () => null;
+  let lastKeptIndex = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const taskId = msg.taskId || msg._taskId || inferTaskId(msg);
+    if (taskId) {
+      const idx = allTasks.findIndex((t) => t.id === taskId);
+      if (idx >= 0 && idx >= targetIdx) break;
+      if (idx >= 0) lastKeptIndex = i;
+    } else {
+      lastKeptIndex = i;
+    }
+  }
+  return messages.slice(0, lastKeptIndex + 1);
+}
+
 /** 根据《数字化问题跟进阶段设计》1.3 各任务输入数据，从当前问题记录（不含聊天区内容）合成该任务的上下文 JSON，供沟通历史「上下文」块展示 */
 function buildTaskContextJson(taskId, item) {
   if (!item) return {};
@@ -7862,6 +7887,41 @@ async function handleProblemDetailChatSend() {
             return;
           }
         } catch (_) {}
+      }
+      if (taskId === 'task4' && type === 'modification') {
+        let valueStreamJson = null;
+        const jsonBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (jsonBlockMatch) {
+          try {
+            valueStreamJson = JSON.parse(jsonBlockMatch[1].trim());
+          } catch (_) {}
+        }
+        if (!valueStreamJson) {
+          const fallbackMatch = content.match(/\{[\s\S]*\}/);
+          if (fallbackMatch) {
+            try {
+              valueStreamJson = JSON.parse(fallbackMatch[0]);
+            } catch (_) {}
+          }
+        }
+        if (valueStreamJson && typeof valueStreamJson === 'object') {
+          const valueStream = valueStreamJson;
+          pushAndSaveProblemDetailChat({
+            type: 'valueStreamCard',
+            taskId: 'task4',
+            data: valueStream,
+            logicText: content.replace(/```[\s\S]*?```/g, '').trim(),
+            timestamp: getTimeStr(),
+            confirmed: false,
+            llmMeta: { usage, model, durationMs },
+          });
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+          renderProblemDetailHistory();
+          if (sendBtn) sendBtn.disabled = false;
+          return;
+        }
       }
       pushAndSaveProblemDetailChat({
         type: 'modificationResponseBlock',
