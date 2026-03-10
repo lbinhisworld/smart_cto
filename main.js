@@ -1507,10 +1507,14 @@ function applyRollbackToTask(targetTaskId) {
   if (!item?.createdAt || !targetTaskId) return;
   const updated = buildItemAfterRollbackToTaskId(item, targetTaskId);
   if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
-  problemDetailConfirmedBasicInfo = updated.basicInfo || null;
-  currentProblemDetailItem = updated;
-  const targetStage = updated.currentMajorStage ?? 0;
+  const list = getDigitalProblems();
+  const fromStorage = list.find((p) => String(p.createdAt) === String(item.createdAt));
+  const finalItem = fromStorage || updated;
+  problemDetailConfirmedBasicInfo = finalItem.basicInfo || null;
+  currentProblemDetailItem = finalItem;
+  const targetStage = finalItem.currentMajorStage ?? getMajorStageByTaskId(targetTaskId);
   problemDetailViewingMajorStage = targetStage;
+  if (typeof updateDigitalProblemMajorStage === 'function') updateDigitalProblemMajorStage(item.createdAt, targetStage);
   updateProblemDetailProgressStages(targetStage, targetStage);
   renderProblemDetailContent();
   const container = el.problemDetailChatMessages;
@@ -2408,6 +2412,15 @@ if (el.problemDetailChatMessages) {
     if (valueStreamBtn && valueStreamBtn.dataset.json && !valueStreamBtn.disabled) {
       try {
         const valueStream = JSON.parse(valueStreamBtn.dataset.json);
+        const item = currentProblemDetailItem;
+        if (item?.createdAt) {
+          if (typeof updateDigitalProblemValueStreamDataOnly === 'function') {
+            updateDigitalProblemValueStreamDataOnly(item.createdAt, valueStream);
+          } else {
+            updateDigitalProblemValueStream(item.createdAt, valueStream);
+          }
+          currentProblemDetailItem = { ...item, valueStream };
+        }
         let idx = -1;
         for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
           if (problemDetailChatMessages[i].type === 'valueStreamCard') {
@@ -2419,24 +2432,17 @@ if (el.problemDetailChatMessages) {
           problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: valueStream, confirmed: true };
           saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
         }
+        pushAndSaveProblemDetailChat({ type: 'valueStreamConfirmLog', taskId: 'task4', data: valueStream, timestamp: getTimeStr() });
         valueStreamBtn.textContent = '已确认';
         valueStreamBtn.disabled = true;
-        const hasDrawStart = problemDetailChatMessages.some((m) => m.type === 'drawValueStreamStartBlock');
-        if (!hasDrawStart) {
-          const drawBlock = document.createElement('div');
-          drawBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-draw-value-stream-start';
-          drawBlock.innerHTML = `
-            <div class="problem-detail-chat-msg-content-wrap">
-              <div class="problem-detail-chat-msg-content">开始绘制价值流图</div>
-              <div class="problem-detail-chat-draw-value-stream-start-actions">
-                <button type="button" class="btn-confirm-draw-value-stream" data-json="${String(JSON.stringify(valueStream)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button>
-              </div>
-            </div>
-            <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-          el.problemDetailChatMessages?.appendChild(drawBlock);
-          pushAndSaveProblemDetailChat({ type: 'drawValueStreamStartBlock', data: valueStream, timestamp: getTimeStr() });
-          el.problemDetailChatMessages.scrollTop = el.problemDetailChatMessages.scrollHeight;
+        renderProblemDetailContent();
+        const container = el.problemDetailChatMessages;
+        if (container) {
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
         }
+        renderProblemDetailHistory();
         showTaskCompletionConfirm('task4', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task4')?.name) || '绘制价值流');
       } catch (_) {}
       return;
@@ -2463,6 +2469,24 @@ if (el.problemDetailChatMessages) {
           showTaskCompletionConfirm('task4', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task4')?.name) || '绘制价值流');
         });
       } catch (_) {}
+      return;
+    }
+    const redoValueStreamBtn = e.target.closest('.btn-redo-value-stream');
+    if (redoValueStreamBtn && !redoValueStreamBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const vsIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'valueStreamCard');
+      if (vsIdx >= 0 && item?.createdAt) {
+        problemDetailChatMessages.splice(vsIdx, 1);
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        const chatContainer = el.problemDetailChatMessages;
+        if (chatContainer) {
+          chatContainer.innerHTML = '';
+          renderProblemDetailChatFromStorage(chatContainer, problemDetailChatMessages);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        renderProblemDetailHistory();
+        requestAnimationFrame(() => runValueStreamGeneration());
+      }
       return;
     }
     const redoBmcBtn = e.target.closest('.btn-redo-bmc');
@@ -3903,7 +3927,7 @@ function getChatsForProblem(createdAt) {
 }
 
 /** Ask 模式上下文单块最大字符数（确保涵盖所有数据，仅极端超长时截断） */
-const ASK_CONTEXT_MAX_PER_BLOCK = 20000;
+const ASK_CONTEXT_MAX_PER_BLOCK = 128000;
 
 /** 构建 Ask 模式下当前问题的完整上下文：必须涵盖当前项目的所有数据，供大模型精准回答；返回 { context, wasTruncated } */
 function buildAskModeProblemContext(item) {
@@ -4105,7 +4129,8 @@ async function executeAskModeDirectQuery(item, userQuestion) {
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userContent },
   ]);
-  return { content: (content || '').trim() || '（无返回内容）', usage, model, durationMs, wasTruncated };
+  const contextLength = (contextStr && contextStr.length) || 0;
+  return { content: (content || '').trim() || '（无返回内容）', usage, model, durationMs, wasTruncated, contextLength };
 }
 
 /** 根据用户问题关键词将工作区定位到对应内容块，并用绿色闪烁边框高亮 */
@@ -6929,19 +6954,24 @@ async function runValueStreamGeneration() {
     }
     const valueStream = valueStreamJson || { raw: content };
     pushOperationToHistory(item.createdAt, 'valueStreamDraw', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
-    pushAndSaveProblemDetailChat({ type: 'valueStreamCard', data: valueStream, logicText: content.replace(/```[\s\S]*?```/g, '').trim(), timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
+    pushAndSaveProblemDetailChat({ type: 'valueStreamCard', taskId: 'task4', data: valueStream, logicText: content.replace(/```[\s\S]*?```/g, '').trim(), timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     const cardBlock = document.createElement('div');
     cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
     cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+    cardBlock.dataset.taskId = 'task4';
     const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
+    const dataAttr = String(JSON.stringify(valueStream)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     cardBlock.innerHTML = `
       <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
       <div class="problem-detail-chat-value-stream-card-wrap">
         <div class="problem-detail-chat-value-stream-card-header">价值流图设计 JSON</div>
         <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
         <div class="problem-detail-chat-value-stream-card-actions">
-          <button type="button" class="btn-confirm-value-stream" data-json="${String(JSON.stringify(valueStream)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button>
+          <button type="button" class="btn-confirm-value-stream btn-confirm-primary" data-json="${dataAttr}">确认</button>
+          <button type="button" class="btn-redo-value-stream">重做</button>
+          <button type="button" class="btn-refine-modify">修正</button>
+          <button type="button" class="btn-refine-discuss">讨论</button>
         </div>
       </div>
       <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
@@ -7009,6 +7039,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
       container.appendChild(block);
     } else if (msg.type === 'taskCompleteBlock') {
       // 任务完成仅写入过程日志，不在聊天区展示
+      return;
+    } else if (msg.type === 'valueStreamConfirmLog') {
+      // 价值流确认仅写入过程日志，不在聊天区展示
       return;
     } else if (msg.type === 'modificationResponseBlock') {
       const taskId = msg.taskId || '';
@@ -7230,19 +7263,22 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'valueStreamCard') {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
+      const taskIdVs = msg.taskId || 'task4';
       const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
       const cardBlock = document.createElement('div');
       cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
       cardBlock.dataset.msgIndex = String(idx);
-      cardBlock.dataset.taskId = _taskId;
+      cardBlock.dataset.taskId = taskIdVs;
       const jsonStr = escapeHtml(JSON.stringify(data, null, 2));
+      const dataAttr = String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       cardBlock.innerHTML = `
         <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-value-stream-card-wrap">
           <div class="problem-detail-chat-value-stream-card-header">价值流图设计 JSON</div>
           <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
           <div class="problem-detail-chat-value-stream-card-actions">
-            <button type="button" class="btn-confirm-value-stream" data-json="${String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-confirm-value-stream btn-confirm-primary" data-json="${dataAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-redo-value-stream" ${confirmed ? 'disabled' : ''}>重做</button>
             <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
             <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
           </div>
@@ -7946,7 +7982,7 @@ async function handleProblemDetailChatSend() {
     if (!DEEPSEEK_API_KEY) {
       throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
     }
-    const { content, usage, model, durationMs, wasTruncated } = await executeAskModeDirectQuery(item, text);
+    const { content, usage, model, durationMs, wasTruncated, contextLength } = await executeAskModeDirectQuery(item, text);
     parsingBlock.remove();
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     const resultBlock = document.createElement('div');
@@ -7956,7 +7992,9 @@ async function handleProblemDetailChatSend() {
     container.appendChild(resultBlock);
     pushAndSaveProblemDetailChat({ role: 'system', content, timestamp: getTimeStr(), llmMeta: { usage, model, durationMs } });
     if (wasTruncated) {
-      const truncateTip = '上下文长度已经超过最大截断值，查询信息不一定准确。';
+      const currentLen = typeof contextLength === 'number' ? contextLength : 0;
+      const maxTruncate = ASK_CONTEXT_MAX_PER_BLOCK;
+      const truncateTip = `上下文长度已超过截断阈值。当前上下文长度：${currentLen.toLocaleString()} 字符，单块最大截断值：${maxTruncate.toLocaleString()} 字符，查询结果可能不完整。`;
       const truncateBlock = document.createElement('div');
       truncateBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
       truncateBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(truncateTip)}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;

@@ -21,7 +21,7 @@
     if (type === 'basicInfoCard' || type === 'basicInfoJsonBlock' || (role === 'system' && (content === '解析完成' || content === '基本信息 json 提取完毕'))) return 'task1';
     if (type === 'bmcCard' || type === 'bmcStartBlock' || (role === 'system' && content.includes('BMC'))) return 'task2';
     if (type === 'requirementLogicBlock' || type === 'requirementLogicStartBlock') return 'task3';
-    if (type === 'valueStreamCard' || type === 'drawValueStreamStartBlock' || type === 'valueStreamStartBlock' || (role === 'system' && (content.includes('价值流') || content.includes('绘制')))) return 'task4';
+    if (type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'drawValueStreamStartBlock' || type === 'valueStreamStartBlock' || (role === 'system' && (content.includes('价值流') || content.includes('绘制')))) return 'task4';
     if (type === 'itStatusStartBlock' || (role === 'system' && (content === 'IT 现状标注完成' || content === 'IT 现状标注失败'))) return 'task5';
     if (type === 'painPointStartBlock' || (role === 'system' && (content === '痛点标注完成' || content === '痛点标注完毕' || content === '痛点标注失败'))) return 'task6';
     if (type === 'intentExtractionCard' && msg.data?.taskId) return msg.data.taskId;
@@ -51,7 +51,7 @@
       return !!msg.confirmed;
     }
     if (type === 'basicInfoCard') return true;
-    if (type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard') return true;
+    if (type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard' || type === 'valueStreamConfirmLog') return true;
     if (type === 'e2eFlowGeneratedLog') return true;
     if (type === 'e2eFlowExtractStartBlock') return !!msg.confirmed;
     if (type === 'e2eFlowJsonBlock') return !!msg.confirmed;
@@ -128,6 +128,7 @@
         payload.taskId = msg.taskId;
       }
       if (msg.data) payload.data = msg.data;
+      if (msg.type === 'valueStreamConfirmLog' && msg.taskId) payload.taskId = msg.taskId;
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard'].includes(msg.type)) payload.confirmed = !!msg.confirmed;
       if (msg.parsed) payload.parsed = msg.parsed;
       if (msg.type === 'intentExtractionCard' && msg.userText) payload.userText = msg.userText;
@@ -146,8 +147,8 @@
       }
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
-      /** 任务完成块必须归入其 msg.taskId 对应任务，保证过程日志中“任务完成”出现在正确任务下 */
-      const targetTask = (msg.type === 'taskCompleteBlock' && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
+      /** 任务完成块、价值流确认日志必须归入其 msg.taskId 对应任务 */
+      const targetTask = ((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
       byTask[targetTask].push(entry);
       lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
@@ -194,6 +195,7 @@
       }
       if (parsed?.type === 'intentExtractionCard' && (parsed?.data?.intent === 'query' || parsed?.data?.intent === 'execute')) return '上下文';
       if (c.speaker === '系统提炼') return '讨论';
+      if (parsed?.type === 'valueStreamConfirmLog') return '确认';
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard'].includes(parsed?.type)) {
         return parsed?.data && parsed?.confirmed !== false ? '确认' : '输出';
       }
@@ -326,6 +328,9 @@
               } else if (parsed?.type === 'valueStreamCard') {
                 titleLabel = parsed?.confirmed ? '价值流图（已确认）' : '价值流图（大模型输出）';
                 contentStr = parsed?.data != null ? JSON.stringify(parsed.data, null, 2) : (contentStr || '(空)');
+              } else if (parsed?.type === 'valueStreamConfirmLog') {
+                titleLabel = '确认';
+                contentStr = parsed?.data != null ? JSON.stringify(parsed.data, null, 2) : '(空)';
               } else if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent != null) {
                 const intentLabel = INTENT_LABELS[parsed.data.intent] || parsed.data.intent || '—';
                 titleLabel = `用户意图提炼：${intentLabel}`;
@@ -367,7 +372,7 @@
                 titleLabel = '任务上下文';
                 contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
               } else if (parsed?.type === 'taskCompleteBlock') {
-                titleLabel = '用户确认任务完成';
+                titleLabel = '任务完成';
                 contentStr = '用户确认任务完成';
               } else if (parsed?.type === 'unsatisfiedBlock') {
                 titleLabel = '用户表示不满意';

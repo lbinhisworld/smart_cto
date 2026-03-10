@@ -255,6 +255,16 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /** 仅更新 valueStream 数据，不修改 workflowAlignCompletedStages（用于用户点击价值流 JSON 确认后，待用户再点「已完成」再推进阶段） */
+  function updateDigitalProblemValueStreamDataOnly(createdAt, valueStream) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    list[idx] = { ...item, valueStream };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
   function updateDigitalProblemValueStream(createdAt, valueStream) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -496,6 +506,7 @@
   global.clearDigitalProblemGlobalItGapAnalysis = clearDigitalProblemGlobalItGapAnalysis;
   global.updateDigitalProblemLocalItGapSessions = updateDigitalProblemLocalItGapSessions;
   global.updateDigitalProblemLocalItGapAnalysis = updateDigitalProblemLocalItGapAnalysis;
+  global.updateDigitalProblemValueStreamDataOnly = updateDigitalProblemValueStreamDataOnly;
   global.updateDigitalProblemValueStream = updateDigitalProblemValueStream;
   global.updateDigitalProblemValueStreamItStatus = updateDigitalProblemValueStreamItStatus;
   global.updateDigitalProblemValueStreamPainPoint = updateDigitalProblemValueStreamPainPoint;
