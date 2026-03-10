@@ -1575,6 +1575,7 @@ if (el.problemDetailChatModeOptionAgent) {
     if (el.problemDetailChatModeDropdown) el.problemDetailChatModeDropdown.setAttribute('aria-hidden', 'true');
     if (el.problemDetailChatModeTrigger) el.problemDetailChatModeTrigger.setAttribute('aria-expanded', 'false');
     updateProblemDetailChatHeaderLabel();
+    updateProblemDetailChatInputForMode();
   });
 }
 if (el.problemDetailChatModeOptionAsk) {
@@ -1587,6 +1588,7 @@ if (el.problemDetailChatModeOptionAsk) {
     if (el.problemDetailChatModeDropdown) el.problemDetailChatModeDropdown.setAttribute('aria-hidden', 'true');
     if (el.problemDetailChatModeTrigger) el.problemDetailChatModeTrigger.setAttribute('aria-expanded', 'false');
     updateProblemDetailChatHeaderLabel();
+    updateProblemDetailChatInputForMode();
   });
 }
 document.addEventListener('click', () => {
@@ -2556,6 +2558,7 @@ if (el.problemDetailChatMessages) {
               container?.appendChild(resultBlock);
               pushAndSaveProblemDetailChat({ role: 'system', content, timestamp: getTimeStr(), llmMeta: { usage, model, durationMs } });
               container.scrollTop = container.scrollHeight;
+              if (problemDetailChatMode === 'ask') focusWorkspaceOnIntent(extracted);
             } catch (err) {
               parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
               parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">查询失败：${escapeHtml(err.message || String(err))}</div>`;
@@ -3835,8 +3838,138 @@ function getChatsForProblem(createdAt) {
   return useMemory ? problemDetailChatMessages : (getProblemDetailChats()[createdAt] || []);
 }
 
-/** 构建用于查询的沟通历史文本（排除查询类消息），供大模型回答查询时使用；大块 JSON 会截断以提升性能 */
-function buildCommunicationHistoryTextForQuery(createdAt) {
+/** Ask 模式上下文单块最大字符数（确保涵盖所有数据，仅极端超长时截断） */
+const ASK_CONTEXT_MAX_PER_BLOCK = 20000;
+
+/** 构建 Ask 模式下当前问题的完整上下文：必须涵盖当前项目的所有数据，供大模型精准回答；返回 { context, wasTruncated } */
+function buildAskModeProblemContext(item) {
+  if (!item) return { context: '', wasTruncated: false };
+  const lines = [];
+  let wasTruncated = false;
+  const fmt = (v) => (v != null && String(v).trim() ? String(v).trim() : '—');
+  const trunc = (s, max) => {
+    if (typeof s !== 'string') return s;
+    if (s.length > max) {
+      wasTruncated = true;
+      return s.slice(0, max) + '\n...(已截断)';
+    }
+    return s;
+  };
+  const BASIC_INFO_KEY_TO_LABEL = { company_name: '公司名称', credit_code: '信用代码', legal_representative: '法人', established_date: '成立时间', registered_capital: '注册资本', is_listed: '是否上市', listing_location: '上市地', business_scope: '经营范围', core_qualifications: '核心资质', official_website: '官网' };
+  const prelim = item.preliminaryReq || {};
+  const preliminaryReq = {
+    customerName: prelim.customerName ?? item.customerName ?? item.customer_name ?? '',
+    customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
+    customerItStatus: prelim.customerItStatus ?? item.customerItStatus ?? item.customer_it_status ?? '',
+    projectTimeRequirement: prelim.projectTimeRequirement ?? item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+  };
+  lines.push('【项目进度】');
+  lines.push(`  当前大阶段: ${PROBLEM_DETAIL_MAJOR_STAGE_LABELS[item.currentMajorStage ?? 0] ?? '—'}`);
+  lines.push(`  需求理解已完成子步骤: ${(item.completedStages || []).join(', ') || '无'}`);
+  lines.push(`  工作流对齐已完成子步骤: ${(item.workflowAlignCompletedStages || []).join(', ') || '无'}`);
+  lines.push(`  ITGap 分析已完成子步骤: ${(item.itGapCompletedStages || []).join(', ') || '无'}`);
+  lines.push('');
+  lines.push('【初步需求】');
+  lines.push(`  客户名称: ${fmt(preliminaryReq.customerName)}`);
+  lines.push(`  客户需求或挑战: ${fmt(preliminaryReq.customerNeedsOrChallenges)}`);
+  lines.push(`  客户IT现状: ${fmt(preliminaryReq.customerItStatus)}`);
+  lines.push(`  项目时间要求: ${fmt(preliminaryReq.projectTimeRequirement)}`);
+  const basicInfo = problemDetailConfirmedBasicInfo || item.basicInfo || {};
+  lines.push('');
+  lines.push('【客户基本信息】');
+  if (Object.keys(basicInfo).some((k) => basicInfo[k] != null && String(basicInfo[k]).trim())) {
+    Object.entries(basicInfo).forEach(([k, v]) => {
+      if (v != null && String(v).trim()) lines.push(`  ${BASIC_INFO_KEY_TO_LABEL[k] || k}: ${fmt(v)}`);
+    });
+  } else {
+    lines.push('  (暂无)');
+  }
+  const bmc = item.bmc || {};
+  lines.push('');
+  lines.push('【商业模式画布 BMC】');
+  if (Object.keys(bmc).some((k) => bmc[k] != null && String(bmc[k]).trim())) {
+    (BMC_FIELDS || []).forEach((f) => {
+      const v = bmc[f.key];
+      if (v != null && String(v).trim()) lines.push(`  ${f.label}: ${fmt(v)}`);
+    });
+    if (bmc.industry_insight) lines.push(`  行业背景洞察: ${fmt(bmc.industry_insight)}`);
+    if (bmc.pain_points) lines.push(`  业务痛点预判: ${fmt(bmc.pain_points)}`);
+    if (bmc.comprehensive_review) lines.push(`  综合评述: ${fmt(bmc.comprehensive_review)}`);
+  } else {
+    lines.push('  (暂无)');
+  }
+  lines.push('');
+  lines.push('【需求逻辑】');
+  if (item.requirementLogic && (typeof item.requirementLogic === 'string' ? item.requirementLogic.trim() : JSON.stringify(item.requirementLogic))) {
+    const rl = typeof item.requirementLogic === 'string' ? item.requirementLogic : JSON.stringify(item.requirementLogic, null, 2);
+    lines.push(trunc(rl, ASK_CONTEXT_MAX_PER_BLOCK));
+  } else {
+    lines.push('  (暂无)');
+  }
+  const vs = item.valueStream;
+  lines.push('');
+  lines.push('【价值流图】');
+  if (vs) {
+    if (vs.raw) {
+      lines.push(trunc(typeof vs.raw === 'string' ? vs.raw : JSON.stringify(vs, null, 2), ASK_CONTEXT_MAX_PER_BLOCK));
+    } else {
+      const vsJson = JSON.stringify(vs, null, 2);
+      lines.push(trunc(vsJson, ASK_CONTEXT_MAX_PER_BLOCK));
+    }
+  } else {
+    lines.push('  (暂无)');
+  }
+  lines.push('');
+  lines.push('【全局 ITGap 分析】');
+  if (item.globalItGapAnalysisJson) {
+    const gj = typeof item.globalItGapAnalysisJson === 'string' ? item.globalItGapAnalysisJson : JSON.stringify(item.globalItGapAnalysisJson, null, 2);
+    lines.push(trunc(gj, ASK_CONTEXT_MAX_PER_BLOCK));
+  } else {
+    lines.push('  (暂无)');
+  }
+  const localSessions = item.localItGapSessions || [];
+  lines.push('');
+  lines.push('【局部 ITGap 分析】');
+  if (localSessions.length > 0) {
+    localSessions.forEach((s, i) => {
+      const analysis = (item.localItGapAnalyses || [])[i];
+      const analysisJson = analysis?.analysisJson || s.analysisJson;
+      const analysisMarkdown = analysis?.analysisMarkdown || s.analysisMarkdown;
+      const stepName = s.stepName || `环节${(s.stepIndex ?? i) + 1}`;
+      lines.push(`  --- ${stepName} ---`);
+      if (analysisMarkdown && String(analysisMarkdown).trim()) {
+        lines.push(trunc(String(analysisMarkdown).trim(), ASK_CONTEXT_MAX_PER_BLOCK));
+      }
+      if (analysisJson) {
+        const aj = typeof analysisJson === 'string' ? analysisJson : JSON.stringify(analysisJson, null, 2);
+        lines.push(trunc(aj, ASK_CONTEXT_MAX_PER_BLOCK));
+      }
+    });
+  } else {
+    lines.push('  (暂无)');
+  }
+  lines.push('');
+  lines.push('【角色与权限模型】');
+  const rpContent = typeof item.rolePermissionModel === 'string' ? item.rolePermissionModel : (item.rolePermissionModel && typeof item.rolePermissionModel === 'object' ? JSON.stringify(item.rolePermissionModel, null, 2) : null);
+  if (rpContent && rpContent.trim()) {
+    lines.push(trunc(rpContent, ASK_CONTEXT_MAX_PER_BLOCK));
+  } else {
+    lines.push('  (暂无)');
+  }
+  const commHistory = buildCommunicationHistoryTextForQuery(item?.createdAt, ASK_CONTEXT_MAX_PER_BLOCK);
+  lines.push('');
+  lines.push('【过程日志/沟通历史】');
+  if (commHistory && commHistory !== '(暂无沟通记录)') {
+    lines.push(trunc(commHistory, ASK_CONTEXT_MAX_PER_BLOCK));
+  } else {
+    lines.push('  (暂无)');
+  }
+  return { context: lines.join('\n'), wasTruncated };
+}
+
+/** 构建用于查询的沟通历史文本（排除查询类消息），供大模型回答查询时使用；maxContentLen 可选，Ask 上下文传入更大值以涵盖所有数据 */
+function buildCommunicationHistoryTextForQuery(createdAt, maxContentLen) {
+  const maxLen = maxContentLen ?? COMM_HISTORY_CONTENT_MAX_LEN;
   const communications = getCommunicationsByTask(createdAt, getChatsForProblem(createdAt));
   const lines = [];
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
@@ -3845,8 +3978,8 @@ function buildCommunicationHistoryTextForQuery(createdAt) {
     const taskLabel = task.name;
     for (const c of comms) {
       let contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
-      if (typeof contentStr === 'string' && contentStr.length > COMM_HISTORY_CONTENT_MAX_LEN) {
-        contentStr = contentStr.slice(0, COMM_HISTORY_CONTENT_MAX_LEN) + '\n...(内容已截断)';
+      if (typeof contentStr === 'string' && contentStr.length > maxLen) {
+        contentStr = contentStr.slice(0, maxLen) + '\n...(内容已截断)';
       }
       lines.push(`[${taskLabel}] ${c.speaker} (${c.time}):\n${contentStr}`);
     }
@@ -3892,6 +4025,83 @@ ${queryReq}`;
     { role: 'user', content: userContent },
   ]);
   return { content: (content || '').trim() || '（无返回内容）', usage, model, durationMs };
+}
+
+/** Ask 模式：将当前问题所有环节数据 + 用户问题发送大模型，要求精准回答、不添加非上下文内容；返回 { content, usage, model, durationMs, wasTruncated } */
+async function executeAskModeDirectQuery(item, userQuestion) {
+  const { context: contextStr, wasTruncated } = buildAskModeProblemContext(item);
+  const systemPrompt = `你是数字化问题跟进助手。下方【上下文】是当前问题的所有环节数据。用户会提出一个问题，请你仅基于【上下文】中提供的数据精准回答。
+
+要求：
+1. 直接给出答案，不要使用「根据...」「依据...」「从上下文可知...」等数据来源描述；
+2. 不要添加任何上下文之外的内容；
+3. 若上下文无相关信息，请如实说明「暂无相关信息」。`;
+  const userContent = `【上下文】\n${contextStr}\n\n【用户问题】\n${userQuestion}`;
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userContent },
+  ]);
+  return { content: (content || '').trim() || '（无返回内容）', usage, model, durationMs, wasTruncated };
+}
+
+/** 根据用户问题关键词将工作区定位到对应内容块，并用绿色闪烁边框高亮 */
+function focusWorkspaceOnUserQuestion(text) {
+  const container = el.problemDetailContent;
+  const item = currentProblemDetailItem;
+  if (!container || !item) return;
+  const t = (text || '').toLowerCase();
+  let taskId = null;
+  if (/基本信息|公司名称|信用代码|法人|注册资本|经营范围|企业背景/.test(t)) taskId = 'task1';
+  else if (/bmc|商业模式|商业画布|客户细分|价值主张|渠道通路/.test(t)) taskId = 'task2';
+  else if (/需求逻辑/.test(t)) taskId = 'task3';
+  else if (/端到端|e2e/.test(t)) taskId = 'task7';
+  else if (/全局.*itgap|itgap.*全局/.test(t)) taskId = 'task8';
+  else if (/局部.*itgap|itgap.*局部/.test(t)) taskId = 'task9';
+  else if (/角色|权限|干系人/.test(t)) taskId = 'task10';
+  else if (/价值流|it现状|痛点/.test(t)) taskId = 'task4';
+  if (!taskId) return;
+  let cardTaskId = taskId;
+  if (['task5', 'task6'].includes(taskId)) cardTaskId = 'task4';
+  else if (taskId === 'task7') cardTaskId = 'e2e-flow';
+  else if (taskId === 'task8') cardTaskId = 'global-itgap';
+  else if (taskId === 'task9') cardTaskId = 'local-itgap';
+  else if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) cardTaskId = taskId;
+  const currentMajorStage = item.currentMajorStage ?? 0;
+  let targetMajorStage = 0;
+  if (['task1', 'task2', 'task3'].includes(taskId)) targetMajorStage = 0;
+  else if (['task4', 'task5', 'task6'].includes(taskId)) targetMajorStage = 1;
+  else if (['task7', 'task8', 'task9'].includes(taskId)) targetMajorStage = 2;
+  else if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) targetMajorStage = 3;
+  else targetMajorStage = 1;
+  if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) {
+    const substepMap = { task10: 0, task11: 1, task12: 2, task13: 3, task14: 4, task15: 5 };
+    itStrategyPlanViewingSubstep = substepMap[taskId];
+  }
+  if (problemDetailViewingMajorStage !== targetMajorStage) {
+    problemDetailViewingMajorStage = Math.min(targetMajorStage, currentMajorStage);
+    updateProblemDetailProgressStages(currentMajorStage, problemDetailViewingMajorStage);
+    renderProblemDetailContent();
+  }
+  requestAnimationFrame(() => {
+    container.querySelectorAll('.problem-detail-ask-highlight').forEach((el) => el.classList.remove('problem-detail-ask-highlight'));
+    let targetCard = container.querySelector(`.problem-detail-card[data-task-id="${cardTaskId}"]`);
+    if (!targetCard) targetCard = container.querySelector(`.problem-detail-value-stream-card[data-task-id="${cardTaskId}"]`);
+    if (!targetCard && cardTaskId === 'local-itgap') {
+      targetCard = container.querySelector('.problem-detail-card[data-task-id="local-itgap-trigger"]');
+    }
+    if (!targetCard) targetCard = container.querySelector(`[data-task-id="${cardTaskId}"]`);
+    if (targetCard) {
+      targetCard.classList.add('problem-detail-ask-highlight');
+      const header = targetCard.querySelector('.problem-detail-card-header');
+      const body = targetCard.querySelector('.problem-detail-card-body');
+      if (header && body && body.hidden) {
+        body.hidden = false;
+        header.classList.remove('problem-detail-card-header-collapsed');
+        header.setAttribute('aria-expanded', 'true');
+      }
+      targetCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  });
 }
 
 /** 执行请教讨论意图：将用户讨论问题及沟通历史上下文发往大模型，返回回答；讨论归入对应任务的沟通历史 */
@@ -5355,6 +5565,7 @@ function openProblemDetail(item) {
   saveRouteState('problemDetail', { createdAt: item.createdAt });
   switchView('problemDetail');
   updateProblemDetailChatHeaderLabel();
+  updateProblemDetailChatInputForMode();
   requestAnimationFrame(() => showNextTaskStartNotification());
 }
 
@@ -5379,6 +5590,19 @@ function updateProblemDetailChatHeaderLabel() {
   badge.setAttribute('role', 'button');
   badge.setAttribute('tabindex', '0');
   labelEl.appendChild(badge);
+}
+
+/** 根据 Agent/Ask 模式更新输入框样式与占位符：Ask 模式为淡绿色底色，占位符为「您想了解本项目的什么信息？」 */
+function updateProblemDetailChatInputForMode() {
+  const input = el.problemDetailChatInput;
+  if (!input) return;
+  if (problemDetailChatMode === 'ask') {
+    input.classList.add('problem-detail-chat-input-ask-mode');
+    input.placeholder = '您想了解本项目的什么信息？';
+  } else {
+    input.classList.remove('problem-detail-chat-input-ask-mode');
+    input.placeholder = '输入消息或执行操作…';
+  }
 }
 
 /** 获取当前问题的第一个未完成任务 */
@@ -7520,92 +7744,52 @@ async function handleProblemDetailChatSend() {
     return;
   }
 
+  // Agent 模式：不进行查询、修改意图的提取，仅响应任务相关的内容确认、修正、进一步讨论
+  if (problemDetailChatMode === 'agent') {
+    const tipBlock = document.createElement('div');
+    tipBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    tipBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">Agent 模式下请使用内容卡片上的确认、修正、进一步讨论按钮推进任务；自由查询请切换至 Ask 模式。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(tipBlock);
+    container.scrollTop = container.scrollHeight;
+    pushAndSaveProblemDetailChat({ role: 'system', content: 'Agent 模式下请使用内容卡片上的确认、修正、进一步讨论按钮推进任务；自由查询请切换至 Ask 模式。', timestamp: getTimeStr() });
+    if (sendBtn) sendBtn.disabled = false;
+    return;
+  }
+
+  // Ask 模式：不进行意图判断，直接用当前问题所有环节数据+用户问题发大模型，精准回答并定位工作区
   const parsingBlock = document.createElement('div');
   parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
-  parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在提炼意图</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在查询…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
   container.appendChild(parsingBlock);
   container.scrollTop = container.scrollHeight;
   try {
     if (!DEEPSEEK_API_KEY) {
       throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
     }
-    const createdAt = item?.createdAt;
-    const { context: contextStr, currentTask } = buildIntentExtractionContext(createdAt, item);
-    let textForExtraction = text;
-    if (lastModificationClarification && lastModificationClarification.createdAt === createdAt) {
-      const userIdx = lastModificationClarification.userMessageIndex;
-      const originalMsg = problemDetailChatMessages[userIdx];
-      const originalText = (originalMsg?.content || '').trim();
-      if (originalText) {
-        const followUps = [];
-        for (let i = userIdx + 1; i < problemDetailChatMessages.length; i++) {
-          const m = problemDetailChatMessages[i];
-          if (m.role === 'user' && (m.content || '').trim()) followUps.push((m.content || '').trim());
-        }
-        textForExtraction = followUps.length > 0 ? `${originalText}\n补充：${followUps.join('\n补充：')}` : originalText;
-      }
-      lastModificationClarification = null;
-    }
-    const result = await extractUserIntentFromChat(textForExtraction, contextStr, { currentTaskHint: currentTask });
-    const { _llmMeta, ...extracted } = result;
+    const { content, usage, model, durationMs, wasTruncated } = await executeAskModeDirectQuery(item, text);
     parsingBlock.remove();
-    const isModificationUnclear = extracted.intent === 'modification' && extracted.modificationClear !== true;
-    if (isModificationUnclear) {
-      const clarificationBlock = document.createElement('div');
-      clarificationBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-      clarificationBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(MODIFICATION_CLARIFICATION_TEXT)}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-      container.appendChild(clarificationBlock);
-      pushAndSaveProblemDetailChat({ role: 'system', type: 'modificationClarificationRequest', content: MODIFICATION_CLARIFICATION_TEXT, timestamp: getTimeStr() });
-      lastModificationClarification = { createdAt, userMessageIndex: problemDetailChatMessages.length - 2 };
-    } else {
-      const cardBlock = document.createElement('div');
-      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-intent-card';
-      const intentLabels = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
-      const intentLabel = intentLabels[extracted.intent] || extracted.intent || '—';
-      const rows = [
-        { label: '当前任务', value: `${extracted.taskName || '—'}（${extracted.stage || '—'}）` },
-        { label: '意图类型', value: intentLabel },
-        { label: '意图概括', value: extracted.summary || '—' },
-      ];
-      if (extracted.intent === 'query' && extracted.queryTarget) rows.push({ label: '查询内容', value: extracted.queryTarget });
-      if (extracted.intent === 'discussion' && extracted.discussionTopic) rows.push({ label: '讨论话题', value: extracted.discussionTopic });
-      if (extracted.intent === 'modification' && extracted.modificationTarget) {
-        let modVal = extracted.modificationTarget;
-        if (extracted.modificationField) modVal += ` → ${extracted.modificationField}`;
-        if (extracted.modificationNewValue) modVal += ` → 改为：${extracted.modificationNewValue}`;
-        rows.push({ label: '修改目标', value: modVal });
-      }
-      if (extracted.intent === 'execute' && extracted.executeTaskName) rows.push({ label: '执行任务', value: extracted.executeTaskName });
-      const vsLvl = extracted.modificationValueStreamLevel || extracted.queryValueStreamLevel;
-      const vsTgt = extracted.modificationValueStreamTarget || extracted.queryValueStreamTarget;
-      if (vsLvl) {
-        const vsLvlLabel = { step: '环节', stage: '阶段', card: '整图' }[vsLvl] || vsLvl;
-        rows.push({ label: '价值流范围', value: vsTgt ? `${vsLvlLabel}：${vsTgt}` : vsLvlLabel });
-      }
-      const rowsHtml = rows.map((r) => `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(r.label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(r.value)}</span></div>`).join('');
-      const dataAttr = String(JSON.stringify(extracted)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const userTextAttr = (textForExtraction || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const llmMetaHtml = _llmMeta ? buildLlmMetaHtml(_llmMeta) : '';
-      const newMsgIndex = problemDetailChatMessages.length;
-      cardBlock.dataset.msgIndex = String(newMsgIndex);
-      cardBlock.innerHTML = `
-        <div class="problem-detail-basic-info-card problem-detail-intent-card-inner">
-          <div class="problem-detail-basic-info-card-body">${rowsHtml}</div>
-          <div class="problem-detail-basic-info-card-actions">
-            <button type="button" class="btn-confirm-intent-extraction" data-extracted="${dataAttr}" data-user-text="${userTextAttr}">确认</button>
-            <button type="button" class="btn-reject-intent-extraction" data-user-text="${userTextAttr}">不对</button>
-          </div>
-        </div>
-        <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
-      container.appendChild(cardBlock);
-      pushAndSaveProblemDetailChat({ role: 'system', type: 'intentExtractionCard', data: extracted, userText: textForExtraction, timestamp: getTimeStr(), confirmed: false, llmMeta: _llmMeta });
-      focusWorkspaceOnIntent(extracted);
+    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+    const resultBlock = document.createElement('div');
+    resultBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-with-delete';
+    resultBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
+    resultBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content markdown-body">${renderMarkdown(content)}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
+    container.appendChild(resultBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content, timestamp: getTimeStr(), llmMeta: { usage, model, durationMs } });
+    if (wasTruncated) {
+      const truncateTip = '上下文长度已经超过最大截断值，查询信息不一定准确。';
+      const truncateBlock = document.createElement('div');
+      truncateBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+      truncateBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(truncateTip)}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(truncateBlock);
+      pushAndSaveProblemDetailChat({ role: 'system', content: truncateTip, timestamp: getTimeStr() });
     }
     container.scrollTop = container.scrollHeight;
+    focusWorkspaceOnUserQuestion(text);
   } catch (err) {
     parsingBlock.classList.remove('problem-detail-chat-msg-parsing');
-    parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">意图提炼失败：${escapeHtml(err.message || String(err))}</div>`;
-    pushAndSaveProblemDetailChat({ role: 'system', content: '意图提炼失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+    const wrap = parsingBlock.querySelector('.problem-detail-chat-msg-content-wrap');
+    if (wrap) wrap.innerHTML = `<div class="problem-detail-chat-msg-content">查询失败：${escapeHtml(err.message || String(err))}</div>`;
+    pushAndSaveProblemDetailChat({ role: 'system', content: '查询失败：' + (err.message || String(err)), timestamp: getTimeStr() });
   } finally {
     if (sendBtn) sendBtn.disabled = false;
   }

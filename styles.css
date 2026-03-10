@@ -2492,6 +2492,19 @@ body {
   border-color: var(--accent);
 }
 
+/* Ask 模式下输入框淡绿色底色、深蓝色字体，形成反差 */
+.problem-detail-chat-input.problem-detail-chat-input-ask-mode {
+  background: #e8f5e9;
+  color: #0d47a1;
+}
+.problem-detail-chat-input.problem-detail-chat-input-ask-mode::placeholder {
+  color: #1565c0;
+  opacity: 0.85;
+}
+.problem-detail-chat-input.problem-detail-chat-input-ask-mode:focus {
+  background: #e8f5e9;
+}
+
 .problem-detail-chat-send {
   position: absolute;
   right: 1rem;
@@ -5082,6 +5095,26 @@ body {
   50% {
     box-shadow: 0 0 0 5px rgba(248, 81, 73, 0.5);
     outline: 4px solid rgba(248, 81, 73, 0.8);
+    outline-offset: 2px;
+  }
+}
+
+/* Ask 模式查询结果相关块高亮（绿色闪烁边框） */
+.problem-detail-ask-highlight {
+  position: relative;
+  border-radius: 8px;
+  animation: ask-highlight-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ask-highlight-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px #22c55e;
+    outline: 2px solid #22c55e;
+    outline-offset: 2px;
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.5);
+    outline: 4px solid rgba(34, 197, 94, 0.9);
     outline-offset: 2px;
   }
 }
