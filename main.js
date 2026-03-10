@@ -1767,9 +1767,13 @@ if (el.problemDetailChatMessages) {
     if (taskCompleteDoneBtn && !taskCompleteDoneBtn.disabled) {
       const taskId = taskCompleteDoneBtn.getAttribute('data-task-id') || '';
       const taskName = taskCompleteDoneBtn.getAttribute('data-task-name') || taskId;
-      pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId, content: '用户确认任务完成', timestamp: getTimeStr() });
-      const createdAt = currentProblemDetailItem?.createdAt;
-      if (createdAt) advanceProblemStateOnTaskComplete(createdAt, taskId);
+      const item = currentProblemDetailItem;
+      const alreadyCompleted = item && typeof isTaskCompleted === 'function' && isTaskCompleted(item, taskId);
+      if (!alreadyCompleted) {
+        pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId, content: '用户确认任务完成', timestamp: getTimeStr() });
+        const createdAt = item?.createdAt;
+        if (createdAt) advanceProblemStateOnTaskComplete(createdAt, taskId);
+      }
       taskCompleteDoneBtn.textContent = '已完成';
       taskCompleteDoneBtn.disabled = true;
       const notYetBtn = taskCompleteDoneBtn.closest('.problem-detail-chat-task-completion-actions')?.querySelector('.btn-task-complete-not-yet');
@@ -4145,7 +4149,7 @@ function focusWorkspaceOnUserQuestion(text) {
   let taskId = null;
   if (/基本信息|公司名称|信用代码|法人|注册资本|经营范围|企业背景/.test(t)) taskId = 'task1';
   else if (/bmc|商业模式|商业画布|客户细分|价值主张|渠道通路/.test(t)) taskId = 'task2';
-  else if (/需求逻辑/.test(t)) taskId = 'task3';
+  else if (/需求逻辑|行业逻辑|逻辑链条|需求背后的逻辑|行业底层逻辑|痛点.*逻辑|逻辑.*痛点|需求背后|深层次|深层原因|深层动机|商业动机|因果关联/.test(t)) taskId = 'task3';
   else if (/端到端|e2e/.test(t)) taskId = 'task7';
   else if (/全局.*itgap|itgap.*全局/.test(t)) taskId = 'task8';
   else if (/局部.*itgap|itgap.*局部/.test(t)) taskId = 'task9';
@@ -7049,6 +7053,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'taskCompletionConfirmBlock') {
       const taskId = msg.taskId || '';
       const taskName = msg.taskName || (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === taskId)?.name) || taskId;
+      const taskAlreadyDone = item && typeof isTaskCompleted === 'function' && isTaskCompleted(item, taskId);
       const block = document.createElement('div');
       block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-task-completion-confirm';
       block.dataset.msgIndex = String(idx);
@@ -7056,8 +7061,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-content-wrap">
           <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || `【${taskName}】是否视为完成？`)}</div>
           <div class="problem-detail-chat-task-completion-actions">
-            <button type="button" class="btn-task-complete-done btn-confirm-primary" data-task-id="${escapeHtml(taskId)}" data-task-name="${escapeHtml(taskName)}">已完成</button>
-            <button type="button" class="btn-task-complete-not-yet">还不行</button>
+            <button type="button" class="btn-task-complete-done btn-confirm-primary" data-task-id="${escapeHtml(taskId)}" data-task-name="${escapeHtml(taskName)}" ${taskAlreadyDone ? 'disabled' : ''}>${taskAlreadyDone ? '已完成' : '已完成'}</button>
+            <button type="button" class="btn-task-complete-not-yet" ${taskAlreadyDone ? 'disabled' : ''}>还不行</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -7441,7 +7446,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
         : `<pre class="problem-detail-chat-json-pre">${jsonStr}</pre>`;
       const confirmBtn = structuredView
         ? `<button type="button" class="btn-confirm-global-itgap-structured btn-confirm-primary" data-json="${dataAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>`
-        : `<button type="button" class="btn-confirm-global-itgap-json btn-confirm-primary" data-json="${dataAttr}">确认</button>`;
+        : `<button type="button" class="btn-confirm-global-itgap-json btn-confirm-primary" data-json="${dataAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>`;
       cardBlock.innerHTML = `
         <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-global-itgap-card-wrap">
