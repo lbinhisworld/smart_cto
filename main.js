@@ -1576,6 +1576,14 @@ if (el.problemDetailChatModeOptionAgent) {
     if (el.problemDetailChatModeTrigger) el.problemDetailChatModeTrigger.setAttribute('aria-expanded', 'false');
     updateProblemDetailChatHeaderLabel();
     updateProblemDetailChatInputForMode();
+    const next = getFirstUncompletedTask(currentProblemDetailItem);
+    if (next) {
+      focusWorkspaceOnCurrentTask(next.id);
+      requestAnimationFrame(() => {
+        showTaskStartNotificationIfNeeded(next.id);
+        scrollChatToTaskStartNotification(next.id);
+      });
+    }
   });
 }
 if (el.problemDetailChatModeOptionAsk) {
@@ -5662,7 +5670,17 @@ function buildTaskContextJson(taskId, item) {
   }
 }
 
-/** 若聊天中尚无该任务的任务启动通知，则在聊天区展示统一任务启动通知（任务通知：我即将开始【任务名称】任务 + 确认按钮） */
+/** 将聊天区滚动到指定任务的任务启动通知块（若存在），确保用户可见 */
+function scrollChatToTaskStartNotification(taskId) {
+  const container = el.problemDetailChatMessages;
+  if (!container || !taskId) return;
+  const block = container.querySelector(`.problem-detail-chat-task-start-notification button[data-task-id="${taskId}"]`);
+  if (!block) return;
+  const msg = block.closest('.problem-detail-chat-msg');
+  if (msg) msg.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/** 若聊天中尚无该任务的任务启动通知，或已有但用户未确认，则在聊天区展示/重新下发统一任务启动通知（任务通知：我即将开始【任务名称】任务 + 确认按钮） */
 function showTaskStartNotificationIfNeeded(taskId) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -5670,8 +5688,16 @@ function showTaskStartNotificationIfNeeded(taskId) {
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   const task = allTasks.find((t) => t.id === taskId);
   if (!task) return;
-  const hasExisting = problemDetailChatMessages.some((m) => m.type === 'taskStartNotification' && m.taskId === taskId);
-  if (hasExisting) return;
+  const existingIdx = problemDetailChatMessages.findIndex((m) => m.type === 'taskStartNotification' && m.taskId === taskId);
+  if (existingIdx >= 0) {
+    const existing = problemDetailChatMessages[existingIdx];
+    if (existing.confirmed) return; // 已确认，无需重复下发
+    // 用户未确认：移除旧通知，稍后重新下发到底部
+    problemDetailChatMessages.splice(existingIdx, 1);
+    saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+    container.innerHTML = '';
+    renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+  }
   pushAndSaveProblemDetailChat({
     type: 'taskStartNotification',
     taskId: task.id,
