@@ -5822,9 +5822,27 @@ function buildItemAfterRollbackToTask(item, prevTaskId) {
     case 'task4':
       nextItem = { ...nextItem, valueStream: undefined, workflowAlignCompletedStages: [] };
       break;
-    case 'task5':
+    case 'task5': {
       nextItem = { ...nextItem, workflowAlignCompletedStages: wfCompleted.filter((x) => x !== 1) };
+      const vs = nextItem.valueStream;
+      if (vs && !vs.raw && (vs.stages || vs.phases || vs.nodes)) {
+        const rawStages = vs.stages ?? vs.phases ?? vs.nodes ?? [];
+        if (Array.isArray(rawStages)) {
+          const stages = rawStages.map((s) => {
+            if (!s || typeof s !== 'object') return s;
+            const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+            const steps = rawSteps.map((st) => {
+              if (typeof st !== 'object' || st == null) return st;
+              const { itStatus, it_status, ...rest } = st;
+              return rest;
+            });
+            return { ...s, steps };
+          });
+          nextItem = { ...nextItem, valueStream: { ...vs, stages } };
+        }
+      }
       break;
+    }
     case 'task6':
       nextItem = { ...nextItem, workflowAlignCompletedStages: wfCompleted.filter((x) => x !== 2) };
       break;
@@ -6924,8 +6942,11 @@ async function runItStatusAnnotation() {
       const stageName = stage.name || '';
       for (const step of stage.steps || []) {
         const stepName = step.name || '';
-        const it = step.itStatus || step.it_status;
-        const itStatus = !it ? '' : (typeof it === 'object' ? (it.type === '手工' ? `手工-${it.detail || ''}` : it.type === '系统' ? `系统-${it.detail || ''}` : '') : String(it));
+        let itStatus = step.itStatusLabel || '';
+        if (!itStatus) {
+          const it = step.itStatus || step.it_status;
+          itStatus = !it ? '' : (typeof it === 'object' ? (it.type === '手工' ? `手工-${it.detail || ''}` : it.type === '系统' ? `系统-${it.detail || ''}` : '') : String(it));
+        }
         itStatusOutputData.push({ stageName, stepName, itStatus });
       }
     }
@@ -6957,6 +6978,7 @@ async function runItStatusAnnotation() {
     container.appendChild(doneBlock);
     pushAndSaveProblemDetailChat({ role: 'system', content: 'IT 现状标注完成', timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
     container.scrollTop = container.scrollHeight;
+    renderProblemDetailHistory();
     requestAnimationFrame(() => showNextTaskStartNotification());
   } catch (err) {
     const errBlock = document.createElement('div');
