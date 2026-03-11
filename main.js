@@ -2288,20 +2288,39 @@ if (el.problemDetailChatMessages) {
       }
       confirmLocalItGapSessionsBtn.disabled = true;
       confirmLocalItGapSessionsBtn.textContent = '已确认';
+      pushAndSaveProblemDetailChat({ type: 'localItGapContextLog', taskId: 'task9', timestamp: getTimeStr() });
       const container = el.problemDetailChatMessages;
       container.innerHTML = '';
       renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
       container.scrollTop = container.scrollHeight;
       renderProblemDetailContent();
       renderProblemDetailHistory();
-      requestAnimationFrame(() => {
-        showTaskCompletionConfirm('task9', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task9')?.name) || '局部 ITGap 分析');
-        runLocalItGapAnalysisForNextStep();
-      });
+      requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
       return;
     }
     const continueLocalItGapSessionsBtn = e.target.closest('.btn-continue-local-itgap-sessions');
     if (continueLocalItGapSessionsBtn && !continueLocalItGapSessionsBtn.disabled) {
+      requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
+      return;
+    }
+    const redoLocalItGapBtn = e.target.closest('.btn-redo-local-itgap');
+    if (redoLocalItGapBtn && !redoLocalItGapBtn.disabled) {
+      const stepIndex = parseInt(redoLocalItGapBtn.dataset.stepIndex, 10);
+      if (isNaN(stepIndex) || stepIndex < 0) return;
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      if (typeof clearDigitalProblemLocalItGapStep === 'function') clearDigitalProblemLocalItGapStep(item.createdAt, stepIndex);
+      problemDetailChatMessages = problemDetailChatMessages.filter((m) => !(m.type === 'localItGapAnalysisCard' && m.stepIndex === stepIndex));
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const list = getDigitalProblems();
+      const updated = list.find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
       requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
       return;
     }
@@ -2334,14 +2353,9 @@ if (el.problemDetailChatMessages) {
         const { stages } = parseValueStreamGraph(item.valueStream);
         const allSteps = stages.flatMap((s) => s.steps);
         if (allSteps.length > stepIndex + 1) {
-          requestAnimationFrame(() => {
-            showTaskCompletionConfirm('task9', taskNameTask9);
-            runLocalItGapAnalysisForNextStep();
-          });
+          requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
         } else {
-          requestAnimationFrame(() => {
-            showTaskCompletionConfirm('task9', taskNameTask9);
-          });
+          requestAnimationFrame(() => showTaskCompletionConfirm('task9', taskNameTask9));
         }
       } catch (_) {}
       return;
@@ -6775,6 +6789,10 @@ async function runLocalItGapAnalysisForNextStep() {
   if (nextIndex >= allSteps.length) return;
   const step = allSteps[nextIndex];
   const stepName = step?.name || `环节${nextIndex + 1}`;
+  pushAndSaveProblemDetailChat({ role: 'system', content: '正在分析环节【' + stepName + '】', timestamp: getTimeStr() });
+  container.innerHTML = '';
+  renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+  container.scrollTop = container.scrollHeight;
   const parsingBlock = document.createElement('div');
   parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
   parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在分析环节「${escapeHtml(stepName)}」…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -6793,6 +6811,7 @@ async function runLocalItGapAnalysisForNextStep() {
     const list = getDigitalProblems();
     const updated = list.find((it) => it.createdAt === item.createdAt);
     if (updated) currentProblemDetailItem = updated;
+    const dataAttr = String(JSON.stringify(analysisJson)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const cardBlock = document.createElement('div');
     cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-card problem-detail-chat-msg-with-delete';
     cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
@@ -6804,24 +6823,22 @@ async function runLocalItGapAnalysisForNextStep() {
         <div class="problem-detail-chat-local-itgap-card-header">局部 ITGap 分析：${escapeHtml(stepName)}</div>
         <div class="problem-detail-chat-local-itgap-card-body">${structuredHtml}</div>
         <div class="problem-detail-chat-local-itgap-card-actions">
-          <button type="button" class="btn-confirm-local-itgap btn-confirm-primary" disabled>已确认</button>
+          <button type="button" class="btn-confirm-local-itgap btn-confirm-primary" data-json="${dataAttr}" data-step-name="${escapeHtml(stepName)}" data-step-index="${nextIndex}">确认</button>
+          <button type="button" class="btn-redo-local-itgap" data-step-name="${escapeHtml(stepName)}" data-step-index="${nextIndex}">重做</button>
+          <button type="button" class="btn-refine-modify" data-task-id="task9">修正</button>
+          <button type="button" class="btn-refine-discuss" data-task-id="task9">讨论</button>
         </div>
       </div>
       <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>
       <div class="problem-detail-chat-local-itgap-card-meta">${llmMetaHtml}</div>`;
     container.appendChild(cardBlock);
-    pushAndSaveProblemDetailChat({ type: 'localItGapAnalysisCard', data: analysisJson, stepName, stepIndex: nextIndex, timestamp: getTimeStr(), confirmed: true, llmMeta });
+    pushAndSaveProblemDetailChat({ type: 'localItGapAnalysisCard', data: analysisJson, stepName, stepIndex: nextIndex, timestamp: getTimeStr(), confirmed: false, llmMeta });
     container.scrollTop = container.scrollHeight;
     renderProblemDetailContent();
     container.innerHTML = '';
     renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
     container.scrollTop = container.scrollHeight;
     renderProblemDetailHistory();
-    if (nextIndex + 1 < allSteps.length) {
-      requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
-    } else {
-      requestAnimationFrame(() => showNextTaskStartNotification());
-    }
   } catch (err) {
     parsingBlock.remove();
     const errBlock = document.createElement('div');
@@ -6853,8 +6870,13 @@ async function runGlobalItGapAnalysis(isRedo) {
   const businessCanvas = item.bmc || {};
   const fullProcessVsm = item.valueStream;
   let parsingBlock = null;
-  // 全局 ITGap 分析：上下文/进度内容块不推送到聊天区，仅大模型提炼的结果卡片推送到聊天区供客户确认
-  if (isRedo) {
+  if (!isRedo) {
+    parsingBlock = document.createElement('div');
+    parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在进行全局 ITGap 分析…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(parsingBlock);
+    container.scrollTop = container.scrollHeight;
+  } else {
     const lastCard = container.querySelector('.problem-detail-chat-global-itgap-card');
     if (lastCard) {
       const wrap = lastCard.querySelector('.problem-detail-chat-global-itgap-card-body');
@@ -7237,6 +7259,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
     } else if (msg.type === 'taskContextBlock') {
+      if (msg.taskId === 'task8') {
+        return;
+      }
       const ctxJson = msg.contextJson && typeof msg.contextJson === 'object' ? JSON.stringify(msg.contextJson, null, 2) : (msg.contextJson != null ? String(msg.contextJson) : '{}');
       const block = document.createElement('div');
       block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-context-block';
@@ -7270,6 +7295,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
       return;
     } else if (msg.type === 'globalItGapContextLog') {
       // 全局 ITGap 上下文仅推送到沟通历史（标签「上下文」），不在聊天区展示卡片
+      return;
+    } else if (msg.type === 'localItGapContextLog') {
+      // 局部 ITGap 上下文仅推送到沟通历史（标签「上下文」+ 备注），不在聊天区展示卡片
       return;
     } else if (msg.type === 'valueStreamConfirmLog') {
       // 价值流确认仅写入过程日志，不在聊天区展示
@@ -7784,8 +7812,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-local-itgap-card-body">${structuredHtml}</div>
           <div class="problem-detail-chat-local-itgap-card-actions">
             <button type="button" class="btn-confirm-local-itgap btn-confirm-primary" data-json="${dataAttr}" data-step-name="${escapeHtml(stepName)}" data-step-index="${stepIndex}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
-            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
+            <button type="button" class="btn-redo-local-itgap" data-step-name="${escapeHtml(stepName)}" data-step-index="${stepIndex}" ${confirmed ? 'disabled' : ''}>重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task9" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task9" ${confirmed ? 'disabled' : ''}>讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;

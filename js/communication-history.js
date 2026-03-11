@@ -28,7 +28,7 @@
     if (type === 'e2eFlowGeneratedLog') return 'task7';
     if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
     if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog' || type === 'globalItGapContextLog') return 'task8';
-    if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog') return 'task9';
+    if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog' || type === 'localItGapContextLog') return 'task9';
     if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionConfirmedLog') return 'task10';
     if (type === 'taskContextBlock') return msg.taskId || null;
     if (type === 'taskCompleteBlock' || type === 'taskCompletionConfirmBlock') return msg.taskId || null;
@@ -62,8 +62,9 @@
     if (type === 'globalItGapContextLog') return true;
     if (type === 'localItGapStartBlock') return !!msg.confirmed;
     if (type === 'localItGapSessionsBlock') return true;
-    if (type === 'localItGapAnalysisCard') return !!msg.confirmed;
+    if (type === 'localItGapAnalysisCard') return true; // 推送即纳入过程日志，未确认标签「输出」，确认后「确认」
     if (type === 'localItGapAnalysisLog') return true;
+    if (type === 'localItGapContextLog') return true;
     if (type === 'rolePermissionCard') return !!msg.confirmed;
     if (type === 'rolePermissionConfirmedLog') return true;
     if (type === 'taskContextBlock') return true;
@@ -134,6 +135,10 @@
         payload.contextJson = msg.contextJson;
         payload.taskId = msg.taskId || 'task8';
       }
+      if (msg.type === 'localItGapContextLog') {
+        payload.content = '上下文';
+        payload.taskId = msg.taskId || 'task9';
+      }
       if (msg.data) payload.data = msg.data;
       if (msg.type === 'valueStreamConfirmLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog' && msg.taskId) payload.taskId = msg.taskId;
@@ -148,6 +153,7 @@
       if ((msg.type === 'localItGapAnalysisCard' && msg.data) || (msg.type === 'localItGapAnalysisLog' && msg.analysisJson)) payload.analysisJson = msg.data || msg.analysisJson;
       if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.stepName) payload.stepName = msg.stepName;
       if (msg.type === 'localItGapSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
+      if (msg.type === 'localItGapAnalysisCard') payload.confirmed = !!msg.confirmed;
       if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.llmMeta) payload.llmMeta = msg.llmMeta;
       if (msg.type === 'rolePermissionCard' && msg.confirmed && typeof msg.content === 'string') {
         payload.rolePermissionModelJson = parseRolePermissionModel(msg.content);
@@ -158,7 +164,7 @@
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
       /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务（itStatusCard 不纳入过程日志，仅通过 itStatusOutputLog 的 confirmed 切换输出/确认） */
-      const targetTask = ((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
+      const targetTask = ((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
       byTask[targetTask].push(entry);
       lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
@@ -195,7 +201,7 @@
       const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
       if (parsed?.type === 'taskCompleteBlock') return '任务完成';
       if (parsed?.type === 'unsatisfiedBlock') return '不满意';
-      if (parsed?.type === 'taskContextBlock' || parsed?.type === 'globalItGapContextLog') return '上下文';
+      if (parsed?.type === 'taskContextBlock' || parsed?.type === 'globalItGapContextLog' || parsed?.type === 'localItGapContextLog') return '上下文';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'discussion') return '讨论';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') {
         const target = String(parsed?.data?.modificationTarget || '');
@@ -208,6 +214,8 @@
       if (parsed?.type === 'valueStreamConfirmLog') return '确认';
       if (parsed?.type === 'itStatusOutputLog') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'e2eFlowJsonBlock') return (parsed?.valueStreamJson != null && parsed?.confirmed) ? '确认' : '输出';
+      if (parsed?.type === 'localItGapAnalysisCard') return (parsed?.analysisJson != null && parsed?.confirmed) ? '确认' : '输出';
+      if (parsed?.type === 'localItGapSessionsBlock') return '确认';
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard', 'itStatusCard'].includes(parsed?.type)) {
         return parsed?.data && parsed?.confirmed !== false ? '确认' : '输出';
       }
@@ -323,6 +331,9 @@
             const logType = getCommunicationLogType(c);
             let contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
             let titleLabel = c.speaker;
+            let stepNameForHead = '';
+            let contextNoteForHead = '';
+            let sessionPlanNoteForHead = '';
             try {
               const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
               if (parsed?.role === 'user') {
@@ -389,6 +400,22 @@
               } else if (parsed?.type === 'globalItGapContextLog') {
                 titleLabel = '上下文';
                 contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
+              } else if (parsed?.type === 'localItGapContextLog') {
+                contextNoteForHead = '价值流+全局 ITGap 分析';
+                titleLabel = '上下文（价值流+全局 ITGap 分析）';
+                contentStr = '(无)';
+              } else if (parsed?.type === 'localItGapSessionsBlock') {
+                sessionPlanNoteForHead = 'ITGap 分析 session 计划';
+                titleLabel = 'ITGap 分析 session 计划';
+                contentStr = parsed.sessions != null ? JSON.stringify(parsed.sessions, null, 2) : '(无)';
+              } else if (parsed?.type === 'localItGapAnalysisCard') {
+                stepNameForHead = parsed?.stepName || '环节';
+                titleLabel = parsed?.confirmed ? `局部 ITGap 分析（${stepNameForHead}）（已确认）` : `局部 ITGap 分析（${stepNameForHead}）`;
+                contentStr = parsed.analysisJson != null ? JSON.stringify(parsed.analysisJson, null, 2) : '(无)';
+              } else if (parsed?.type === 'localItGapAnalysisLog') {
+                stepNameForHead = parsed?.stepName || '环节';
+                titleLabel = parsed.content || `局部 ITGap 分析（${stepNameForHead}）`;
+                contentStr = parsed.analysisJson != null ? JSON.stringify(parsed.analysisJson, null, 2) : (parsed.content || '(无)');
               } else if (parsed?.type === 'taskCompleteBlock') {
                 titleLabel = '任务完成';
                 contentStr = (parsed?.content && String(parsed.content).trim()) || '用户确认任务完成';
@@ -406,7 +433,7 @@
               <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
                 <span class="problem-detail-history-timeline-expand">▸</span>
                 <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
-                <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-${LOG_TYPE_CLASS[logType] || 'confirm'}">${escapeHtml(logType)}</span>
+                <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-${LOG_TYPE_CLASS[logType] || 'confirm'}">${escapeHtml(logType)}</span>${stepNameForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(stepNameForHead)}</span>` : ''}${contextNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(contextNoteForHead)}</span>` : ''}${sessionPlanNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(sessionPlanNoteForHead)}</span>` : ''}
               </button>
               <div class="problem-detail-history-timeline-detail" hidden>
                 <div class="problem-detail-history-timeline-detail-meta">

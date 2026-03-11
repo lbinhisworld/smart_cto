@@ -1025,6 +1025,7 @@ body {
 .btn-redo-value-stream,
 .btn-redo-it-status,
 .btn-redo-e2e-json,
+.btn-redo-local-itgap,
 .btn-refine-modify,
 .btn-refine-discuss {
   padding: 0.35rem 0.75rem;
@@ -1045,6 +1046,7 @@ body {
 .btn-redo-value-stream:hover:not(:disabled),
 .btn-redo-it-status:hover:not(:disabled),
 .btn-redo-e2e-json:hover:not(:disabled),
+.btn-redo-local-itgap:hover:not(:disabled),
 .btn-refine-modify:hover:not(:disabled),
 .btn-refine-discuss:hover:not(:disabled) {
   opacity: 0.9;
@@ -1058,6 +1060,7 @@ body {
 .btn-redo-value-stream:disabled,
 .btn-redo-it-status:disabled,
 .btn-redo-e2e-json:disabled,
+.btn-redo-local-itgap:disabled,
 .btn-refine-modify:disabled,
 .btn-refine-discuss:disabled {
   opacity: 0.5;
@@ -2978,6 +2981,12 @@ body {
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
   font-weight: 600;
+}
+
+.problem-detail-history-timeline-step-name {
+  margin-left: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
 }
 
 .problem-detail-history-log-type-input {

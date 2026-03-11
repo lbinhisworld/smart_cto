@@ -255,6 +255,21 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /** 清除某环节的局部 ITGap 分析结果，便于该环节重做 */
+  function clearDigitalProblemLocalItGapStep(createdAt, stepIndex) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    const sessions = item.localItGapSessions || [];
+    const analyses = (item.localItGapAnalyses || []).filter((a) => a.stepIndex !== stepIndex);
+    const newSessions = sessions.map((s) =>
+      s.stepIndex === stepIndex ? { ...s, analysisJson: undefined, analysisMarkdown: undefined } : s
+    );
+    list[idx] = { ...item, localItGapSessions: newSessions, localItGapAnalyses: analyses };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
   /** 仅更新 valueStream 数据，不修改 workflowAlignCompletedStages（用于用户点击价值流 JSON 确认后，待用户再点「已完成」再推进阶段） */
   function updateDigitalProblemValueStreamDataOnly(createdAt, valueStream) {
     const list = getDigitalProblems();
@@ -506,6 +521,7 @@
   global.clearDigitalProblemGlobalItGapAnalysis = clearDigitalProblemGlobalItGapAnalysis;
   global.updateDigitalProblemLocalItGapSessions = updateDigitalProblemLocalItGapSessions;
   global.updateDigitalProblemLocalItGapAnalysis = updateDigitalProblemLocalItGapAnalysis;
+  global.clearDigitalProblemLocalItGapStep = clearDigitalProblemLocalItGapStep;
   global.updateDigitalProblemValueStreamDataOnly = updateDigitalProblemValueStreamDataOnly;
   global.updateDigitalProblemValueStream = updateDigitalProblemValueStream;
   global.updateDigitalProblemValueStreamItStatus = updateDigitalProblemValueStreamItStatus;
