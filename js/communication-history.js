@@ -27,7 +27,7 @@
     if (type === 'intentExtractionCard' && msg.data?.taskId) return msg.data.taskId;
     if (type === 'e2eFlowGeneratedLog') return 'task7';
     if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
-    if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog') return 'task8';
+    if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog' || type === 'globalItGapContextLog') return 'task8';
     if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog') return 'task9';
     if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionConfirmedLog') return 'task10';
     if (type === 'taskContextBlock') return msg.taskId || null;
@@ -59,6 +59,7 @@
     if (type === 'globalItGapStartBlock') return !!msg.confirmed;
     if (type === 'globalItGapAnalysisCard') return !!msg.confirmed;
     if (type === 'globalItGapAnalysisLog') return true;
+    if (type === 'globalItGapContextLog') return true;
     if (type === 'localItGapStartBlock') return !!msg.confirmed;
     if (type === 'localItGapSessionsBlock') return true;
     if (type === 'localItGapAnalysisCard') return !!msg.confirmed;
@@ -128,6 +129,11 @@
         payload.contextJson = msg.contextJson;
         payload.taskId = msg.taskId;
       }
+      if (msg.type === 'globalItGapContextLog') {
+        payload.content = '上下文';
+        payload.contextJson = msg.contextJson;
+        payload.taskId = msg.taskId || 'task8';
+      }
       if (msg.data) payload.data = msg.data;
       if (msg.type === 'valueStreamConfirmLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog' && msg.taskId) payload.taskId = msg.taskId;
@@ -152,7 +158,7 @@
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
       /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务（itStatusCard 不纳入过程日志，仅通过 itStatusOutputLog 的 confirmed 切换输出/确认） */
-      const targetTask = ((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
+      const targetTask = ((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
       byTask[targetTask].push(entry);
       lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
@@ -189,7 +195,7 @@
       const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
       if (parsed?.type === 'taskCompleteBlock') return '任务完成';
       if (parsed?.type === 'unsatisfiedBlock') return '不满意';
-      if (parsed?.type === 'taskContextBlock') return '上下文';
+      if (parsed?.type === 'taskContextBlock' || parsed?.type === 'globalItGapContextLog') return '上下文';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'discussion') return '讨论';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') {
         const target = String(parsed?.data?.modificationTarget || '');
@@ -379,6 +385,9 @@
                 }
               } else if (parsed?.type === 'taskContextBlock') {
                 titleLabel = '任务上下文';
+                contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
+              } else if (parsed?.type === 'globalItGapContextLog') {
+                titleLabel = '上下文';
                 contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
               } else if (parsed?.type === 'taskCompleteBlock') {
                 titleLabel = '任务完成';

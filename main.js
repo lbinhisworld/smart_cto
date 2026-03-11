@@ -2197,6 +2197,13 @@ if (el.problemDetailChatMessages) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
         saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
       }
+      const contextJson = {
+        enterpriseContext: { basicInfo: item?.basicInfo || problemDetailConfirmedBasicInfo, requirementLogic: item?.requirementLogic, preliminary: { customerName: item?.customerName, customerNeedsOrChallenges: item?.customerNeedsOrChallenges, customerItStatus: item?.customerItStatus, projectTimeRequirement: item?.projectTimeRequirement } },
+        businessCanvas: item?.bmc || {},
+        fullProcessVsm: item?.valueStream,
+      };
+      pushAndSaveProblemDetailChat({ type: 'globalItGapContextLog', taskId: 'task8', contextJson, timestamp: getTimeStr() });
+      if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
       requestAnimationFrame(() => runGlobalItGapAnalysis(false));
       return;
     }
@@ -6846,13 +6853,8 @@ async function runGlobalItGapAnalysis(isRedo) {
   const businessCanvas = item.bmc || {};
   const fullProcessVsm = item.valueStream;
   let parsingBlock = null;
-  if (!isRedo) {
-    parsingBlock = document.createElement('div');
-    parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
-    parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在开展全局 ITGap 分析…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(parsingBlock);
-    container.scrollTop = container.scrollHeight;
-  } else {
+  // 全局 ITGap 分析：上下文/进度内容块不推送到聊天区，仅大模型提炼的结果卡片推送到聊天区供客户确认
+  if (isRedo) {
     const lastCard = container.querySelector('.problem-detail-chat-global-itgap-card');
     if (lastCard) {
       const wrap = lastCard.querySelector('.problem-detail-chat-global-itgap-card-body');
@@ -6886,6 +6888,8 @@ async function runGlobalItGapAnalysis(isRedo) {
           <div class="problem-detail-chat-global-itgap-card-actions">
             <button type="button" class="btn-confirm-global-itgap-json btn-confirm-primary" data-json="${dataAttr}">确认</button>
             <button type="button" class="btn-redo-global-itgap">重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task8">修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task8">讨论</button>
           </div>`;
       }
       cardBlock.querySelector('.problem-detail-chat-global-itgap-card-meta')?.remove();
@@ -6910,6 +6914,8 @@ async function runGlobalItGapAnalysis(isRedo) {
           <div class="problem-detail-chat-global-itgap-card-actions">
             <button type="button" class="btn-confirm-global-itgap-json btn-confirm-primary" data-json="${dataAttr}">确认</button>
             <button type="button" class="btn-redo-global-itgap">重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task8">修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task8">讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>
@@ -7261,6 +7267,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
       container.appendChild(block);
     } else if (msg.type === 'taskCompleteBlock') {
       // 任务完成仅写入过程日志，不在聊天区展示
+      return;
+    } else if (msg.type === 'globalItGapContextLog') {
+      // 全局 ITGap 上下文仅推送到沟通历史（标签「上下文」），不在聊天区展示卡片
       return;
     } else if (msg.type === 'valueStreamConfirmLog') {
       // 价值流确认仅写入过程日志，不在聊天区展示
@@ -7675,9 +7684,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-global-itgap-card-body">${bodyContent}</div>
           <div class="problem-detail-chat-global-itgap-card-actions">
             ${confirmBtn}
-            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
-            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
             <button type="button" class="btn-redo-global-itgap" ${confirmed ? 'disabled' : ''}>重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task8" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task8" ${confirmed ? 'disabled' : ''}>讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
