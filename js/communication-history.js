@@ -51,7 +51,8 @@
       return !!msg.confirmed;
     }
     if (type === 'basicInfoCard') return true;
-    if (type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'itStatusOutputLog' || type === 'itStatusCard') return true;
+    if (type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'itStatusOutputLog') return true;
+    if (type === 'itStatusCard') return false;
     if (type === 'e2eFlowGeneratedLog') return true;
     if (type === 'e2eFlowExtractStartBlock') return !!msg.confirmed;
     if (type === 'e2eFlowJsonBlock') return !!msg.confirmed;
@@ -130,6 +131,7 @@
       if (msg.data) payload.data = msg.data;
       if (msg.type === 'valueStreamConfirmLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog' && msg.taskId) payload.taskId = msg.taskId;
+      if (msg.type === 'itStatusOutputLog') payload.confirmed = !!msg.confirmed;
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard', 'itStatusCard'].includes(msg.type)) payload.confirmed = !!msg.confirmed;
       if (msg.parsed) payload.parsed = msg.parsed;
       if (msg.type === 'intentExtractionCard' && msg.userText) payload.userText = msg.userText;
@@ -148,8 +150,8 @@
       }
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
-      /** 任务完成块、价值流确认日志、IT 现状输出日志、IT 现状确认卡必须归入其 msg.taskId 对应任务 */
-      const targetTask = ((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'itStatusCard') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
+      /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务（itStatusCard 不纳入过程日志，仅通过 itStatusOutputLog 的 confirmed 切换输出/确认） */
+      const targetTask = ((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
       byTask[targetTask].push(entry);
       lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
@@ -197,7 +199,7 @@
       if (parsed?.type === 'intentExtractionCard' && (parsed?.data?.intent === 'query' || parsed?.data?.intent === 'execute')) return '上下文';
       if (c.speaker === '系统提炼') return '讨论';
       if (parsed?.type === 'valueStreamConfirmLog') return '确认';
-      if (parsed?.type === 'itStatusOutputLog') return '输出';
+      if (parsed?.type === 'itStatusOutputLog') return parsed?.confirmed ? '确认' : '输出';
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard', 'itStatusCard'].includes(parsed?.type)) {
         return parsed?.data && parsed?.confirmed !== false ? '确认' : '输出';
       }

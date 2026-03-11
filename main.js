@@ -2489,6 +2489,8 @@ if (el.problemDetailChatMessages) {
       const cardIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusCard');
       if (cardIdx >= 0 && item?.createdAt) {
         problemDetailChatMessages[cardIdx] = { ...problemDetailChatMessages[cardIdx], confirmed: true };
+        const logIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusOutputLog');
+        if (logIdx >= 0) problemDetailChatMessages[logIdx] = { ...problemDetailChatMessages[logIdx], confirmed: true };
         saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
         confirmItStatusBtn.textContent = '已确认';
         confirmItStatusBtn.disabled = true;
