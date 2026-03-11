@@ -5544,12 +5544,21 @@ function isTaskCompleted(item, taskId) {
   }
 }
 
-/** 根据问题单状态推导任务状态：已完成 / 进行中 / 待执行 */
-function getTaskStatusText(item, taskId, allTasks) {
+/** 聊天中是否存在某任务的未确认输出卡（有则该任务在沟通历史中不应显示为已完成） */
+function hasUnconfirmedOutputCardForTask(messages, taskId) {
+  if (!Array.isArray(messages)) return false;
+  const cardByTask = { task1: 'basicInfoCard', task2: 'bmcCard', task3: 'requirementLogicBlock', task4: 'valueStreamCard', task5: 'itStatusCard' };
+  const cardType = cardByTask[taskId];
+  if (!cardType) return false;
+  return messages.some((m) => m.type === cardType && !m.confirmed);
+}
+
+/** 根据问题单状态推导任务状态：已完成 / 进行中 / 待执行。传入 messages 时会考虑未确认输出卡（有未确认卡则该任务不视为已完成） */
+function getTaskStatusText(item, taskId, allTasks, messages) {
   if (!item || !taskId || !allTasks?.length) return '—';
-  const completed = isTaskCompleted(item, taskId);
+  const completed = isTaskCompleted(item, taskId) && (messages == null || !hasUnconfirmedOutputCardForTask(messages, taskId));
   if (completed) return '已完成';
-  const firstUncompleted = allTasks.find((t) => !isTaskCompleted(item, t.id));
+  const firstUncompleted = allTasks.find((t) => !(isTaskCompleted(item, t.id) && (messages == null || !hasUnconfirmedOutputCardForTask(messages, t.id))));
   if (firstUncompleted?.id === taskId) return '进行中';
   return '待执行';
 }

@@ -299,7 +299,7 @@
       const inputDesc = extra.input || '—';
       const actionDesc = extra.action || '—';
       const outputDesc = extra.outputFeedback || '—';
-      const taskStatusText = typeof getTaskStatusText === 'function' ? getTaskStatusText(item, task.id, allHistoryTasks) : '—';
+      const taskStatusText = typeof getTaskStatusText === 'function' ? getTaskStatusText(item, task.id, allHistoryTasks, getChatsForProblem && createdAt ? getChatsForProblem(createdAt) : null) : '—';
       const comms = (communications[task.id] || []).slice().sort((a, b) => {
         const ta = (a.time && new Date(a.time).getTime()) || 0;
         const tb = (b.time && new Date(b.time).getTime()) || 0;
