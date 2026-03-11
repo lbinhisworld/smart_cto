@@ -55,7 +55,7 @@
     if (type === 'itStatusCard') return false;
     if (type === 'e2eFlowGeneratedLog') return true;
     if (type === 'e2eFlowExtractStartBlock') return !!msg.confirmed;
-    if (type === 'e2eFlowJsonBlock') return !!msg.confirmed;
+    if (type === 'e2eFlowJsonBlock') return true; // 推送即纳入过程日志，未确认时标签为「输出」，确认后为「确认」
     if (type === 'globalItGapStartBlock') return !!msg.confirmed;
     if (type === 'globalItGapAnalysisCard') return !!msg.confirmed;
     if (type === 'globalItGapAnalysisLog') return true;
@@ -133,6 +133,7 @@
       if (msg.type === 'itStatusOutputLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog') payload.confirmed = !!msg.confirmed;
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard', 'itStatusCard'].includes(msg.type)) payload.confirmed = !!msg.confirmed;
+      if (msg.type === 'e2eFlowJsonBlock') payload.confirmed = !!msg.confirmed;
       if (msg.parsed) payload.parsed = msg.parsed;
       if (msg.type === 'intentExtractionCard' && msg.userText) payload.userText = msg.userText;
       if (msg.type === 'e2eFlowGeneratedLog' && msg.valueStreamJson) payload.valueStreamJson = msg.valueStreamJson;
@@ -200,6 +201,7 @@
       if (c.speaker === '系统提炼') return '讨论';
       if (parsed?.type === 'valueStreamConfirmLog') return '确认';
       if (parsed?.type === 'itStatusOutputLog') return parsed?.confirmed ? '确认' : '输出';
+      if (parsed?.type === 'e2eFlowJsonBlock') return (parsed?.valueStreamJson != null && parsed?.confirmed) ? '确认' : '输出';
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard', 'itStatusCard'].includes(parsed?.type)) {
         return parsed?.data && parsed?.confirmed !== false ? '确认' : '输出';
       }
@@ -344,7 +346,7 @@
               } else if (parsed?.type === 'e2eFlowExtractStartBlock') {
                 titleLabel = parsed.content || '我先需要提取端到端流程绘制的 json 数据';
               } else if (parsed?.type === 'e2eFlowJsonBlock') {
-                titleLabel = '端到端流程 JSON 数据';
+                titleLabel = parsed?.confirmed ? '端到端流程 JSON 数据（已确认）' : '端到端流程 JSON 数据';
                 if (parsed.valueStreamJson) {
                   contentStr = '【端到端流程 JSON 数据】\n' + JSON.stringify(parsed.valueStreamJson, null, 2);
                 }
@@ -380,7 +382,7 @@
                 contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
               } else if (parsed?.type === 'taskCompleteBlock') {
                 titleLabel = '任务完成';
-                contentStr = '用户确认任务完成';
+                contentStr = (parsed?.content && String(parsed.content).trim()) || '用户确认任务完成';
               } else if (parsed?.type === 'unsatisfiedBlock') {
                 titleLabel = '用户表示不满意';
                 contentStr = (typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content || {}, null, 2)).slice(0, 2000) + (String(parsed.content || '').length > 2000 ? '\n…' : '');

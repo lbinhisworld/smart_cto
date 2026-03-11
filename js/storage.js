@@ -383,7 +383,7 @@
 
   function restoreItemFromSnapshot(createdAt, snapshot) {
     const list = getDigitalProblems();
-    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    const idx = list.findIndex((it) => String(it.createdAt) === String(createdAt));
     if (idx < 0) return;
     list[idx] = { ...snapshot, createdAt };
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));

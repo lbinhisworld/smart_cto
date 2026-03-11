@@ -1775,7 +1775,8 @@ if (el.problemDetailChatMessages) {
       const item = currentProblemDetailItem;
       const alreadyCompleted = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some((m) => m.type === 'taskCompleteBlock' && m.taskId === taskId);
       if (!alreadyCompleted) {
-        pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId, content: '用户确认任务完成', timestamp: getTimeStr() });
+        const taskCompleteContent = taskId === 'task7' ? '用户确认端到端流程绘制' : (taskId === 'task8' ? '用户确认全局 ITGap 分析' : (taskId === 'task9' ? '用户确认局部 ITGap 分析' : '用户确认任务完成'));
+        pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId, content: taskCompleteContent, timestamp: getTimeStr() });
         const createdAt = item?.createdAt;
         if (createdAt) advanceProblemStateOnTaskComplete(createdAt, taskId);
       }
@@ -1945,8 +1946,8 @@ if (el.problemDetailChatMessages) {
         const valueStream = item?.valueStream;
         if (valueStream && !valueStream.raw && item?.createdAt) {
           updateDigitalProblemMajorStage(item.createdAt, 2);
-          updateDigitalProblemItGapCompletedStages(item.createdAt, [0]);
-          currentProblemDetailItem = { ...item, currentMajorStage: 2, itGapCompletedStages: [0] };
+          // 不在此处标记 task7 完成，仅切换到 ITGap 阶段并展示 e2e JSON 卡片；用户点击卡片「确认」后再标记完成
+          currentProblemDetailItem = { ...item, currentMajorStage: 2 };
           problemDetailViewingMajorStage = 2;
           updateProblemDetailProgressStages(2, problemDetailViewingMajorStage);
           renderProblemDetailContent();
@@ -1968,7 +1969,10 @@ if (el.problemDetailChatMessages) {
               <div class="problem-detail-chat-e2e-json-header">端到端流程 JSON 数据</div>
               <pre class="problem-detail-chat-json-pre">${jsonStr}</pre>
               <div class="problem-detail-chat-e2e-json-actions">
-                <button type="button" class="btn-confirm-e2e-json" data-json="${dataAttr}">确认</button>
+                <button type="button" class="btn-confirm-e2e-json btn-confirm-primary" data-json="${dataAttr}">确认</button>
+                <button type="button" class="btn-redo-e2e-json">重做</button>
+                <button type="button" class="btn-refine-modify" data-task-id="task7">修正</button>
+                <button type="button" class="btn-refine-discuss" data-task-id="task7">讨论</button>
               </div>
             </div>
             <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -2132,7 +2136,10 @@ if (el.problemDetailChatMessages) {
           <div class="problem-detail-chat-e2e-json-header">端到端流程 JSON 数据</div>
           <pre class="problem-detail-chat-json-pre">${jsonStr}</pre>
           <div class="problem-detail-chat-e2e-json-actions">
-            <button type="button" class="btn-confirm-e2e-json" data-json="${dataAttr}">确认</button>
+            <button type="button" class="btn-confirm-e2e-json btn-confirm-primary" data-json="${dataAttr}">确认</button>
+            <button type="button" class="btn-redo-e2e-json">重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task7">修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task7">讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -2147,23 +2154,37 @@ if (el.problemDetailChatMessages) {
       try {
         const valueStream = JSON.parse(confirmE2eJsonBtn.dataset.json);
         const item = currentProblemDetailItem;
+        if (!item?.createdAt) return;
         let idx = problemDetailChatMessages.findIndex((m) => m.type === 'e2eFlowJsonBlock');
         if (idx >= 0) {
           problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], valueStreamJson: valueStream, confirmed: true };
-          saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+          saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
         }
         confirmE2eJsonBtn.disabled = true;
         confirmE2eJsonBtn.textContent = '已确认';
-        pushAndSaveProblemDetailChat({ role: 'user', content: '确认', timestamp: getTimeStr() });
         const container = el.problemDetailChatMessages;
         container.innerHTML = '';
         renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
         container.scrollTop = container.scrollHeight;
         renderProblemDetailHistory();
-        requestAnimationFrame(() => {
-          showTaskCompletionConfirm('task7', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task7')?.name) || '端到端流程绘制');
-        });
+        showTaskCompletionConfirm('task7', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task7')?.name) || '端到端流程绘制');
       } catch (_) {}
+      return;
+    }
+    const redoE2eJsonBtn = e.target.closest('.btn-redo-e2e-json');
+    if (redoE2eJsonBtn && !redoE2eJsonBtn.disabled) {
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      const idx = problemDetailChatMessages.findIndex((m) => m.type === 'e2eFlowJsonBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: false };
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        const container = el.problemDetailChatMessages;
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+      }
       return;
     }
     const startGlobalItGapBtn = e.target.closest('.btn-confirm-start-global-itgap');
@@ -2376,8 +2397,8 @@ if (el.problemDetailChatMessages) {
       const item = currentProblemDetailItem;
       if (item?.createdAt) {
         updateDigitalProblemMajorStage(item.createdAt, 2);
-        updateDigitalProblemItGapCompletedStages(item.createdAt, [0]);
-        currentProblemDetailItem = { ...item, currentMajorStage: 2, itGapCompletedStages: [0] };
+        // 仅切换到 ITGap 阶段，不在此处标记 task7 完成；task7 在用户点击端到端流程 JSON 卡片的「确认」后才标记完成
+        currentProblemDetailItem = { ...item, currentMajorStage: 2 };
         problemDetailViewingMajorStage = 2;
         updateProblemDetailProgressStages(2, problemDetailViewingMajorStage);
         renderProblemDetailContent();
@@ -5549,7 +5570,7 @@ function isTaskCompleted(item, taskId) {
 /** 聊天中是否存在某任务的未确认输出卡（有则该任务在沟通历史中不应显示为已完成） */
 function hasUnconfirmedOutputCardForTask(messages, taskId) {
   if (!Array.isArray(messages)) return false;
-  const cardByTask = { task1: 'basicInfoCard', task2: 'bmcCard', task3: 'requirementLogicBlock', task4: 'valueStreamCard', task5: 'itStatusCard' };
+  const cardByTask = { task1: 'basicInfoCard', task2: 'bmcCard', task3: 'requirementLogicBlock', task4: 'valueStreamCard', task5: 'itStatusCard', task7: 'e2eFlowJsonBlock' };
   const cardType = cardByTask[taskId];
   if (!cardType) return false;
   return messages.some((m) => m.type === cardType && !m.confirmed);
@@ -7594,9 +7615,10 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-e2e-json-header">端到端流程 JSON 数据</div>
           <pre class="problem-detail-chat-json-pre">${jsonStr}</pre>
           <div class="problem-detail-chat-e2e-json-actions">
-            <button type="button" class="btn-confirm-e2e-json" data-json="${dataAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
-            <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
-            <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
+            <button type="button" class="btn-confirm-e2e-json btn-confirm-primary" data-json="${dataAttr}" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-redo-e2e-json" ${confirmed ? 'disabled' : ''}>重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task7" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task7" ${confirmed ? 'disabled' : ''}>讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -8570,13 +8592,7 @@ function renderProblemDetailContent() {
       { id: 'task9', name: '局部 ITGap 分析' },
     ].map((t) => withTaskNumberPrefix(t.id, t.name));
     const valueStream = resolveValueStreamForItGap(item);
-    let itGapCompleted = item.itGapCompletedStages || [];
-    // 若已有价值流（端到端流程已绘制），自动将端到端流程绘制任务标为完成并持久化（任务过程日志由用户确认流程写入）
-    if (valueStream && !valueStream.raw && !itGapCompleted.includes(0)) {
-      itGapCompleted = [...itGapCompleted, 0].sort((a, b) => a - b);
-      updateDigitalProblemItGapCompletedStages(item.createdAt, itGapCompleted);
-      currentProblemDetailItem = { ...item, itGapCompletedStages: itGapCompleted };
-    }
+    const itGapCompleted = item.itGapCompletedStages || [];
     const itGapCurrent = [0, 1, 2].find((i) => !itGapCompleted.includes(i)) ?? 3;
     const itGapSubstepTaskIds = ['e2e-flow', 'global-itgap', 'local-itgap'];
     const itGapSubstepsHtml = itGapSubsteps.map((name, i) => {
@@ -8591,7 +8607,8 @@ function renderProblemDetailContent() {
     }).join('<span class="problem-detail-substep-sep">→</span>');
     let workspaceContent = '';
     if (valueStream && !valueStream.raw) {
-      const e2eHtml = renderEndToEndFlowHTML(valueStream);
+      const e2eDrawn = itGapCompleted.includes(0);
+      const e2eHtml = e2eDrawn ? renderEndToEndFlowHTML(valueStream) : '<p class="vs-view-placeholder">请先在聊天区确认端到端流程 JSON 后，此处将显示端到端流程</p>';
       const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
       let globalItGapCardHtml = '';
       const analysis = item.globalItGapAnalysisJson;
