@@ -1507,7 +1507,11 @@ function applyRollbackToTask(targetTaskId) {
   if (!item?.createdAt || !targetTaskId) return;
   const updated = buildItemAfterRollbackToTaskId(item, targetTaskId);
   if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
-  const chats = typeof getProblemDetailChats === 'function' ? (getProblemDetailChats()[item.createdAt] || problemDetailChatMessages) : problemDetailChatMessages;
+  // 以当前聊天框中的消息为源，删除「选定任务及以后」的所有聊天记录，再写回并刷新
+  const isCurrentProblem = String(item.createdAt) === String(currentProblemDetailItem?.createdAt);
+  const chats = isCurrentProblem && Array.isArray(problemDetailChatMessages)
+    ? problemDetailChatMessages
+    : (typeof getProblemDetailChats === 'function' ? (getProblemDetailChats()[item.createdAt] || []) : []);
   const filteredChats = filterChatMessagesAfterRollback(Array.isArray(chats) ? chats : [], targetTaskId);
   if (typeof saveProblemDetailChat === 'function') saveProblemDetailChat(item.createdAt, filteredChats);
   problemDetailChatMessages = filteredChats;
@@ -5889,7 +5893,7 @@ function buildItemAfterRollbackToTaskId(item, targetTaskId) {
   return next;
 }
 
-/** 回退到某任务时，从沟通历史中移除该任务及之后所有任务的过程日志；返回截断后的消息数组 */
+/** 回退到某任务时，从聊天记录中删除「选定任务及之后」的所有消息；返回仅保留选定任务之前消息的数组（用于清空聊天框中选定任务及以后的全部记录） */
 function filterChatMessagesAfterRollback(messages, targetTaskId) {
   if (!Array.isArray(messages) || messages.length === 0 || !targetTaskId) return messages;
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
