@@ -2479,6 +2479,29 @@ if (el.problemDetailChatMessages) {
       } catch (_) {}
       return;
     }
+    const confirmItStatusBtn = e.target.closest('.btn-confirm-it-status');
+    if (confirmItStatusBtn && !confirmItStatusBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const cardIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusCard');
+      if (cardIdx >= 0 && item?.createdAt) {
+        problemDetailChatMessages[cardIdx] = { ...problemDetailChatMessages[cardIdx], confirmed: true };
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        confirmItStatusBtn.textContent = '已确认';
+        confirmItStatusBtn.disabled = true;
+        renderProblemDetailContent();
+        const chatContainer = el.problemDetailChatMessages;
+        if (chatContainer) {
+          chatContainer.innerHTML = '';
+          renderProblemDetailChatFromStorage(chatContainer, problemDetailChatMessages);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        renderProblemDetailHistory();
+        requestAnimationFrame(() => {
+          showTaskCompletionConfirm('task5', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task5')?.name) || 'IT 现状标注');
+        });
+      }
+      return;
+    }
     const redoValueStreamBtn = e.target.closest('.btn-redo-value-stream');
     if (redoValueStreamBtn && !redoValueStreamBtn.disabled) {
       const item = currentProblemDetailItem;
@@ -2494,6 +2517,30 @@ if (el.problemDetailChatMessages) {
         }
         renderProblemDetailHistory();
         requestAnimationFrame(() => runValueStreamGeneration());
+      }
+      return;
+    }
+    const redoItStatusBtn = e.target.closest('.btn-redo-it-status');
+    if (redoItStatusBtn && !redoItStatusBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const cardIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusCard');
+      if (cardIdx >= 0 && item?.createdAt) {
+        const logIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusOutputLog');
+        const toRemove = [];
+        if (logIdx >= 0 && logIdx < cardIdx) toRemove.push(logIdx);
+        toRemove.push(cardIdx);
+        const doneIdx = cardIdx + 1;
+        if (doneIdx < problemDetailChatMessages.length && problemDetailChatMessages[doneIdx].role === 'system' && problemDetailChatMessages[doneIdx].content === 'IT 现状标注完成') toRemove.push(doneIdx);
+        toRemove.sort((a, b) => b - a).forEach((i) => problemDetailChatMessages.splice(i, 1));
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        const chatContainer = el.problemDetailChatMessages;
+        if (chatContainer) {
+          chatContainer.innerHTML = '';
+          renderProblemDetailChatFromStorage(chatContainer, problemDetailChatMessages);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        renderProblemDetailHistory();
+        requestAnimationFrame(() => runItStatusAnnotation(true));
       }
       return;
     }
@@ -5956,7 +6003,7 @@ function hasUnconfirmedOutputCardBeforeTask(messages, nextTaskId) {
   const nextIdx = allTasks.findIndex((t) => t.id === nextTaskId);
   if (nextIdx <= 0) return false;
   const taskIdsToCheck = allTasks.slice(0, nextIdx).map((t) => t.id);
-  const cardByTask = { task1: 'basicInfoCard', task2: 'bmcCard', task3: 'requirementLogicBlock' };
+  const cardByTask = { task1: 'basicInfoCard', task2: 'bmcCard', task3: 'requirementLogicBlock', task4: 'valueStreamCard', task5: 'itStatusCard' };
   for (const tid of taskIdsToCheck) {
     const cardType = cardByTask[tid];
     if (!cardType) continue;
@@ -6871,7 +6918,39 @@ async function runItStatusAnnotation() {
     updateDigitalProblemValueStreamItStatus(item.createdAt, mergedVs);
     currentProblemDetailItem = { ...item, valueStream: mergedVs, workflowAlignCompletedStages: [...new Set([...(item.workflowAlignCompletedStages || []), 0, 1])].sort((a, b) => a - b) };
     renderProblemDetailContent();
+    const { stages: vsStages } = parseValueStreamGraph(mergedVs);
+    const itStatusOutputData = [];
+    for (const stage of vsStages || []) {
+      const stageName = stage.name || '';
+      for (const step of stage.steps || []) {
+        const stepName = step.name || '';
+        const it = step.itStatus || step.it_status;
+        const itStatus = !it ? '' : (typeof it === 'object' ? (it.type === '手工' ? `手工-${it.detail || ''}` : it.type === '系统' ? `系统-${it.detail || ''}` : '') : String(it));
+        itStatusOutputData.push({ stageName, stepName, itStatus });
+      }
+    }
+    pushAndSaveProblemDetailChat({ type: 'itStatusOutputLog', taskId: 'task5', content: JSON.stringify(itStatusOutputData, null, 2), timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ type: 'itStatusCard', taskId: 'task5', data: itStatusOutputData, timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+    const cardBlock = document.createElement('div');
+    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
+    cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+    cardBlock.dataset.taskId = 'task5';
+    const itStatusJsonStr = escapeHtml(JSON.stringify(itStatusOutputData, null, 2));
+    cardBlock.innerHTML = `
+      <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+      <div class="problem-detail-chat-value-stream-card-wrap">
+        <div class="problem-detail-chat-value-stream-card-header">IT 现状标注 JSON（阶段名-环节名-IT 现状）</div>
+        <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${itStatusJsonStr}</pre></div>
+        <div class="problem-detail-chat-value-stream-card-actions">
+          <button type="button" class="btn-confirm-it-status btn-confirm-primary">确认</button>
+          <button type="button" class="btn-redo-it-status">重做</button>
+          <button type="button" class="btn-refine-modify" data-task-id="task5">修正</button>
+          <button type="button" class="btn-refine-discuss" data-task-id="task5">讨论</button>
+        </div>
+      </div>
+      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
+    container.appendChild(cardBlock);
     const doneBlock = document.createElement('div');
     doneBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsed';
     doneBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">IT 现状标注完成</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
@@ -7128,6 +7207,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'valueStreamConfirmLog') {
       // 价值流确认仅写入过程日志，不在聊天区展示
       return;
+    } else if (msg.type === 'itStatusOutputLog') {
+      // IT 现状标注输出仅写入过程日志，不在聊天区展示
+      return;
     } else if (msg.type === 'modificationResponseBlock') {
       const taskId = msg.taskId || '';
       const taskName = (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === taskId) || {}).name || taskId;
@@ -7367,6 +7449,30 @@ function renderProblemDetailChatFromStorage(container, messages) {
             <button type="button" class="btn-redo-value-stream" ${confirmed ? 'disabled' : ''}>重做</button>
             <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
             <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
+      container.appendChild(cardBlock);
+    } else if (msg.type === 'itStatusCard') {
+      const itStatusData = msg.data || [];
+      const confirmed = !!msg.confirmed;
+      const taskIdItStatus = msg.taskId || 'task5';
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = taskIdItStatus;
+      const itStatusJsonStr = escapeHtml(JSON.stringify(itStatusData, null, 2));
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-value-stream-card-wrap">
+          <div class="problem-detail-chat-value-stream-card-header">IT 现状标注 JSON（阶段名-环节名-IT 现状）</div>
+          <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${itStatusJsonStr}</pre></div>
+          <div class="problem-detail-chat-value-stream-card-actions">
+            <button type="button" class="btn-confirm-it-status btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-redo-it-status" ${confirmed ? 'disabled' : ''}>重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task5" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task5" ${confirmed ? 'disabled' : ''}>讨论</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;

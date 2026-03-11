@@ -1022,6 +1022,8 @@ body {
 .btn-redo-role-permission,
 .btn-redo-basic-info,
 .btn-redo-bmc,
+.btn-redo-value-stream,
+.btn-redo-it-status,
 .btn-refine-modify,
 .btn-refine-discuss {
   padding: 0.35rem 0.75rem;
@@ -1039,6 +1041,8 @@ body {
 .btn-redo-role-permission:hover:not(:disabled),
 .btn-redo-basic-info:hover:not(:disabled),
 .btn-redo-bmc:hover:not(:disabled),
+.btn-redo-value-stream:hover:not(:disabled),
+.btn-redo-it-status:hover:not(:disabled),
 .btn-refine-modify:hover:not(:disabled),
 .btn-refine-discuss:hover:not(:disabled) {
   opacity: 0.9;
@@ -1049,6 +1053,8 @@ body {
 .btn-redo-role-permission:disabled,
 .btn-redo-basic-info:disabled,
 .btn-redo-bmc:disabled,
+.btn-redo-value-stream:disabled,
+.btn-redo-it-status:disabled,
 .btn-refine-modify:disabled,
 .btn-refine-discuss:disabled {
   opacity: 0.5;
@@ -2159,7 +2165,8 @@ body {
   border-top: 1px solid var(--border);
 }
 
-.btn-confirm-value-stream {
+.btn-confirm-value-stream,
+.btn-confirm-it-status {
   padding: 0.35rem 0.75rem;
   font-size: 0.8125rem;
   font-family: inherit;
@@ -2172,11 +2179,13 @@ body {
   transition: opacity 0.2s;
 }
 
-.btn-confirm-value-stream:hover:not(:disabled) {
+.btn-confirm-value-stream:hover:not(:disabled),
+.btn-confirm-it-status:hover:not(:disabled) {
   opacity: 0.9;
 }
 
-.btn-confirm-value-stream:disabled {
+.btn-confirm-value-stream:disabled,
+.btn-confirm-it-status:disabled {
   opacity: 0.6;
   cursor: default;
 }
