@@ -270,6 +270,44 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /** 更新角色与权限模型推演 session 列表（用于逐步按环节分析） */
+  function updateDigitalProblemRolePermissionSessions(createdAt, sessions) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    list[idx] = { ...item, rolePermissionSessions: sessions };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
+  /** 更新某环节的角色与权限推演结果 */
+  function updateDigitalProblemRolePermissionStep(createdAt, stepIndex, rolePermissionJson) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    const sessions = item.rolePermissionSessions || [];
+    const newSessions = sessions.map((s) =>
+      s.stepIndex === stepIndex ? { ...s, rolePermissionJson } : s
+    );
+    list[idx] = { ...item, rolePermissionSessions: newSessions };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
+  /** 清除某环节的角色与权限推演结果，便于重做 */
+  function clearDigitalProblemRolePermissionStep(createdAt, stepIndex) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    const sessions = item.rolePermissionSessions || [];
+    const newSessions = sessions.map((s) =>
+      s.stepIndex === stepIndex ? { ...s, rolePermissionJson: undefined } : s
+    );
+    list[idx] = { ...item, rolePermissionSessions: newSessions };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
   /** 仅更新 valueStream 数据，不修改 workflowAlignCompletedStages（用于用户点击价值流 JSON 确认后，待用户再点「已完成」再推进阶段） */
   function updateDigitalProblemValueStreamDataOnly(createdAt, valueStream) {
     const list = getDigitalProblems();
@@ -522,6 +560,9 @@
   global.updateDigitalProblemLocalItGapSessions = updateDigitalProblemLocalItGapSessions;
   global.updateDigitalProblemLocalItGapAnalysis = updateDigitalProblemLocalItGapAnalysis;
   global.clearDigitalProblemLocalItGapStep = clearDigitalProblemLocalItGapStep;
+  global.updateDigitalProblemRolePermissionSessions = updateDigitalProblemRolePermissionSessions;
+  global.updateDigitalProblemRolePermissionStep = updateDigitalProblemRolePermissionStep;
+  global.clearDigitalProblemRolePermissionStep = clearDigitalProblemRolePermissionStep;
   global.updateDigitalProblemValueStreamDataOnly = updateDigitalProblemValueStreamDataOnly;
   global.updateDigitalProblemValueStream = updateDigitalProblemValueStream;
   global.updateDigitalProblemValueStreamItStatus = updateDigitalProblemValueStreamItStatus;

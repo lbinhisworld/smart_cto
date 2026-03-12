@@ -1189,10 +1189,176 @@ body {
   line-height: 1.35;
 }
 
+.problem-detail-role-permission-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.problem-detail-role-permission-list-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.35rem;
+}
+.problem-detail-role-permission-json {
+  margin: 0;
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
 .problem-detail-role-permission-placeholder {
   padding: 0.5rem 0;
   font-size: 0.85rem;
   color: var(--text-muted);
+}
+
+/* 环节卡片 view/json 双 tab */
+.problem-detail-role-permission-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35rem;
+}
+.problem-detail-role-permission-tab {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.problem-detail-role-permission-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.problem-detail-role-permission-tab-active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+/* view 面板：角色圆角卡片列表 */
+.problem-detail-role-permission-view-roles {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.problem-detail-role-card {
+  flex: 1 1 min(280px, 100%);
+  min-width: 240px;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.problem-detail-role-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+.problem-detail-role-card-header:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.problem-detail-role-card-header-collapsed {
+  border-bottom: none;
+}
+.problem-detail-role-card-header-arrow {
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+.problem-detail-role-card-header-collapsed .problem-detail-role-card-header-arrow {
+  transform: rotate(-90deg);
+}
+.problem-detail-role-card-sections {
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.problem-detail-role-card-section {
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.problem-detail-role-card-section-title {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.problem-detail-role-permission-field-content {
+  font-size: 0.82rem;
+}
+.problem-detail-role-permission-field-content.markdown-body {
+  font-size: 0.82rem;
+}
+.problem-detail-role-permission-field-pre {
+  margin: 0;
+  padding: 0.5rem;
+  font-size: 0.78rem;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.problem-detail-role-permission-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* 角色卡片内的二级子卡片（新权限三栏、痛点解决方案多卡片） */
+.problem-detail-role-permission-inner-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.problem-detail-role-permission-inner-card {
+  flex: 1 1 min(200px, 100%);
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.problem-detail-role-permission-inner-card-title {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+.problem-detail-role-permission-inner-card-body {
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.problem-detail-role-permission-list {
+  margin: 0;
+  padding-left: 1rem;
+  list-style: disc;
+}
+.problem-detail-role-permission-list-item {
+  margin: 0.15rem 0;
 }
 
 /* 工作区环节卡片内表格样式 */
@@ -1295,10 +1461,64 @@ body {
 .problem-detail-chat-local-itgap-start-actions,
 .problem-detail-chat-it-strategy-plan-start-actions,
 .problem-detail-chat-local-itgap-card-actions,
-.problem-detail-chat-local-itgap-sessions-actions {
+.problem-detail-chat-local-itgap-sessions-actions,
+.problem-detail-chat-role-permission-sessions-actions {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+.problem-detail-chat-role-permission-sessions-card-wrap {
+  padding: 0.75rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.problem-detail-chat-role-permission-sessions-card-header {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+}
+
+.problem-detail-chat-role-permission-sessions-header {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.problem-detail-chat-role-permission-sessions-list {
+  max-height: 10rem;
+  overflow-y: auto;
+  margin-bottom: 0.5rem;
+}
+
+.problem-detail-chat-role-permission-session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8125rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.15);
+  margin-bottom: 0.25rem;
+}
+
+.problem-detail-chat-role-permission-session-name {
+  font-weight: 500;
+}
+
+.problem-detail-chat-role-permission-session-status {
+  font-size: 0.75rem;
+}
+
+.problem-detail-chat-role-permission-session-status.session-pending {
+  color: var(--accent);
+}
+
+.problem-detail-chat-role-permission-session-status.session-done {
+  color: var(--text-muted);
 }
 
 .btn-continue-local-itgap-sessions {

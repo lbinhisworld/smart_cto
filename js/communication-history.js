@@ -29,7 +29,7 @@
     if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
     if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog' || type === 'globalItGapContextLog') return 'task8';
     if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog' || type === 'localItGapContextLog') return 'task9';
-    if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionConfirmedLog') return 'task10';
+    if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionSessionsBlock' || type === 'rolePermissionAnalysisCard' || type === 'rolePermissionConfirmedLog') return 'task10';
     if (type === 'taskContextBlock') return msg.taskId || null;
     if (type === 'taskCompleteBlock' || type === 'taskCompletionConfirmBlock') return msg.taskId || null;
     if (type === 'unsatisfiedBlock' || type === 'modificationResponseBlock') return msg.taskId || null;
@@ -66,6 +66,8 @@
     if (type === 'localItGapAnalysisLog') return true;
     if (type === 'localItGapContextLog') return true;
     if (type === 'rolePermissionCard') return true; // 推送即纳入过程日志，未确认时标签为「输出」，确认后为「确认」
+    if (type === 'rolePermissionSessionsBlock') return true;
+    if (type === 'rolePermissionAnalysisCard') return true; // 单环节推演卡片，推送即纳入过程日志
     if (type === 'rolePermissionConfirmedLog') return true;
     if (type === 'taskContextBlock') return true;
     if (type === 'taskCompleteBlock') return true;
@@ -158,6 +160,14 @@
       if (msg.type === 'rolePermissionCard') {
         payload.confirmed = !!msg.confirmed;
         if (msg.confirmed && typeof msg.content === 'string') payload.rolePermissionModelJson = parseRolePermissionModel(msg.content);
+        // payload.content 为整个 JSON 字符串，时间线标签由 getCommunicationLogType 根据 confirmed 返回「输出」或「确认」
+      }
+      if (msg.type === 'rolePermissionSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
+      if (msg.type === 'rolePermissionSessionsBlock') payload.confirmed = !!msg.confirmed;
+      if (msg.type === 'rolePermissionAnalysisCard') {
+        payload.confirmed = !!msg.confirmed;
+        if (msg.stepName) payload.stepName = msg.stepName;
+        if (msg.stepIndex != null) payload.stepIndex = msg.stepIndex;
       }
       if (msg.type === 'rolePermissionConfirmedLog' && msg.rolePermissionModelJson) {
         payload.rolePermissionModelJson = msg.rolePermissionModelJson;
@@ -165,7 +175,7 @@
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
       /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务；角色与权限卡片固定归入 task10 */
-      const targetTask = (msg.type === 'rolePermissionCard' && Array.isArray(byTask['task10'])) ? 'task10' : (((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask);
+      const targetTask = ((msg.type === 'rolePermissionCard' || msg.type === 'rolePermissionSessionsBlock' || msg.type === 'rolePermissionAnalysisCard') && Array.isArray(byTask['task10'])) ? 'task10' : (((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask);
       byTask[targetTask].push(entry);
       lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
@@ -217,7 +227,9 @@
       if (parsed?.type === 'e2eFlowJsonBlock') return (parsed?.valueStreamJson != null && parsed?.confirmed) ? '确认' : '输出';
       if (parsed?.type === 'localItGapAnalysisCard') return (parsed?.analysisJson != null && parsed?.confirmed) ? '确认' : '输出';
       if (parsed?.type === 'localItGapSessionsBlock') return '确认';
+      if (parsed?.type === 'rolePermissionSessionsBlock') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'rolePermissionCard') return parsed?.confirmed ? '确认' : '输出';
+      if (parsed?.type === 'rolePermissionAnalysisCard') return parsed?.confirmed ? '确认' : '输出';
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard', 'itStatusCard'].includes(parsed?.type)) {
         return parsed?.data && parsed?.confirmed !== false ? '确认' : '输出';
       }
@@ -393,6 +405,14 @@
                 } else if (typeof parsed?.content === 'string') {
                   contentStr = parsed.content;
                 }
+              } else if (parsed?.type === 'rolePermissionSessionsBlock') {
+                titleLabel = parsed?.confirmed ? '角色与权限模型推演 Session（已确认）' : '角色与权限模型推演 Session';
+                contentStr = parsed.sessions != null ? JSON.stringify(parsed.sessions, null, 2) : '(无)';
+              } else if (parsed?.type === 'rolePermissionAnalysisCard') {
+                const stepNameForRbac = parsed?.stepName || `环节${(parsed?.stepIndex ?? 0) + 1}`;
+                stepNameForHead = stepNameForRbac;
+                titleLabel = parsed?.confirmed ? `角色与权限推演（${stepNameForRbac}）（已确认）` : `角色与权限推演（${stepNameForRbac}）`;
+                contentStr = parsed.content != null ? (typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content, null, 2)) : '(无)';
               } else if (parsed?.type === 'rolePermissionConfirmedLog') {
                 titleLabel = parsed.content || '已确认角色与权限模型推演';
                 if (parsed.rolePermissionModelJson) {

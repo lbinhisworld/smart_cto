@@ -1866,7 +1866,7 @@ if (el.problemDetailChatMessages) {
           if (isGlobalItGapMsg && currentProblemDetailItem?.createdAt) {
             problemDetailChatMessages = problemDetailChatMessages.filter((m) => {
               const t = m.type;
-              return t !== 'globalItGapStartBlock' && t !== 'globalItGapAnalysisCard' && t !== 'globalItGapAnalysisLog' && t !== 'localItGapStartBlock' && t !== 'localItGapSessionsBlock' && t !== 'localItGapAnalysisCard' && t !== 'localItGapAnalysisLog';
+              return t !== 'globalItGapStartBlock' && t !== 'globalItGapAnalysisCard' && t !== 'globalItGapAnalysisLog' && t !== 'localItGapStartBlock' && t !== 'localItGapSessionsBlock' && t !== 'localItGapAnalysisCard' && t !== 'localItGapAnalysisLog' && t !== 'rolePermissionSessionsBlock' && t !== 'rolePermissionCard' && t !== 'rolePermissionAnalysisCard';
             });
             saveProblemDetailChat(currentProblemDetailItem.createdAt, problemDetailChatMessages);
             clearDigitalProblemGlobalItGapAnalysis(currentProblemDetailItem.createdAt);
@@ -2050,15 +2050,21 @@ if (el.problemDetailChatMessages) {
         return;
       }
       if (taskId === 'task10') {
-        const container = el.problemDetailChatMessages;
-        pushAndSaveProblemDetailChat({ role: 'system', content: '正在准备工作区', timestamp: getTimeStr() });
-        const preparingBlock = document.createElement('div');
-        preparingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-        preparingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">正在准备工作区</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-        container?.appendChild(preparingBlock);
-        container.scrollTop = container.scrollHeight;
-        renderProblemDetailContent();
-        requestAnimationFrame(() => runRolePermissionModeling(false));
+        const valueStream = item?.valueStream;
+        if (!valueStream || valueStream.raw) {
+          pushAndSaveProblemDetailChat({ role: 'system', content: '角色与权限模型推演需要完整的价值流图，请先在工作流对齐阶段完成价值流图绘制。', timestamp: getTimeStr() });
+        } else {
+          const sessions = generateRolePermissionSessions(valueStream);
+          if (typeof updateDigitalProblemRolePermissionSessions === 'function') updateDigitalProblemRolePermissionSessions(item.createdAt, sessions);
+          currentProblemDetailItem = { ...item, rolePermissionSessions: sessions };
+          pushAndSaveProblemDetailChat({ type: 'rolePermissionSessionsBlock', sessions, timestamp: getTimeStr() });
+          const container = el.problemDetailChatMessages;
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+          renderProblemDetailHistory();
+          renderProblemDetailContent();
+        }
         return;
       }
       if (['task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) {
@@ -2106,6 +2112,7 @@ if (el.problemDetailChatMessages) {
             confirmed: true,
           };
           saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+          // 时间线对应内容块标注为「确认」
           if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
           const currentMajorStage = item.currentMajorStage ?? 0;
           const targetMajorStage = 3;
@@ -2116,6 +2123,9 @@ if (el.problemDetailChatMessages) {
           problemDetailViewingMajorStage = targetMajorStage;
           itStrategyPlanViewingSubstep = 0;
           updateProblemDetailProgressStages(Math.max(currentMajorStage, targetMajorStage), problemDetailViewingMajorStage);
+          // 将大模型返回的 JSON 按环节提取并展示到对应环节名称的内容卡片上（本次渲染强制使用刚确认的内容）
+          lastConfirmedRolePermissionContentForRender = typeof msg.content === 'string' ? msg.content : null;
+          if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 确认按钮: 已设置 lastConfirmedRolePermissionContentForRender, content类型=', typeof msg.content, '长度=', typeof msg.content === 'string' ? msg.content.length : 0, '前200字=', typeof msg.content === 'string' ? msg.content.slice(0, 200) : '');
           renderProblemDetailContent();
           requestAnimationFrame(() => {
             const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
@@ -2325,6 +2335,90 @@ if (el.problemDetailChatMessages) {
       renderProblemDetailHistory();
       return;
     }
+    const confirmRolePermissionSessionsBtn = e.target.closest('.btn-confirm-role-permission-sessions');
+    if (confirmRolePermissionSessionsBtn && !confirmRolePermissionSessionsBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'rolePermissionSessionsBlock');
+      if (sessionsIdx >= 0) {
+        problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], confirmed: true };
+        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+      }
+      confirmRolePermissionSessionsBtn.disabled = true;
+      confirmRolePermissionSessionsBtn.textContent = '已确认';
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => runRolePermissionModelingForNextStep && runRolePermissionModelingForNextStep());
+      return;
+    }
+    const confirmRolePermissionStepBtn = e.target.closest('.btn-confirm-role-permission-step');
+    if (confirmRolePermissionStepBtn && !confirmRolePermissionStepBtn.disabled) {
+      const card = confirmRolePermissionStepBtn.closest('[data-msg-index]');
+      const stepIndex = parseInt(card?.getAttribute('data-step-index') || card?.dataset?.stepIndex || '-1', 10);
+      const stepName = (card?.getAttribute('data-step-name') || card?.dataset?.stepName || '').trim();
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt || isNaN(stepIndex) || stepIndex < 0) return;
+      const idx = problemDetailChatMessages.findIndex((m) => m.type === 'rolePermissionAnalysisCard' && m.stepIndex === stepIndex);
+      if (idx < 0) return;
+      const msg = problemDetailChatMessages[idx];
+      const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || {});
+      problemDetailChatMessages[idx] = { ...msg, confirmed: true };
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      if (typeof updateDigitalProblemRolePermissionStep === 'function') {
+        let parsed = null;
+        try {
+          parsed = typeof content === 'string' ? JSON.parse(content) : content;
+        } catch (_) {}
+        updateDigitalProblemRolePermissionStep(item.createdAt, stepIndex, parsed || content);
+      }
+      const list = getDigitalProblems();
+      const updated = list.find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      confirmRolePermissionStepBtn.disabled = true;
+      confirmRolePermissionStepBtn.textContent = '已确认';
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      const sessions = updated?.rolePermissionSessions || item.rolePermissionSessions || [];
+      const hasMore = sessions.some((s, i) => i > stepIndex && !s.rolePermissionJson);
+      if (hasMore) {
+        requestAnimationFrame(() => runRolePermissionModelingForNextStep && runRolePermissionModelingForNextStep());
+      } else {
+        requestAnimationFrame(() => {
+          const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+          if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          showTaskCompletionConfirm('task10', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task10')?.name) || '角色与权限模型');
+        });
+      }
+      return;
+    }
+    const redoRolePermissionStepBtn = e.target.closest('.btn-redo-role-permission-step');
+    if (redoRolePermissionStepBtn && !redoRolePermissionStepBtn.disabled) {
+      const card = redoRolePermissionStepBtn.closest('[data-msg-index]');
+      const stepIndex = parseInt(card?.getAttribute('data-step-index') || card?.dataset?.stepIndex || '-1', 10);
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt || isNaN(stepIndex) || stepIndex < 0) return;
+      if (typeof clearDigitalProblemRolePermissionStep === 'function') clearDigitalProblemRolePermissionStep(item.createdAt, stepIndex);
+      problemDetailChatMessages = problemDetailChatMessages.filter((m) => !(m.type === 'rolePermissionAnalysisCard' && m.stepIndex === stepIndex));
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const list = getDigitalProblems();
+      const updated = list.find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => runRolePermissionModelingForNextStep && runRolePermissionModelingForNextStep());
+      return;
+    }
     const confirmLocalItGapSessionsBtn = e.target.closest('.btn-confirm-local-itgap-sessions');
     if (confirmLocalItGapSessionsBtn && !confirmLocalItGapSessionsBtn.disabled) {
       const item = currentProblemDetailItem;
@@ -2438,19 +2532,21 @@ if (el.problemDetailChatMessages) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
         saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
       }
-      const container = el.problemDetailChatMessages;
-      pushAndSaveProblemDetailChat({
-        role: 'system',
-        content: '正在准备工作区',
-        timestamp: getTimeStr(),
-      });
-      const preparingBlock = document.createElement('div');
-      preparingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-      preparingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">正在准备工作区</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-      container?.appendChild(preparingBlock);
-      container.scrollTop = container.scrollHeight;
-      renderProblemDetailContent();
-      requestAnimationFrame(() => runRolePermissionModeling(false));
+      const valueStream = item?.valueStream;
+      if (!valueStream || valueStream.raw) {
+        pushAndSaveProblemDetailChat({ role: 'system', content: '角色与权限模型推演需要完整的价值流图，请先在工作流对齐阶段完成价值流图绘制。', timestamp: getTimeStr() });
+      } else {
+        const sessions = generateRolePermissionSessions(valueStream);
+        if (typeof updateDigitalProblemRolePermissionSessions === 'function') updateDigitalProblemRolePermissionSessions(item.createdAt, sessions);
+        currentProblemDetailItem = { ...item, rolePermissionSessions: sessions };
+        pushAndSaveProblemDetailChat({ type: 'rolePermissionSessionsBlock', sessions, timestamp: getTimeStr() });
+        const container = el.problemDetailChatMessages;
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+        renderProblemDetailContent();
+      }
       return;
     }
     const startItGapBtn = e.target.closest('.btn-confirm-start-it-gap');
@@ -5171,6 +5267,22 @@ function generateLocalItGapSessions(valueStream) {
   });
 }
 
+/** 根据价值流生成角色与权限模型推演 session（不调用大模型），用于逐步按环节分析 */
+function generateRolePermissionSessions(valueStream) {
+  const { stages } = parseValueStreamGraph(valueStream || {});
+  let stepIndex = 0;
+  const sessions = [];
+  for (const stage of stages) {
+    const stageName = stage?.name || '';
+    for (const step of stage.steps || []) {
+      const stepName = step?.name || `环节${stepIndex + 1}`;
+      sessions.push({ stepName, stepIndex, stageName, rolePermissionJson: null });
+      stepIndex += 1;
+    }
+  }
+  return sessions;
+}
+
 const GLOBAL_ITGAP_STRUCTURED_SECTIONS = [
   { key: 'structuralGap', label: '全局架构失调诊断 (Structural Gap)' },
   { key: 'collaborationGap', label: '决策协同断裂分析 (Collaboration Gap)' },
@@ -6540,6 +6652,42 @@ function scrollChatToBlock(container, blockEl) {
   container.scrollTop = Math.max(0, blockTop - Math.floor(containerHeight / 3));
 }
 
+/** 针对单个环节调用大模型进行角色与权限推演 */
+async function generateRolePermissionForStep(stepName, stageName, valueStream, globalItGap, localItGap, projectName) {
+  const vsmJson = JSON.stringify(valueStream, null, 2);
+  const globalItGapJson = globalItGap != null ? JSON.stringify(globalItGap, null, 2) : '';
+  const localItGapJson = Array.isArray(localItGap) && localItGap.length > 0 ? JSON.stringify(localItGap, null, 2) : '';
+  const systemPrompt = `Role & Context:
+我是一名软件公司的需求分析专家。请针对价值流中的**单一环节**进行角色与权限模型（RBAC）推演。
+
+Task Goal:
+针对环节「${stepName}」所在的阶段「${stageName}」，输出该环节的角色与权限推演结果（单个 JSON 对象）。
+
+Requirement: 角色画像模拟、现状转换映射、痛点闭环设计、合规与风控（SoD）。
+
+Output Format: 直接输出一个 JSON 对象，不要数组，不要 markdown 代码块。结构必须包含：
+{
+  "stage_name": "阶段名称",
+  "step_id": "环节序号",
+  "step_name": "环节名称",
+  "it_gap_reference": "关联的 IT 现状与痛点简述",
+  "roles": [{"role_name":"","legacy_operation":"","new_it_permissions":{},"pain_point_solution":{},"trigger_logic":""}],
+  "sod_warning": "职责分离建议或 null"
+}`;
+  const userParts = [
+    `项目：${projectName}。针对环节「${stepName}」进行角色与权限推演。`,
+    '【端到端全流程】', vsmJson,
+  ];
+  if (globalItGapJson) userParts.push('【全局 ITGap 分析】', globalItGapJson);
+  if (localItGapJson) userParts.push('【局部 ITGap 分析】', localItGapJson);
+  userParts.push('\n请直接输出该环节的 JSON 对象，不要 markdown 代码块或说明文字。');
+  const userPrompt = userParts.join('\n\n');
+  return fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ]);
+}
+
 async function runRolePermissionModeling(isRedo) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -6572,6 +6720,10 @@ async function runRolePermissionModeling(isRedo) {
   const customerName = (item.customerName ?? item.customer_name ?? '').trim() || '该客户';
   const projectName = `${customerName} 数字化项目`;
   const vsmJson = JSON.stringify(valueStream, null, 2);
+  const globalItGapJson = item.globalItGapAnalysisJson != null ? JSON.stringify(item.globalItGapAnalysisJson, null, 2) : '';
+  const localItGapJson = Array.isArray(item.localItGapAnalyses) && item.localItGapAnalyses.length > 0
+    ? JSON.stringify(item.localItGapAnalyses, null, 2)
+    : (Array.isArray(item.localItGapSessions) && item.localItGapSessions.length > 0 ? JSON.stringify(item.localItGapSessions, null, 2) : '');
   let parsingBlock = null;
   if (!isRedo) {
     parsingBlock = document.createElement('div');
@@ -6591,9 +6743,69 @@ async function runRolePermissionModeling(isRedo) {
     }
   }
   try {
-    const systemPrompt =
-      '你是一位熟悉企业微信和低代码平台的业务分析师与解决方案架构师，擅长基于价值流图进行角色与权限设计。请严格按照要求组织表格内容，便于后续程序解析。';
-    const userPrompt = `我正在进行 ${projectName} 的 IT 解决方案设计。目前已完成价值流图（VSM），数据如下（JSON）：\n\n${vsmJson}\n\n请你基于这些节点，运用业务分析师思维，推演所需的角色模型：\n- 识别角色：每个节点谁是执行者、谁是审批者、谁是知情者？\n- 定义权限：哪些角色需要移动端（企微）操作，哪些需要后台管理（低代码）权限？\n- 交互场景：他们在企业微信中分别需要接收什么样的通知或查询什么数据？\n\n【重要格式要求】\n1. 请以 Markdown 表格形式输出，表头固定为：节点 | 建议角色 | 核心职责 | 权限类型。\n2. 「建议角色」一列，必须严格使用以下格式：\n   执行者: 角色A、角色B；审批者: 角色C；知情者: 角色D、角色E\n3. 「权限类型」一列，必须严格使用以下格式（可以为空但键名不能省略）：\n   企微端: xxx；低代码: yyy；接收通知: zzz；查询数据: kkk\n\n请严格遵守以上键名与分隔符，避免使用其他描述方式。`;
+    const systemPrompt = `Role & Context:
+我是一名软件公司的需求分析专家。我已经完成了客户业务的全链路价值流绘制，并详细标注了每个环节的 IT 现状及痛点标注（端到端全流程json）、全局 itgap 分析json，局部 ITGap 分析。
+
+Task Goal:
+请基于我提供的价值流逻辑，利用行业最佳实践（Industry Best Practices）模拟出一套高度匹配的角色与权限模型（RBAC Model）。这套模型将作为后续 IT 解决方案的底座。
+
+重要说明：推演对象是价值流图中**每个阶段（stage）内的具体环节（step）节点**，不是按阶段聚合。即：遍历每个阶段下的每一个环节，对**每个环节**分别输出一条角色与权限推演结果。数组的每个元素对应**一个具体环节**。
+
+Requirement Details:
+
+角色画像模拟： 针对每个环节推演 1-2 个标准业务角色（如：高管、业务经办、风险控制官等），并定义其在该节点的核心业务使命。
+
+现状转换映射： 深度对比该角色在"旧系统/线下纸质"与"新 IT 系统"中的操作差异。
+
+痛点闭环设计： 权限设计必须直接对冲标注的痛点。例如：若痛点是"人工查验慢"，新权限应包含"系统自动准入校验权"；若痛点是"信息孤岛"，新权限应包含"跨模块数据透视权"。
+
+合规与风控（SoD）： 识别关键节点中的职责分离要求（如：提报与审批、财务与出纳、采购与验收等角色的互斥逻辑）。
+
+Output Format (Strict JSON):
+请直接输出 JSON 数据，不要包含任何多余的解释文字。数组的每一项对应**一个具体环节（步骤）**，结构需包含如下字段：
+
+[
+  {
+    "stage_name": "所属阶段名称（来自价值流阶段）",
+    "step_id": "环节序号或标识",
+    "step_name": "环节名称（该阶段内的具体步骤/环节名）",
+    "it_gap_reference": "关联的 IT 现状与痛点简述",
+    "roles": [
+      {
+        "role_name": "模拟角色名称",
+        "legacy_operation": "现状/线下操作模式描述",
+        "new_it_permissions": {
+          "create": "boolean",
+          "read": "string (权限范围：本人/本组/全行)",
+          "update": "boolean",
+          "delete": "boolean",
+          "approve": "boolean"
+        },
+        "pain_point_solution": {
+          "target_pain": "解决的具体痛点",
+          "improvement_logic": "新权限/新功能如何从技术层面消除该痛点"
+        },
+        "trigger_logic": "该角色触发下一环节的操作逻辑或系统判别条件"
+      }
+    ],
+    "sod_warning": "该环节的职责分离建议（如无则设为 null）"
+  }
+]`;
+    const userParts = [
+      `我正在进行 ${projectName} 的 IT 解决方案设计。`,
+      '【端到端全流程 / 价值流】',
+      vsmJson,
+    ];
+    if (globalItGapJson) {
+      userParts.push('【全局 ITGap 分析】');
+      userParts.push(globalItGapJson);
+    }
+    if (localItGapJson) {
+      userParts.push('【局部 ITGap 分析】');
+      userParts.push(localItGapJson);
+    }
+    userParts.push('\n请根据上述数据，直接输出符合 Output Format 的 JSON 数组，不要包含 markdown 代码块或其它说明文字。');
+    const userPrompt = userParts.join('\n\n');
     const { content, usage, model, durationMs } = await fetchDeepSeekChat([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
@@ -6654,12 +6866,15 @@ async function runRolePermissionModeling(isRedo) {
             </div>
             <div class="problem-detail-basic-info-card-actions">
               <button type="button" class="btn-confirm-role-permission btn-confirm-primary">确认</button>
+              <button type="button" class="btn-refine-modify">修正</button>
+              <button type="button" class="btn-refine-discuss">讨论</button>
               <button type="button" class="btn-redo-role-permission">重做</button>
             </div>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>
         ${llmMetaHtml}`;
+      card.dataset.taskId = 'task10';
       container.appendChild(card);
       container.scrollTop = container.scrollHeight;
       pushAndSaveProblemDetailChat({
@@ -6670,6 +6885,7 @@ async function runRolePermissionModeling(isRedo) {
         llmMeta,
       });
       card.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+      // 同时推送到过程日志：时间线出现一条内容块，标签为「输出」，详情中展示整个 JSON
       if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
     }
   } catch (err) {
@@ -6689,29 +6905,120 @@ async function runRolePermissionModeling(isRedo) {
   }
 }
 
-function getLatestConfirmedRolePermissionContent() {
+let lastConfirmedRolePermissionContentForRender = null;
+const ROLE_PERMISSION_LOG = true;
+
+function getLatestConfirmedRolePermissionContent(item) {
+  if (typeof lastConfirmedRolePermissionContentForRender === 'string' && lastConfirmedRolePermissionContentForRender.trim()) {
+    const content = lastConfirmedRolePermissionContentForRender;
+    if (ROLE_PERMISSION_LOG) console.log('[角色与权限] getLatestConfirmedRolePermissionContent: 使用刚确认的覆盖内容, 长度=', content.length);
+    lastConfirmedRolePermissionContentForRender = null;
+    return content;
+  }
+  const it = item || currentProblemDetailItem;
+  const sessions = it?.rolePermissionSessions;
+  if (Array.isArray(sessions) && sessions.some((s) => s.rolePermissionJson)) {
+    const arr = [];
+    for (const s of sessions) {
+      if (!s.rolePermissionJson) continue;
+      const j = typeof s.rolePermissionJson === 'object' ? s.rolePermissionJson : (() => { try { return JSON.parse(s.rolePermissionJson); } catch (_) { return null; } })();
+      if (j) arr.push(j);
+    }
+    if (arr.length) {
+      if (ROLE_PERMISSION_LOG) console.log('[角色与权限] getLatestConfirmedRolePermissionContent: 从 rolePermissionSessions 聚合, 环节数=', arr.length);
+      return JSON.stringify(arr);
+    }
+  }
   if (!Array.isArray(problemDetailChatMessages) || problemDetailChatMessages.length === 0) {
+    if (ROLE_PERMISSION_LOG) console.log('[角色与权限] getLatestConfirmedRolePermissionContent: 无消息列表, 返回 null');
     return null;
   }
   for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
     const m = problemDetailChatMessages[i];
     if (m && m.type === 'rolePermissionCard' && m.confirmed && typeof m.content === 'string') {
+      if (ROLE_PERMISSION_LOG) console.log('[角色与权限] getLatestConfirmedRolePermissionContent: 从消息列表找到已确认卡片, index=', i, 'content长度=', m.content.length);
       return m.content;
     }
   }
+  if (ROLE_PERMISSION_LOG) console.log('[角色与权限] getLatestConfirmedRolePermissionContent: 未找到已确认的 rolePermissionCard, 返回 null');
   return null;
 }
 
 function parseRolePermissionModel(markdown) {
   if (!markdown || typeof markdown !== 'string') return [];
+  let raw = markdown.trim().replace(/^\uFEFF/, '');
+  if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 输入长度=', raw.length, '前80字=', raw.slice(0, 80));
+  // 1) 尝试直接解析为 RBAC JSON 数组（新格式）
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e1) {
+    if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: JSON.parse(raw) 失败:', e1 && e1.message);
+    const codeBlock = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlock) {
+      try {
+        parsed = JSON.parse(codeBlock[1].trim());
+      } catch (_2) {}
+    }
+    if (!Array.isArray(parsed)) {
+      const start = raw.indexOf('[');
+      if (start >= 0) {
+        let depth = 0;
+        let end = -1;
+        let i = start;
+        while (i < raw.length) {
+          const c = raw[i];
+          if (c === '"') {
+            i += 1;
+            while (i < raw.length) {
+              if (raw[i] === '\\') i += 2;
+              else if (raw[i] === '"') { i += 1; break; }
+              else i += 1;
+            }
+            continue;
+          }
+          if (c === '[') { depth += 1; i += 1; continue; }
+          if (c === ']') {
+            depth -= 1;
+            if (depth === 0) { end = i; break; }
+            i += 1;
+            continue;
+          }
+          i += 1;
+        }
+        if (end > start) {
+          try {
+            parsed = JSON.parse(raw.slice(start, end + 1));
+          } catch (_3) {
+            if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 括号截取后仍解析失败, 长度=', end - start + 1);
+          }
+        }
+      }
+    }
+  }
+  if (Array.isArray(parsed) && parsed.length > 0) {
+    const first = parsed[0];
+    if (first && typeof first === 'object') {
+      const hasRoles = Array.isArray(first.roles);
+      const hasStep = 'step_name' in first || 'step_id' in first;
+      const hasStage = 'stage_name' in first || 'stage_id' in first;
+      if (hasRoles && (hasStep || hasStage)) {
+        if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 解析成功(新格式), 条数=', parsed.length, '首条keys=', Object.keys(first || {}));
+        return parsed;
+      }
+      if (hasStep || hasStage) {
+        if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 解析成功(按环节), 条数=', parsed.length);
+        return parsed;
+      }
+    }
+  }
+  if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 未识别为新格式数组, 尝试表格解析, parsed=', Array.isArray(parsed) ? 'length=' + parsed.length : parsed);
+  // 2) 兼容旧版 Markdown 表格
   const lines = markdown.split(/\r?\n/).map((l) => l.trim());
   const tableLines = lines.filter((l) => l.includes('|'));
   if (tableLines.length < 2) return [];
   const headerLine = tableLines[0];
   const separatorLine = tableLines[1];
-  if (!separatorLine.replace(/\|/g, '').match(/^-+$/)) {
-    // 简单容错：若第二行不是典型分隔线，则仍然按第一行为表头、其余为数据行处理
-  }
   const headerCells = headerLine
     .split('|')
     .map((c) => c.trim())
@@ -6766,8 +7073,132 @@ function parseRolePermissionModel(markdown) {
 }
 if (typeof window !== 'undefined') window.parseRolePermissionModel = parseRolePermissionModel;
 
+/** 将角色字段渲染为 HTML：字符串用 markdown，对象用 JSON pre */
+function formatRolePermissionField(val) {
+  if (val == null || (typeof val === 'string' && !val.trim())) return '<span class="problem-detail-role-permission-empty">—</span>';
+  if (typeof val === 'string') return `<div class="problem-detail-role-permission-field-content markdown-body">${renderMarkdown(val.trim())}</div>`;
+  if (typeof val === 'object') return `<pre class="problem-detail-role-permission-field-pre">${escapeHtml(JSON.stringify(val, null, 2))}</pre>`;
+  return escapeHtml(String(val));
+}
+
+/** 将 new_it_permissions 渲染为 数据权限、功能实用、系统操作 三个子卡片 */
+function buildNewPermissionsSubcardsHtml(obj) {
+  if (!obj || typeof obj !== 'object') return '<span class="problem-detail-role-permission-empty">—</span>';
+  const labels = { data_access: '数据权限', function_use: '功能实用', system_operation: '系统操作' };
+  const keys = ['data_access', 'function_use', 'system_operation'];
+  const cards = keys.map((key) => {
+    const val = obj[key];
+    if (val == null && !(key in obj)) return '';
+    const label = labels[key] || key;
+    let content = '';
+    if (val == null) content = '<span class="problem-detail-role-permission-empty">—</span>';
+    else if (Array.isArray(val)) content = val.length ? `<ul class="problem-detail-role-permission-list">${val.map((v) => `<li class="problem-detail-role-permission-list-item">${escapeHtml(String(v))}</li>`).join('')}</ul>` : '<span class="problem-detail-role-permission-empty">—</span>';
+    else if (typeof val === 'string') content = `<div class="problem-detail-role-permission-field-content markdown-body">${renderMarkdown(val.trim() || '—')}</div>`;
+    else content = `<pre class="problem-detail-role-permission-field-pre">${escapeHtml(JSON.stringify(val, null, 2))}</pre>`;
+    return `<div class="problem-detail-role-permission-inner-card"><div class="problem-detail-role-permission-inner-card-title">${escapeHtml(label)}</div><div class="problem-detail-role-permission-inner-card-body">${content}</div></div>`;
+  }).filter(Boolean).join('');
+  if (!cards) return '<span class="problem-detail-role-permission-empty">—</span>';
+  return `<div class="problem-detail-role-permission-inner-cards">${cards}</div>`;
+}
+
+/** 痛点解决方案 key 映射为中文标题 */
+const PAIN_POINT_SOLUTION_LABELS = {
+  eliminate_manual_collection: '消除人工采集',
+  real_time_data_fusion: '实时数据融合',
+  'real-time_data_fusion': '实时数据融合',
+  predictive_analysis_support: '预测分析支持',
+  automated_alerting: '自动化预警',
+  centralized_knowledge_asset: '集中化知识资产',
+  immediate_market_reference: '即时市场参考',
+  proactive_risk_awareness: '主动风险感知',
+  data_driven_decision: '数据驱动决策',
+  strategic_insight: '战略洞察',
+  real_time_visibility: '实时可视',
+  workflow_automation: '流程自动化',
+  decision_support: '决策支持',
+  knowledge_management: '知识管理',
+  collaboration_improvement: '协作改善',
+};
+
+/** 将 pain_point_solution 按每个 json 子项渲染为子卡片 */
+function buildPainPointSolutionSubcardsHtml(obj) {
+  if (!obj || typeof obj !== 'object') return '<span class="problem-detail-role-permission-empty">—</span>';
+  const entries = Object.entries(obj);
+  if (!entries.length) return '<span class="problem-detail-role-permission-empty">—</span>';
+  const cards = entries.map(([key, val]) => {
+    const label = PAIN_POINT_SOLUTION_LABELS[key] || (key || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || '—';
+    const content = val == null || (typeof val === 'string' && !val.trim())
+      ? '<span class="problem-detail-role-permission-empty">—</span>'
+      : (typeof val === 'string'
+        ? `<div class="problem-detail-role-permission-field-content markdown-body">${renderMarkdown(val.trim())}</div>`
+        : `<pre class="problem-detail-role-permission-field-pre">${escapeHtml(JSON.stringify(val, null, 2))}</pre>`);
+    return `<div class="problem-detail-role-permission-inner-card"><div class="problem-detail-role-permission-inner-card-title">${escapeHtml(label)}</div><div class="problem-detail-role-permission-inner-card-body">${content}</div></div>`;
+  }).join('');
+  return `<div class="problem-detail-role-permission-inner-cards">${cards}</div>`;
+}
+
+/** 基于单个环节的 model 对象构建 View 视图 HTML（按角色渲染圆角子卡片） */
+function buildRolePermissionStepViewHtml(match) {
+  if (!match || typeof match !== 'object') return '';
+  const roles = Array.isArray(match.roles) ? match.roles : [];
+  if (roles.length === 0) return '<div class="problem-detail-role-permission-placeholder">该环节暂无角色数据</div>';
+  const roleCards = roles.map((r) => {
+    if (!r || typeof r !== 'object') return '';
+    const roleName = r.role_name ?? r.roleName ?? '未命名角色';
+    const legacyOp = formatRolePermissionField(r.legacy_operation ?? r.legacyOperation);
+    const newPerms = buildNewPermissionsSubcardsHtml(r.new_it_permissions ?? r.newItPermissions ?? r.new_it_permission);
+    const painSolution = buildPainPointSolutionSubcardsHtml(r.pain_point_solution ?? r.painPointSolution ?? r.pain_point_solutions);
+    const triggerLogic = r.trigger_logic ?? r.triggerLogic;
+    const triggerHtml = triggerLogic != null && String(triggerLogic).trim() ? `<div class="problem-detail-role-card-section"><div class="problem-detail-role-card-section-title">触发逻辑</div>${formatRolePermissionField(triggerLogic)}</div>` : '';
+    return `
+    <div class="problem-detail-role-card">
+      <div class="problem-detail-role-card-header problem-detail-role-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
+        <span class="problem-detail-role-card-header-title">${escapeHtml(roleName)}</span>
+        <span class="problem-detail-role-card-header-arrow">▾</span>
+      </div>
+      <div class="problem-detail-role-card-body" hidden>
+      <div class="problem-detail-role-card-sections">
+        <div class="problem-detail-role-card-section"><div class="problem-detail-role-card-section-title">过去操作</div>${legacyOp}</div>
+        <div class="problem-detail-role-card-section"><div class="problem-detail-role-card-section-title">新的权限</div>${newPerms}</div>
+        <div class="problem-detail-role-card-section"><div class="problem-detail-role-card-section-title">痛点解决方案</div>${painSolution}</div>
+        ${triggerHtml}
+      </div>
+      </div>
+    </div>`;
+  }).filter(Boolean).join('');
+  return `<div class="problem-detail-role-permission-view-roles">${roleCards}</div>`;
+}
+
 function buildRolePermissionNodeCardsHtml(model) {
   if (!Array.isArray(model) || model.length === 0) return '';
+  const isNewFormat = model[0] && typeof model[0] === 'object' && Array.isArray(model[0].roles) && (model[0].step_name != null || model[0].step_id != null || model[0].stage_name != null || model[0].stage_id != null);
+  if (isNewFormat) {
+    return `<div class="problem-detail-role-permission-step-list">
+      <div class="problem-detail-role-permission-list-title">环节列表</div>${model
+      .map((item) => {
+        const stepName = item.stage_name != null && item.step_name != null
+          ? `${item.stage_name} － ${item.step_name}`
+          : (item.step_name || item.stage_name || [item.step_id, item.stage_id].filter(Boolean).join(' ') || '环节');
+        const viewHtml = buildRolePermissionStepViewHtml(item);
+        const jsonStr = JSON.stringify(item, null, 2);
+        return `
+      <div class="problem-detail-card problem-detail-card-role-permission">
+        <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
+          <span class="problem-detail-card-header-title">${escapeHtml(stepName)}</span>
+          <span class="problem-detail-card-header-arrow">▾</span>
+        </div>
+        <div class="problem-detail-card-body" hidden>
+          <div class="problem-detail-role-permission-tabs">
+            <button type="button" class="problem-detail-role-permission-tab problem-detail-role-permission-tab-active" data-tab="view">view</button>
+            <button type="button" class="problem-detail-role-permission-tab" data-tab="json">json</button>
+          </div>
+          <div class="problem-detail-role-permission-panel problem-detail-role-permission-panel-view" data-panel="view">${viewHtml}</div>
+          <div class="problem-detail-role-permission-panel problem-detail-role-permission-panel-json" data-panel="json" hidden><pre class="problem-detail-role-permission-json">${escapeHtml(jsonStr)}</pre></div>
+        </div>
+      </div>`;
+      })
+      .join('')}</div>`;
+  }
   return model
     .map((m) => {
       const nodeName = m.node || '';
@@ -6912,6 +7343,89 @@ async function runLocalItGapAnalysisForNextStep() {
     errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">局部 ITGap 分析失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
     pushAndSaveProblemDetailChat({ role: 'system', content: '局部 ITGap 分析失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+async function runRolePermissionModelingForNextStep() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!DEEPSEEK_API_KEY) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY。', timestamp: getTimeStr() });
+    return;
+  }
+  const valueStream = item.valueStream;
+  if (!valueStream || valueStream.raw) return;
+  const sessions = item.rolePermissionSessions || [];
+  const nextIdx = sessions.findIndex((s) => !s.rolePermissionJson);
+  if (nextIdx < 0) return;
+  const session = sessions[nextIdx];
+  const stepName = session.stepName || `环节${nextIdx + 1}`;
+  const stageName = session.stageName || '';
+  const projectName = ((item.customerName ?? item.customer_name ?? '') || '该客户').trim() + ' 数字化项目';
+  const localItGap = item.localItGapAnalyses && item.localItGapAnalyses.length > 0 ? item.localItGapAnalyses : (item.localItGapSessions || []);
+  pushAndSaveProblemDetailChat({ role: 'system', content: '正在进行【' + stepName + '】的角色与权限模型推演', timestamp: getTimeStr() });
+  container.innerHTML = '';
+  renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+  container.scrollTop = container.scrollHeight;
+  const parsingBlock = document.createElement('div');
+  parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+  parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在进行【${escapeHtml(stepName)}】的角色与权限模型推演…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(parsingBlock);
+  container.scrollTop = container.scrollHeight;
+  try {
+    const { content, usage, model, durationMs } = await generateRolePermissionForStep(
+      stepName, stageName, valueStream, item.globalItGapAnalysisJson, localItGap, projectName
+    );
+    parsingBlock.remove();
+    const llmMeta = { usage, model, durationMs };
+    const llmMetaHtml = buildLlmMetaHtml(llmMeta);
+    const jsonStr = typeof content === 'string' ? content : JSON.stringify(content || {}, null, 2);
+    const cardBlock = document.createElement('div');
+    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-step-card problem-detail-chat-msg-with-delete';
+    cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
+    cardBlock.dataset.taskId = 'task10';
+    cardBlock.dataset.stepName = stepName;
+    cardBlock.dataset.stepIndex = String(nextIdx);
+    cardBlock.innerHTML = `
+      <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+      <div class="problem-detail-chat-role-permission-step-card-wrap">
+        <div class="problem-detail-chat-role-permission-step-card-header">角色与权限模型推演：${escapeHtml(stepName)}</div>
+        <div class="problem-detail-chat-role-permission-step-card-body"><pre class="problem-detail-chat-json-pre">${escapeHtml(jsonStr)}</pre></div>
+        <div class="problem-detail-chat-role-permission-step-card-actions">
+          <button type="button" class="btn-confirm-role-permission-step btn-confirm-primary">确认</button>
+          <button type="button" class="btn-redo-role-permission-step">重做</button>
+          <button type="button" class="btn-refine-modify" data-task-id="task10">修正</button>
+          <button type="button" class="btn-refine-discuss" data-task-id="task10">讨论</button>
+        </div>
+      </div>
+      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>
+      <div class="problem-detail-chat-role-permission-step-meta">${llmMetaHtml}</div>`;
+    container.appendChild(cardBlock);
+    pushAndSaveProblemDetailChat({
+      type: 'rolePermissionAnalysisCard',
+      content,
+      stepName,
+      stepIndex: nextIdx,
+      timestamp: getTimeStr(),
+      confirmed: false,
+      llmMeta,
+    });
+    container.scrollTop = container.scrollHeight;
+    renderProblemDetailContent();
+    renderProblemDetailHistory();
+  } catch (err) {
+    parsingBlock.remove();
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">角色与权限模型推演失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '角色与权限模型推演失败：' + (err.message || String(err)), timestamp: getTimeStr() });
     container.scrollTop = container.scrollHeight;
   }
 }
@@ -7675,6 +8189,34 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>
         ${llmMetaHtml}`;
       container.appendChild(card);
+    } else if (msg.type === 'rolePermissionAnalysisCard') {
+      const content = msg.content;
+      const jsonStr = typeof content === 'string' ? content : JSON.stringify(content || {}, null, 2);
+      const stepName = (msg.stepName || '').trim() || `环节${(msg.stepIndex ?? 0) + 1}`;
+      const stepIndex = parseInt(msg.stepIndex, 10);
+      const confirmed = !!msg.confirmed;
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-step-card problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = 'task10';
+      cardBlock.dataset.stepName = stepName;
+      cardBlock.dataset.stepIndex = String(stepIndex);
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-role-permission-step-card-wrap">
+          <div class="problem-detail-chat-role-permission-step-card-header">角色与权限模型推演：${escapeHtml(stepName)}</div>
+          <div class="problem-detail-chat-role-permission-step-card-body"><pre class="problem-detail-chat-json-pre">${escapeHtml(jsonStr)}</pre></div>
+          <div class="problem-detail-chat-role-permission-step-card-actions">
+            <button type="button" class="btn-confirm-role-permission-step btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-redo-role-permission-step" ${confirmed ? 'disabled' : ''}>重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task10" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task10" ${confirmed ? 'disabled' : ''}>讨论</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>
+        <div class="problem-detail-chat-role-permission-step-meta">${llmMetaHtml}</div>`;
+      container.appendChild(cardBlock);
     } else if (msg.type === 'basicInfoJsonBlock') {
       const jsonBlock = document.createElement('div');
       jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible problem-detail-chat-msg-with-delete';
@@ -7853,6 +8395,35 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-local-itgap-sessions-actions">
             <button type="button" class="btn-confirm-local-itgap-sessions btn-confirm-primary" ${sessionsConfirmed || !hasUnfinished ? 'disabled' : ''}>${sessionsConfirmed ? '已确认' : !hasUnfinished ? '全部已完成' : '确认'}</button>
             <button type="button" class="btn-continue-local-itgap-sessions" ${!hasUnfinished ? 'disabled' : ''}>继续</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'rolePermissionSessionsBlock') {
+      const item = currentProblemDetailItem;
+      const sessions = item?.rolePermissionSessions || msg.sessions || [];
+      const sessionsConfirmed = !!msg.confirmed;
+      const hasUnfinished = sessions.some((s) => !s.rolePermissionJson);
+      const sessionsListHtml = sessions
+        .map(
+          (s) =>
+            `<div class="problem-detail-chat-role-permission-session-item"><span class="problem-detail-chat-role-permission-session-name">${escapeHtml(s.stepName || `环节${s.stepIndex + 1}`)}</span><span class="problem-detail-chat-role-permission-session-status ${s.rolePermissionJson ? 'session-done' : 'session-pending'}">${s.rolePermissionJson ? '已推演✅' : '待推演'}</span></div>`
+        )
+        .join('');
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-sessions-card problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.dataset.taskId = 'task10';
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-role-permission-sessions-card-wrap">
+          <div class="problem-detail-chat-role-permission-sessions-card-header">角色与权限模型推演 Session</div>
+          <div class="problem-detail-chat-role-permission-sessions-card-body">
+            <div class="problem-detail-chat-role-permission-sessions-header">已为 ${sessions.length} 个环节生成角色与权限模型推演 session</div>
+            <div class="problem-detail-chat-role-permission-sessions-list">${sessionsListHtml}</div>
+          </div>
+          <div class="problem-detail-chat-role-permission-sessions-actions">
+            <button type="button" class="btn-confirm-role-permission-sessions btn-confirm-primary" ${sessionsConfirmed ? 'disabled' : ''}>${sessionsConfirmed ? '已确认' : '确认'}</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -8596,6 +9167,7 @@ function renderProblemDetailContent() {
     return;
   }
   const currentMajorStage = item.currentMajorStage ?? 0;
+  if (ROLE_PERMISSION_LOG) console.log('[角色与权限] renderProblemDetailContent 调用: problemDetailViewingMajorStage=', problemDetailViewingMajorStage, 'itStrategyPlanViewingSubstep=', itStrategyPlanViewingSubstep);
   if (problemDetailViewingMajorStage === 3) {
     const itStrategyTaskBarHtml = IT_STRATEGY_TASKS.map((t, i) => {
       const current = i === itStrategyPlanViewingSubstep;
@@ -8618,25 +9190,109 @@ function renderProblemDetailContent() {
       </div>`;
     if (itStrategyPlanViewingSubstep === 0) {
       const valueStream = item.valueStream;
+      const roleContent = getLatestConfirmedRolePermissionContent(item);
+      const model = roleContent ? parseRolePermissionModel(roleContent) : [];
+      const isNewRbacFormat = Array.isArray(model) && model.length > 0 && model.some((m) => m && (m.step_name != null || m.step_id != null || m.stage_name != null || m.stage_id != null));
+      let stageCardsHtml = '';
+      if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 工作区渲染: problemDetailViewingMajorStage=', problemDetailViewingMajorStage, 'itStrategyPlanViewingSubstep=', itStrategyPlanViewingSubstep, 'roleContent=', roleContent ? '有(' + roleContent.length + '字)' : 'null', 'model条数=', model.length, 'isNewRbacFormat=', isNewRbacFormat, 'valueStream=', !!(valueStream && !valueStream.raw), 'valueStream.raw=', valueStream?.raw);
+
       if (valueStream && !valueStream.raw) {
-        const { stages } = parseValueStreamGraph(valueStream);
-        const roleContent = getLatestConfirmedRolePermissionContent();
-        const model = roleContent ? parseRolePermissionModel(roleContent) : [];
-        const stageCardsHtml = stages
-          .map((stage) => {
-            const stepCardsHtml = (stage.steps || [])
-              .map((step) => {
-                const nodeName = step?.name || '';
-                if (!nodeName) return '';
-                const match =
-                  model.find((m) => m.node === nodeName) ||
-                  model.find((m) => nodeName.includes(m.node) || m.node.includes(nodeName));
-                const roles = match?.roles || { executor: '', approver: '', informer: '' };
-                const perms = match?.perms || { wechat: '', lowcode: '', notify: '', query: '' };
-                const duty = match?.duty || '';
-                const hasContent = match && (roles.executor || roles.approver || roles.informer || perms.wechat || perms.lowcode || perms.notify || perms.query || duty);
-                const stepBodyContent = hasContent
-                  ? `
+        if (isNewRbacFormat) {
+          const { stages } = parseValueStreamGraph(valueStream);
+          const norm = (s) => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '');
+          const modelByStage = (() => {
+            const map = new Map();
+            for (const m of model) {
+              const k = norm(m.stage_name != null ? String(m.stage_name) : '') || '_';
+              if (!map.has(k)) map.set(k, []);
+              map.get(k).push(m);
+            }
+            return map;
+          })();
+          const getModelListForStage = (stageNameNorm) => {
+            if (modelByStage.get(stageNameNorm)) return modelByStage.get(stageNameNorm);
+            for (const [k, list] of modelByStage) {
+              if (k === '_' || !stageNameNorm || !k) continue;
+              if (k === stageNameNorm || k.includes(stageNameNorm) || stageNameNorm.includes(k)) return list;
+            }
+            return modelByStage.get('_') || [];
+          };
+          if (stages && stages.length > 0) {
+            if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 工作区渲染: 价值流阶段数=', stages.length, 'modelByStage keys=', [...modelByStage.keys()]);
+            stageCardsHtml = stages
+              .map((stage) => {
+                const stageNameNorm = norm(stage.name || '');
+                const stageModelList = getModelListForStage(stageNameNorm);
+                if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 阶段:', stageNameNorm, '该阶段model条数=', stageModelList.length);
+                const stepCardsHtml = (stage.steps || [])
+                  .map((step, stepIndex) => {
+                    const nodeName = (step?.name || '').trim();
+                    if (!nodeName) return '';
+                    const nodeNorm = norm(nodeName);
+                    let match = model.find((m) => {
+                      const mStage = norm(m.stage_name != null ? String(m.stage_name) : '');
+                      const mStep = norm(m.step_name != null ? String(m.step_name) : '');
+                      if (!mStep) return false;
+                      const stepMatch = nodeNorm === mStep || nodeNorm.includes(mStep) || mStep.includes(nodeNorm);
+                      const stageMatch = !stageNameNorm || !mStage || stageNameNorm === mStage || stageNameNorm.includes(mStage) || mStage.includes(stageNameNorm);
+                      return stepMatch && stageMatch;
+                    }) || model.find((m) => {
+                      const mStep = norm(m.step_name != null ? String(m.step_name) : '');
+                      return mStep && (nodeNorm === mStep || nodeNorm.includes(mStep) || mStep.includes(nodeNorm));
+                    });
+                    if (!match && stepIndex < stageModelList.length) match = stageModelList[stepIndex];
+                    if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 环节:', nodeName, 'match=', !!match, match ? 'step_name=' + (match.step_name || '') : '');
+                    const viewHtml = match ? buildRolePermissionStepViewHtml(match) : '';
+                    const jsonStr = match ? JSON.stringify(match, null, 2) : '';
+                    const stepBodyContent = match
+                      ? `<div class="problem-detail-role-permission-tabs">
+            <button type="button" class="problem-detail-role-permission-tab problem-detail-role-permission-tab-active" data-tab="view">view</button>
+            <button type="button" class="problem-detail-role-permission-tab" data-tab="json">json</button>
+          </div>
+          <div class="problem-detail-role-permission-panel problem-detail-role-permission-panel-view" data-panel="view">${viewHtml}</div>
+          <div class="problem-detail-role-permission-panel problem-detail-role-permission-panel-json" data-panel="json" hidden><pre class="problem-detail-role-permission-json">${escapeHtml(jsonStr)}</pre></div>`
+                      : '<div class="problem-detail-role-permission-placeholder">待推演</div>';
+                    return `
+                  <div class="problem-detail-card problem-detail-card-role-permission">
+                    <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
+                      <span class="problem-detail-card-header-title">环节：${escapeHtml(nodeName)}</span>
+                      <span class="problem-detail-card-header-arrow">▾</span>
+                    </div>
+                    <div class="problem-detail-card-body" hidden>${stepBodyContent}</div>
+                  </div>`;
+                  })
+                  .join('');
+                const stageName = stage.name || '未命名阶段';
+                return `
+              <div class="problem-detail-card problem-detail-role-permission-stage">
+                <div class="problem-detail-card-header" tabindex="0" role="button" aria-expanded="true">
+                  <span class="problem-detail-card-header-title">${escapeHtml(stageName)}</span>
+                  <span class="problem-detail-card-header-arrow">▾</span>
+                </div>
+                <div class="problem-detail-card-body">${stepCardsHtml}</div>
+              </div>`;
+              })
+              .join('');
+          } else {
+            stageCardsHtml = buildRolePermissionNodeCardsHtml(model);
+          }
+        } else {
+          const { stages } = parseValueStreamGraph(valueStream);
+          stageCardsHtml = stages
+            .map((stage) => {
+              const stepCardsHtml = (stage.steps || [])
+                .map((step) => {
+                  const nodeName = step?.name || '';
+                  if (!nodeName) return '';
+                  const match =
+                    model.find((m) => m.node === nodeName) ||
+                    model.find((m) => nodeName.includes(m.node) || m.node.includes(nodeName));
+                  const roles = match?.roles || { executor: '', approver: '', informer: '' };
+                  const perms = match?.perms || { wechat: '', lowcode: '', notify: '', query: '' };
+                  const duty = match?.duty || '';
+                  const hasContent = match && (roles.executor || roles.approver || roles.informer || perms.wechat || perms.lowcode || perms.notify || perms.query || duty);
+                  const stepBodyContent = hasContent
+                    ? `
                       <table class="problem-detail-role-permission-table">
                         <tbody>
                           <tr><td class="problem-detail-role-permission-table-label">环节名称</td><td class="problem-detail-role-permission-table-value">${escapeHtml(nodeName)}</td></tr>
@@ -8650,8 +9306,8 @@ function renderProblemDetailContent() {
                           ${duty ? `<tr><td class="problem-detail-role-permission-table-label">核心职责</td><td class="problem-detail-role-permission-table-value">${escapeHtml(duty)}</td></tr>` : ''}
                         </tbody>
                       </table>`
-                  : '<div class="problem-detail-role-permission-placeholder">待推演</div>';
-                return `
+                    : '<div class="problem-detail-role-permission-placeholder">待推演</div>';
+                  return `
                   <div class="problem-detail-card problem-detail-card-role-permission">
                     <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
                       <span class="problem-detail-card-header-title">环节：${escapeHtml(nodeName)}</span>
@@ -8659,10 +9315,10 @@ function renderProblemDetailContent() {
                     </div>
                     <div class="problem-detail-card-body" hidden>${stepBodyContent}</div>
                   </div>`;
-              })
-              .join('');
-            const stageName = stage.name || '未命名阶段';
-            return `
+                })
+                .join('');
+              const stageName = stage.name || '未命名阶段';
+              return `
               <div class="problem-detail-card problem-detail-role-permission-stage">
                 <div class="problem-detail-card-header" tabindex="0" role="button" aria-expanded="true">
                   <span class="problem-detail-card-header-title">${escapeHtml(stageName)}</span>
@@ -8670,14 +9326,24 @@ function renderProblemDetailContent() {
                 </div>
                 <div class="problem-detail-card-body">${stepCardsHtml}</div>
               </div>`;
-          })
-          .join('');
+            })
+            .join('');
+        }
+      }
+      if (model.length > 0 && !stageCardsHtml) {
+        if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 工作区渲染: 无价值流或未填stageCardsHtml, 使用扁平环节列表, model条数=', model.length);
+        stageCardsHtml = buildRolePermissionNodeCardsHtml(model);
+      }
+      if (stageCardsHtml) {
+        if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 工作区渲染: 已设置 workspaceInner 为环节卡片内容');
         workspaceInner = `
           <div class="problem-detail-it-strategy-content">
             <div class="problem-detail-role-permission-wrap">
               ${stageCardsHtml}
             </div>
           </div>`;
+      } else if (ROLE_PERMISSION_LOG) {
+        console.log('[角色与权限] 工作区渲染: stageCardsHtml 为空, 未更新 workspaceInner, 仍为占位符');
       }
     }
     container.innerHTML = `
@@ -9088,7 +9754,48 @@ function setupItStrategyPlanTaskButtons(container) {
   });
 }
 
+function setupRoleCardToggle() {
+  if (el.problemDetailContent?.dataset.roleCardToggleBound === '1') return;
+  if (!el.problemDetailContent) return;
+  el.problemDetailContent.dataset.roleCardToggleBound = '1';
+  el.problemDetailContent.addEventListener('click', (e) => {
+    const header = e.target.closest('.problem-detail-role-card-header');
+    if (!header || header.closest('.problem-detail-role-permission-tab')) return;
+    const card = header.closest('.problem-detail-role-card');
+    const body = card?.querySelector('.problem-detail-role-card-body');
+    if (!body) return;
+    const expanded = !body.hidden;
+    body.hidden = expanded;
+    header.setAttribute('aria-expanded', String(!expanded));
+    header.classList.toggle('problem-detail-role-card-header-collapsed', expanded);
+  });
+  el.problemDetailContent.addEventListener('keydown', (e) => {
+    const header = e.target.closest('.problem-detail-role-card-header');
+    if (!header || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    header.click();
+  });
+}
+
+function setupRolePermissionStepTabs() {
+  setupRoleCardToggle();
+  el.problemDetailContent?.querySelectorAll('.problem-detail-role-permission-tabs').forEach((tabsWrap) => {
+    const tabs = tabsWrap.querySelectorAll('.problem-detail-role-permission-tab');
+    const card = tabsWrap.closest('.problem-detail-card-body');
+    const panels = card?.querySelectorAll('.problem-detail-role-permission-panel') || [];
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const tabName = tab.getAttribute('data-tab');
+        tabs.forEach((t) => t.classList.toggle('problem-detail-role-permission-tab-active', t.getAttribute('data-tab') === tabName));
+        panels.forEach((p) => { p.hidden = (p.getAttribute('data-panel') || '') !== tabName; });
+      });
+    });
+  });
+}
+
 function setupProblemDetailCardToggle() {
+  setupRolePermissionStepTabs();
   el.problemDetailContent?.querySelectorAll('.problem-detail-card').forEach((card) => {
     const header = card.querySelector('.problem-detail-card-header');
     const body = card.querySelector('.problem-detail-card-body');
