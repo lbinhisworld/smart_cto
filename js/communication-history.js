@@ -65,7 +65,7 @@
     if (type === 'localItGapAnalysisCard') return true; // 推送即纳入过程日志，未确认标签「输出」，确认后「确认」
     if (type === 'localItGapAnalysisLog') return true;
     if (type === 'localItGapContextLog') return true;
-    if (type === 'rolePermissionCard') return !!msg.confirmed;
+    if (type === 'rolePermissionCard') return true; // 推送即纳入过程日志，未确认时标签为「输出」，确认后为「确认」
     if (type === 'rolePermissionConfirmedLog') return true;
     if (type === 'taskContextBlock') return true;
     if (type === 'taskCompleteBlock') return true;
@@ -155,16 +155,17 @@
       if (msg.type === 'localItGapSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
       if (msg.type === 'localItGapAnalysisCard') payload.confirmed = !!msg.confirmed;
       if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.llmMeta) payload.llmMeta = msg.llmMeta;
-      if (msg.type === 'rolePermissionCard' && msg.confirmed && typeof msg.content === 'string') {
-        payload.rolePermissionModelJson = parseRolePermissionModel(msg.content);
+      if (msg.type === 'rolePermissionCard') {
+        payload.confirmed = !!msg.confirmed;
+        if (msg.confirmed && typeof msg.content === 'string') payload.rolePermissionModelJson = parseRolePermissionModel(msg.content);
       }
       if (msg.type === 'rolePermissionConfirmedLog' && msg.rolePermissionModelJson) {
         payload.rolePermissionModelJson = msg.rolePermissionModelJson;
       }
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
-      /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务（itStatusCard 不纳入过程日志，仅通过 itStatusOutputLog 的 confirmed 切换输出/确认） */
-      const targetTask = ((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask;
+      /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务；角色与权限卡片固定归入 task10 */
+      const targetTask = (msg.type === 'rolePermissionCard' && Array.isArray(byTask['task10'])) ? 'task10' : (((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask);
       byTask[targetTask].push(entry);
       lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
@@ -216,6 +217,7 @@
       if (parsed?.type === 'e2eFlowJsonBlock') return (parsed?.valueStreamJson != null && parsed?.confirmed) ? '确认' : '输出';
       if (parsed?.type === 'localItGapAnalysisCard') return (parsed?.analysisJson != null && parsed?.confirmed) ? '确认' : '输出';
       if (parsed?.type === 'localItGapSessionsBlock') return '确认';
+      if (parsed?.type === 'rolePermissionCard') return parsed?.confirmed ? '确认' : '输出';
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard', 'itStatusCard'].includes(parsed?.type)) {
         return parsed?.data && parsed?.confirmed !== false ? '确认' : '输出';
       }
@@ -385,9 +387,11 @@
                   contentStr = (parsed.content || '') + '\n\n【全局 ITGap 分析 JSON】\n' + JSON.stringify(parsed.analysisJson, null, 2);
                 }
               } else if (parsed?.type === 'rolePermissionCard') {
-                titleLabel = '角色与权限模型推演';
+                titleLabel = parsed?.confirmed ? '角色与权限模型推演（已确认）' : '角色与权限模型推演';
                 if (parsed.rolePermissionModelJson) {
                   contentStr = '【角色与权限模型推演 JSON】\n' + JSON.stringify(parsed.rolePermissionModelJson, null, 2);
+                } else if (typeof parsed?.content === 'string') {
+                  contentStr = parsed.content;
                 }
               } else if (parsed?.type === 'rolePermissionConfirmedLog') {
                 titleLabel = parsed.content || '已确认角色与权限模型推演';

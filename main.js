@@ -103,6 +103,7 @@ const el = {
   btnProblemDetailReset: document.getElementById('btnProblemDetailReset'),
   problemDetailBody: document.getElementById('problemDetailBody'),
   btnProblemDetailRollback: document.getElementById('btnProblemDetailRollback'),
+  btnProblemDetailRestartTask: document.getElementById('btnProblemDetailRestartTask'),
   btnProblemDetailHistory: document.getElementById('btnProblemDetailHistory'),
   problemDetailHistoryPanel: document.getElementById('problemDetailHistoryPanel'),
   btnCloseProblemDetailHistory: document.getElementById('btnCloseProblemDetailHistory'),
@@ -1539,6 +1540,51 @@ function applyRollbackToTask(targetTaskId) {
 if (el.btnProblemDetailRollback) {
   el.btnProblemDetailRollback.addEventListener('click', () => openRollbackTaskModal());
 }
+
+/** 重新开始当前任务：清空当前任务已形成的聊天、工作区、沟通历史数据，不改变当前任务设置，并推送当前任务启动通知 */
+function applyRestartCurrentTask() {
+  const item = currentProblemDetailItem;
+  if (!item?.createdAt) return;
+  const list = getDigitalProblems();
+  const dataItem = list.find((p) => String(p.createdAt) === String(item.createdAt)) || item;
+  const currentTask = getFirstUncompletedTask(dataItem);
+  if (!currentTask) return;
+  const taskId = currentTask.id;
+  const updated = buildItemClearCurrentTaskOnly(dataItem, taskId);
+  if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
+  const isCurrentProblem = String(item.createdAt) === String(currentProblemDetailItem?.createdAt);
+  const chats = isCurrentProblem && Array.isArray(problemDetailChatMessages)
+    ? problemDetailChatMessages
+    : (typeof getProblemDetailChats === 'function' ? (getProblemDetailChats()[item.createdAt] || []) : []);
+  const filteredChats = filterChatMessagesRemoveTask(Array.isArray(chats) ? chats : [], taskId);
+  if (typeof saveProblemDetailChat === 'function') saveProblemDetailChat(item.createdAt, filteredChats);
+  problemDetailChatMessages = filteredChats;
+  const fromStorage = getDigitalProblems().find((p) => String(p.createdAt) === String(item.createdAt));
+  currentProblemDetailItem = fromStorage || updated;
+  problemDetailConfirmedBasicInfo = currentProblemDetailItem.basicInfo || null;
+  const majorStage = currentProblemDetailItem.currentMajorStage ?? getMajorStageByTaskId(taskId);
+  problemDetailViewingMajorStage = majorStage;
+  if (['task10', 'task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) {
+    const substepMap = { task10: 0, task11: 1, task12: 2, task13: 3, task14: 4, task15: 5 };
+    itStrategyPlanViewingSubstep = substepMap[taskId] ?? 0;
+  }
+  updateProblemDetailProgressStages(majorStage, majorStage);
+  renderProblemDetailContent();
+  const container = el.problemDetailChatMessages;
+  if (container) {
+    container.innerHTML = '';
+    renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+    container.scrollTop = container.scrollHeight;
+  }
+  updateProblemDetailChatHeaderLabel();
+  renderProblemDetailHistory();
+  showTaskStartNotificationIfNeeded(taskId, true);
+}
+
+if (el.btnProblemDetailRestartTask) {
+  el.btnProblemDetailRestartTask.addEventListener('click', () => applyRestartCurrentTask());
+}
+
 if (el.rollbackModalOverlay) {
   el.rollbackModalOverlay.addEventListener('click', (e) => {
     if (e.target === el.rollbackModalOverlay) closeRollbackTaskModal();
@@ -2060,6 +2106,7 @@ if (el.problemDetailChatMessages) {
             confirmed: true,
           };
           saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+          if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
           const currentMajorStage = item.currentMajorStage ?? 0;
           const targetMajorStage = 3;
           if (currentMajorStage < targetMajorStage) {
@@ -5932,6 +5979,14 @@ function buildItemAfterRollbackToTask(item, prevTaskId) {
   return nextItem;
 }
 
+/** 仅清空指定任务的工作区/完成数据，不改变当前任务与 currentMajorStage（用于「重新开始当前任务」） */
+function buildItemClearCurrentTaskOnly(item, taskId) {
+  if (!item || !taskId) return item;
+  const next = buildItemAfterRollbackToTask(item, taskId);
+  next.currentMajorStage = item.currentMajorStage ?? getMajorStageByTaskId(taskId);
+  return next;
+}
+
 /** 回退到指定任务：清空该任务及之后所有任务的完成状态与产出数据，返回新 item（不写存储） */
 function buildItemAfterRollbackToTaskId(item, targetTaskId) {
   if (!item || !targetTaskId) return item;
@@ -5944,6 +5999,16 @@ function buildItemAfterRollbackToTaskId(item, targetTaskId) {
   }
   next.currentMajorStage = getMajorStageByTaskId(targetTaskId);
   return next;
+}
+
+/** 从聊天记录中删除仅属于指定任务的所有消息（用于「重新开始当前任务」：清空当前任务形成的聊天数据，不改当前任务设置） */
+function filterChatMessagesRemoveTask(messages, taskId) {
+  if (!Array.isArray(messages) || !taskId) return messages || [];
+  const inferTaskId = typeof window.inferTaskIdFromMessage === 'function' ? window.inferTaskIdFromMessage : () => null;
+  return messages.filter((msg) => {
+    const mid = msg.taskId || msg._taskId || inferTaskId(msg);
+    return mid !== taskId;
+  });
 }
 
 /** 回退到某任务时，从聊天记录中删除「选定任务及之后」的所有消息；返回仅保留选定任务之前消息的数组（用于清空聊天框中选定任务及以后的全部记录） */
@@ -6605,6 +6670,7 @@ async function runRolePermissionModeling(isRedo) {
         llmMeta,
       });
       card.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
+      if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
     }
   } catch (err) {
     if (parsingBlock) parsingBlock.remove();

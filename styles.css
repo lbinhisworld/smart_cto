@@ -58,6 +58,9 @@ body {
   margin-right: -0.45rem;
 }
 
+.app:has(#problemDetailView:not([hidden])) .problem-detail-chat {
+  margin-left: 1.5rem;
+}
 .app:has(#problemDetailView:not([hidden])) .problem-detail-workspace {
   margin-left: 0.3rem;
 }
@@ -864,6 +867,25 @@ body {
 .btn-problem-detail-rollback:hover {
   background: #c2410c;
   border-color: #c2410c;
+  color: #fff;
+}
+
+.btn-problem-detail-restart-task {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: #fff;
+  background: #0d9488;
+  border: 1px solid #0d9488;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.btn-problem-detail-restart-task:hover {
+  background: #0f766e;
+  border-color: #0f766e;
   color: #fff;
 }
 
