@@ -29,10 +29,14 @@
     if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
     if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog' || type === 'globalItGapContextLog') return 'task8';
     if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog' || type === 'localItGapContextLog') return 'task9';
-    if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionSessionsBlock' || type === 'rolePermissionAnalysisCard' || type === 'rolePermissionConfirmedLog') return 'task10';
+    if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionSessionsBlock' || type === 'rolePermissionAnalysisCard' || type === 'rolePermissionConfirmedLog' || type === 'rolePermissionAllDoneBlock') return 'task10';
     if (type === 'taskContextBlock') return msg.taskId || null;
     if (type === 'taskCompleteBlock' || type === 'taskCompletionConfirmBlock') return msg.taskId || null;
     if (type === 'unsatisfiedBlock' || type === 'modificationResponseBlock') return msg.taskId || null;
+    if (role === 'system' && typeof content === 'string') {
+      if (content.includes('正在分析环节')) return 'task9';
+      if (content.includes('正在进行') && content.includes('角色与权限')) return 'task10';
+    }
     return null;
   }
 

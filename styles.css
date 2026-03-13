@@ -1042,6 +1042,7 @@ body {
 
 .btn-redo-global-itgap,
 .btn-redo-role-permission,
+.btn-redo-role-permission-step,
 .btn-redo-basic-info,
 .btn-redo-bmc,
 .btn-redo-value-stream,
@@ -1063,6 +1064,7 @@ body {
 
 .btn-redo-global-itgap:hover:not(:disabled),
 .btn-redo-role-permission:hover:not(:disabled),
+.btn-redo-role-permission-step:hover:not(:disabled),
 .btn-redo-basic-info:hover:not(:disabled),
 .btn-redo-bmc:hover:not(:disabled),
 .btn-redo-value-stream:hover:not(:disabled),
@@ -1077,6 +1079,7 @@ body {
 
 .btn-redo-global-itgap:disabled,
 .btn-redo-role-permission:disabled,
+.btn-redo-role-permission-step:disabled,
 .btn-redo-basic-info:disabled,
 .btn-redo-bmc:disabled,
 .btn-redo-value-stream:disabled,

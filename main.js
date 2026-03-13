@@ -1821,7 +1821,7 @@ if (el.problemDetailChatMessages) {
       const item = currentProblemDetailItem;
       const alreadyCompleted = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some((m) => m.type === 'taskCompleteBlock' && m.taskId === taskId);
       if (!alreadyCompleted) {
-        const taskCompleteContent = taskId === 'task7' ? '用户确认端到端流程绘制' : (taskId === 'task8' ? '用户确认全局 ITGap 分析' : (taskId === 'task9' ? '用户确认局部 ITGap 分析' : '用户确认任务完成'));
+        const taskCompleteContent = taskId === 'task7' ? '用户确认端到端流程绘制' : (taskId === 'task8' ? '用户确认全局 ITGap 分析' : (taskId === 'task9' ? '用户确认局部 ITGap 分析' : (taskId === 'task10' ? '用户确认角色与权限模型推演' : '用户确认任务完成')));
         pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId, content: taskCompleteContent, timestamp: getTimeStr() });
         const createdAt = item?.createdAt;
         if (createdAt) advanceProblemStateOnTaskComplete(createdAt, taskId);
@@ -2335,16 +2335,84 @@ if (el.problemDetailChatMessages) {
       renderProblemDetailHistory();
       return;
     }
-    const confirmRolePermissionSessionsBtn = e.target.closest('.btn-confirm-role-permission-sessions');
-    if (confirmRolePermissionSessionsBtn && !confirmRolePermissionSessionsBtn.disabled) {
+    const btnRolePermissionSessionsAuto = e.target.closest('.btn-role-permission-sessions-auto');
+    if (btnRolePermissionSessionsAuto && !btnRolePermissionSessionsAuto.disabled) {
       const item = currentProblemDetailItem;
       const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'rolePermissionSessionsBlock');
       if (sessionsIdx >= 0) {
-        problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], confirmed: true };
+        problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], confirmed: true, rolePermissionSessionMode: 'auto' };
         saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
       }
-      confirmRolePermissionSessionsBtn.disabled = true;
-      confirmRolePermissionSessionsBtn.textContent = '已确认';
+      btnRolePermissionSessionsAuto.disabled = true;
+      btnRolePermissionSessionsAuto.textContent = '已选择：自动顺序执行';
+      const otherBtn = btnRolePermissionSessionsAuto.closest('.problem-detail-chat-role-permission-sessions-actions')?.querySelector('.btn-role-permission-sessions-manual');
+      if (otherBtn) { otherBtn.disabled = true; otherBtn.textContent = '手工逐项确认'; }
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => runRolePermissionModelingAutoSequential && runRolePermissionModelingAutoSequential());
+      return;
+    }
+    const btnRolePermissionConfirmAll = e.target.closest('.btn-role-permission-confirm-all');
+    if (btnRolePermissionConfirmAll && !btnRolePermissionConfirmAll.disabled) {
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      const allDoneBlock = btnRolePermissionConfirmAll.closest('[data-msg-index]');
+      const allDoneIdx = allDoneBlock ? parseInt(allDoneBlock.dataset.msgIndex, 10) : -1;
+      let hasUnconfirmed = false;
+      for (let i = 0; i < problemDetailChatMessages.length; i++) {
+        const m = problemDetailChatMessages[i];
+        if (m.type === 'rolePermissionAnalysisCard' && !m.confirmed) {
+          hasUnconfirmed = true;
+          const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || {});
+          let parsed = null;
+          try {
+            parsed = typeof m.content === 'string' ? JSON.parse(m.content) : m.content;
+          } catch (_) {}
+          problemDetailChatMessages[i] = { ...m, confirmed: true };
+          if (typeof updateDigitalProblemRolePermissionStep === 'function') {
+            updateDigitalProblemRolePermissionStep(item.createdAt, m.stepIndex, parsed || content);
+          }
+        }
+      }
+      if (allDoneIdx >= 0 && allDoneIdx < problemDetailChatMessages.length && problemDetailChatMessages[allDoneIdx].type === 'rolePermissionAllDoneBlock') {
+        problemDetailChatMessages[allDoneIdx] = { ...problemDetailChatMessages[allDoneIdx], allConfirmed: true };
+      }
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      btnRolePermissionConfirmAll.disabled = true;
+      btnRolePermissionConfirmAll.textContent = '已全部确认';
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      if (hasUnconfirmed) {
+        requestAnimationFrame(() => {
+          const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+          if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          showTaskCompletionConfirm('task10', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task10')?.name) || '角色与权限模型推演');
+        });
+      }
+      return;
+    }
+    const btnRolePermissionSessionsManual = e.target.closest('.btn-role-permission-sessions-manual');
+    if (btnRolePermissionSessionsManual && !btnRolePermissionSessionsManual.disabled) {
+      const item = currentProblemDetailItem;
+      const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'rolePermissionSessionsBlock');
+      if (sessionsIdx >= 0) {
+        problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], confirmed: true, rolePermissionSessionMode: 'manual' };
+        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+      }
+      btnRolePermissionSessionsManual.disabled = true;
+      btnRolePermissionSessionsManual.textContent = '已选择：手工逐项确认';
+      const otherBtn = btnRolePermissionSessionsManual.closest('.problem-detail-chat-role-permission-sessions-actions')?.querySelector('.btn-role-permission-sessions-auto');
+      if (otherBtn) { otherBtn.disabled = true; otherBtn.textContent = '自动顺序执行'; }
       const container = el.problemDetailChatMessages;
       container.innerHTML = '';
       renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
@@ -7449,6 +7517,113 @@ async function runRolePermissionModelingForNextStep() {
   }
 }
 
+/** 自动顺序执行：逐环节调用大模型推演，每环节返回卡片不自动确认，全部结束后由用户逐项确认 */
+async function runRolePermissionModelingAutoSequential() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!DEEPSEEK_API_KEY) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY。', timestamp: getTimeStr() });
+    return;
+  }
+  for (;;) {
+    const list = getDigitalProblems();
+    const item = currentProblemDetailItem;
+    if (!item?.createdAt) return;
+    const dataItem = list.find((p) => String(p.createdAt) === String(item.createdAt)) || item;
+    const valueStream = dataItem.valueStream;
+    if (!valueStream || valueStream.raw) return;
+    const sessions = dataItem.rolePermissionSessions || [];
+    const nextIdx = sessions.findIndex((s) => !s.rolePermissionJson);
+    if (nextIdx < 0) {
+      pushAndSaveProblemDetailChat({ type: 'rolePermissionAllDoneBlock', content: '全部环节已推演完毕，请逐项确认各卡片。', timestamp: getTimeStr() });
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => {
+        const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+        if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+      return;
+    }
+    const session = sessions[nextIdx];
+    const stepName = session.stepName || `环节${nextIdx + 1}`;
+    const stageName = session.stageName || '';
+    const projectName = ((dataItem.customerName ?? dataItem.customer_name ?? '') || '该客户').trim() + ' 数字化项目';
+    const localItGap = dataItem.localItGapAnalyses && dataItem.localItGapAnalyses.length > 0 ? dataItem.localItGapAnalyses : (dataItem.localItGapSessions || []);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '正在进行【' + stepName + '】的角色与权限模型推演', timestamp: getTimeStr() });
+    container.innerHTML = '';
+    renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+    container.scrollTop = container.scrollHeight;
+    const parsingBlock = document.createElement('div');
+    parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在进行【${escapeHtml(stepName)}】的角色与权限模型推演…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(parsingBlock);
+    container.scrollTop = container.scrollHeight;
+    try {
+      const { content, usage, model, durationMs } = await generateRolePermissionForStep(
+        stepName, stageName, valueStream, dataItem.globalItGapAnalysisJson, localItGap, projectName
+      );
+      parsingBlock.remove();
+      const llmMeta = { usage, model, durationMs };
+      const llmMetaHtml = buildLlmMetaHtml(llmMeta);
+      const jsonStr = typeof content === 'string' ? content : JSON.stringify(content || {}, null, 2);
+      const parsed = typeof content === 'string' ? (() => { try { return JSON.parse(content); } catch (_) { return content; } })() : content;
+      if (typeof updateDigitalProblemRolePermissionStep === 'function') updateDigitalProblemRolePermissionStep(item.createdAt, nextIdx, parsed || content);
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-step-card problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
+      cardBlock.dataset.taskId = 'task10';
+      cardBlock.dataset.stepName = stepName;
+      cardBlock.dataset.stepIndex = String(nextIdx);
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-role-permission-step-card-wrap">
+          <div class="problem-detail-chat-role-permission-step-card-header">角色与权限模型推演：${escapeHtml(stepName)}</div>
+          <div class="problem-detail-chat-role-permission-step-card-body"><pre class="problem-detail-chat-json-pre">${escapeHtml(jsonStr)}</pre></div>
+          <div class="problem-detail-chat-role-permission-step-card-actions">
+            <button type="button" class="btn-confirm-role-permission-step btn-confirm-primary">确认</button>
+            <button type="button" class="btn-redo-role-permission-step">重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task10">修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task10">讨论</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>
+        <div class="problem-detail-chat-role-permission-step-meta">${llmMetaHtml}</div>`;
+      container.appendChild(cardBlock);
+      pushAndSaveProblemDetailChat({
+        type: 'rolePermissionAnalysisCard',
+        content,
+        stepName,
+        stepIndex: nextIdx,
+        timestamp: getTimeStr(),
+        confirmed: false,
+        llmMeta,
+      });
+      container.scrollTop = container.scrollHeight;
+      const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+    } catch (err) {
+      parsingBlock.remove();
+      const errBlock = document.createElement('div');
+      errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+      errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">角色与权限模型推演失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(errBlock);
+      pushAndSaveProblemDetailChat({ role: 'system', content: '角色与权限模型推演失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+  }
+}
+
 async function runGlobalItGapAnalysis(isRedo) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -8236,6 +8411,20 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>
         <div class="problem-detail-chat-role-permission-step-meta">${llmMetaHtml}</div>`;
       container.appendChild(cardBlock);
+    } else if (msg.type === 'rolePermissionAllDoneBlock') {
+      const allConfirmed = !!msg.allConfirmed;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-all-done';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '全部环节已推演完毕，请逐项确认各卡片。')}</div>
+          <div class="problem-detail-chat-role-permission-all-done-actions">
+            <button type="button" class="btn-role-permission-confirm-all btn-confirm-primary" ${allConfirmed ? 'disabled' : ''}>${allConfirmed ? '已全部确认' : '全部确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
     } else if (msg.type === 'basicInfoJsonBlock') {
       const jsonBlock = document.createElement('div');
       jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible problem-detail-chat-msg-with-delete';
@@ -8422,6 +8611,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
       const item = currentProblemDetailItem;
       const sessions = item?.rolePermissionSessions || msg.sessions || [];
       const sessionsConfirmed = !!msg.confirmed;
+      const sessionMode = msg.rolePermissionSessionMode || '';
       const hasUnfinished = sessions.some((s) => !s.rolePermissionJson);
       const sessionsListHtml = sessions
         .map(
@@ -8429,6 +8619,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
             `<div class="problem-detail-chat-role-permission-session-item"><span class="problem-detail-chat-role-permission-session-name">${escapeHtml(s.stepName || `环节${s.stepIndex + 1}`)}</span><span class="problem-detail-chat-role-permission-session-status ${s.rolePermissionJson ? 'session-done' : 'session-pending'}">${s.rolePermissionJson ? '已推演✅' : '待推演'}</span></div>`
         )
         .join('');
+      const actionLabelAuto = sessionMode === 'auto' ? '已选择：自动顺序执行' : '自动顺序执行';
+      const actionLabelManual = sessionMode === 'manual' ? '已选择：手工逐项确认' : '手工逐项确认';
       const block = document.createElement('div');
       block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-sessions-card problem-detail-chat-msg-with-delete';
       block.dataset.msgIndex = String(idx);
@@ -8442,7 +8634,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
             <div class="problem-detail-chat-role-permission-sessions-list">${sessionsListHtml}</div>
           </div>
           <div class="problem-detail-chat-role-permission-sessions-actions">
-            <button type="button" class="btn-confirm-role-permission-sessions btn-confirm-primary" ${sessionsConfirmed ? 'disabled' : ''}>${sessionsConfirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-role-permission-sessions-auto btn-confirm-primary" ${sessionsConfirmed ? 'disabled' : ''}>${escapeHtml(actionLabelAuto)}</button>
+            <button type="button" class="btn-role-permission-sessions-manual" ${sessionsConfirmed ? 'disabled' : ''}>${escapeHtml(actionLabelManual)}</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
