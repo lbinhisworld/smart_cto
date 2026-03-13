@@ -9765,10 +9765,18 @@ function setupRoleCardToggle() {
     const card = header.closest('.problem-detail-role-card');
     const body = card?.querySelector('.problem-detail-role-card-body');
     if (!body) return;
-    const expanded = !body.hidden;
-    body.hidden = expanded;
-    header.setAttribute('aria-expanded', String(!expanded));
-    header.classList.toggle('problem-detail-role-card-header-collapsed', expanded);
+    const willExpand = body.hidden;
+    const container = card?.closest('.problem-detail-role-permission-view-roles');
+    const allCards = container ? container.querySelectorAll('.problem-detail-role-card') : [card];
+    allCards.forEach((c) => {
+      const b = c.querySelector('.problem-detail-role-card-body');
+      const h = c.querySelector('.problem-detail-role-card-header');
+      if (b && h) {
+        b.hidden = !willExpand;
+        h.setAttribute('aria-expanded', String(willExpand));
+        h.classList.toggle('problem-detail-role-card-header-collapsed', !willExpand);
+      }
+    });
   });
   el.problemDetailContent.addEventListener('keydown', (e) => {
     const header = e.target.closest('.problem-detail-role-card-header');
