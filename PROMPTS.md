@@ -688,46 +688,62 @@ ${summary ? '意图概括：' + summary : ''}
 
 ## 15. 角色与权限模型推演
 
-**触发入口**：IT 策略规划阶段，进入「角色与权限模型推演」任务后，点击「即将开始角色与权限模型推演」→「确认」；或对已有推演卡片点击「重做」  
-**函数**：`runRolePermissionModeling(isRedo)`  
-**用途**：基于价值流图（VSM）节点，推演角色模型与权限类型（企微端/低代码/接收通知/查询数据），以 Markdown 表格输出，便于后续程序解析。
+**流程**：IT 策略规划阶段进入「角色与权限模型推演」后，先推送「即将开始角色与权限模型推演」→ 用户确认 → 系统生成 **Session 块**（列出所有环节 + [确认]）；用户点击 Session 的 [确认] 后，从第一环节开始**逐环节**调用大模型推演。每环节开始前聊天区显示「正在进行【环节名称】的角色与权限模型推演」及 loading；大模型返回后推送该环节的 `rolePermissionAnalysisCard`（JSON 卡片 + 确认/重做/修正/讨论）；**仅当用户点击该环节卡片的 [确认]** 后才进入下一环节；全部环节确认后推送「是否视为完成」。
 
-### System Prompt
+**单环节推演函数**：`generateRolePermissionForStep(stepName, stageName, valueStream, globalItGap, localItGap, projectName)`  
+**流程控制**：`runRolePermissionModelingForNextStep()`（查找未完成环节、发通知、调用 LLM、推送卡片）
 
-```
-你是一位熟悉企业微信和低代码平台的业务分析师与解决方案架构师，擅长基于价值流图进行角色与权限设计。请严格按照要求组织表格内容，便于后续程序解析。
-```
-
-### User Message 模板
+### 单环节 System Prompt（generateRolePermissionForStep）
 
 ```
-我正在进行 ${projectName} 的 IT 解决方案设计。目前已完成价值流图（VSM），数据如下（JSON）：
+Role & Context:
+我是一名软件公司的需求分析专家。请针对价值流中的**单一环节**进行角色与权限模型（RBAC）推演。
 
-${vsmJson}
+Task Goal:
+针对环节「${stepName}」所在的阶段「${stageName}」，输出该环节的角色与权限推演结果（单个 JSON 对象）。
 
-请你基于这些节点，运用业务分析师思维，推演所需的角色模型：
-- 识别角色：每个节点谁是执行者、谁是审批者、谁是知情者？
-- 定义权限：哪些角色需要移动端（企微）操作，哪些需要后台管理（低代码）权限？
-- 交互场景：他们在企业微信中分别需要接收什么样的通知或查询什么数据？
+Requirement: 角色画像模拟、现状转换映射、痛点闭环设计、合规与风控（SoD）。
 
-【重要格式要求】
-1. 请以 Markdown 表格形式输出，表头固定为：节点 | 建议角色 | 核心职责 | 权限类型。
-2. 「建议角色」一列，必须严格使用以下格式：
-   执行者: 角色A、角色B；审批者: 角色C；知情者: 角色D、角色E
-3. 「权限类型」一列，必须严格使用以下格式（可以为空但键名不能省略）：
-   企微端: xxx；低代码: yyy；接收通知: zzz；查询数据: kkk
-
-请严格遵守以上键名与分隔符，避免使用其他描述方式。
+Output Format: 直接输出一个 JSON 对象，不要数组，不要 markdown 代码块。结构必须包含：
+{
+  "stage_name": "阶段名称",
+  "step_id": "环节序号",
+  "step_name": "环节名称",
+  "it_gap_reference": "关联的 IT 现状与痛点简述",
+  "roles": [
+    {
+      "role_name": "角色名称",
+      "legacy_operation": "过去操作描述",
+      "new_it_permissions": {
+        "data_access": ["数据权限项1", "数据权限项2"],
+        "function_use": ["功能实用项1", "功能实用项2"],
+        "system_operation": ["系统操作项1"]
+      },
+      "pain_point_solution": {
+        "eliminate_manual_collection": "消除人工采集的解决方案描述",
+        "real_time_data_fusion": "实时数据融合的解决方案",
+        ...
+      },
+      "trigger_logic": "触发逻辑描述"
+    }
+  ],
+  "sod_warning": "职责分离建议或 null"
+}
 ```
 
-其中 `projectName` 为「{客户名称} 数字化项目」，`vsmJson` 为当前问题已绘制的价值流图 JSON。
+- `new_it_permissions` 分为 **data_access（数据权限）**、**function_use（功能实用）**、**system_operation（系统操作）** 三类，每类为字符串数组。
+- `pain_point_solution` 为对象，key 为痛点类型（如 eliminate_manual_collection），value 为该痛点的解决方案描述。
+
+### User Message 模板（单环节）
+
+由 `generateRolePermissionForStep` 构建：项目名、环节名、阶段名、【端到端全流程】JSON、【全局 ITGap 分析】（若有）、【局部 ITGap 分析】（若有）；结尾：请直接输出该环节的 JSON 对象。
 
 ### 展示规则
 
-- **过程日志**：大模型返回内容块时，在任务（Task10）过程日志中增加一条标签为「输出」的时间线；用户点击聊天区该内容块的「确认」后，该条标签变为「确认」，随后推送「【角色与权限模型推演】是否视为完成？」；沟通历史在推送与确认后刷新。
-- **工作区联动**：用户点击「确认」后，各环节推演内容渲染到工作区对应环节卡片，并自动切换到 IT 策略规划阶段、角色与权限子任务视图。
-- **重做**：卡片提供「重做」按钮，点击后重新调用大模型生成新结果并更新同一条卡片。
-- **LLM 元信息**：推演结果卡片下方展示模型、消耗 token、耗时。
+- **过程日志**：每个环节的 `rolePermissionAnalysisCard` 推送时标签为「输出」，确认后为「确认」；时间线中标签右侧显示环节名称。
+- **Session 块**：`rolePermissionSessionsBlock` 展示环节列表及待推演/已推演状态，用户确认后开始逐环节推演。
+- **单环节卡片**：`rolePermissionAnalysisCard` 展示该环节 JSON，带确认/重做/修正/讨论；确认后更新 `rolePermissionSessions` 并进入下一环节；全部确认后推送「是否视为完成」。
+- **工作区**：每环节卡片含 **view** / **json** 双 Tab；view 中按角色渲染圆角子卡片（可折叠、水平排列），每个角色含：角色名称、过去操作、新权限（拆为数据权限/功能实用/系统操作三子卡片）、痛点解决方案（按 JSON 子项生成子卡片，标题中文映射）、触发逻辑。
 
 ---
 

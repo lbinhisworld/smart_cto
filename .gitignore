@@ -3,3 +3,4 @@
 .env
 .env.local
 config.local.js
+data.json
