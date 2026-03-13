@@ -7153,6 +7153,7 @@ function buildRolePermissionStepViewHtml(match) {
     return `
     <div class="problem-detail-role-card">
       <div class="problem-detail-role-card-header problem-detail-role-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
+        <span class="problem-detail-role-card-header-icon" aria-hidden="true">👤</span>
         <span class="problem-detail-role-card-header-title">${escapeHtml(roleName)}</span>
         <span class="problem-detail-role-card-header-arrow">▾</span>
       </div>
