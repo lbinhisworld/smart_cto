@@ -7118,21 +7118,39 @@ const PAIN_POINT_SOLUTION_LABELS = {
   decision_support: '决策支持',
   knowledge_management: '知识管理',
   collaboration_improvement: '协作改善',
+  'data-driven_decision': '数据驱动决策',
+  immediate_response: '即时响应',
+  accuracy_guarantee: '准确性保障',
+  mobile_support: '移动端支持',
+  inventory_reservation: '库存预留',
+  reduce_interruption: '减少打断',
+  improve_accuracy: '提升准确性',
+  enhanced_visibility: '增强可见性',
+  standardized_pricing: '标准化定价',
+  audit_trail: '审计追踪',
 };
+
+/** 将 key 格式化为英文标题（Title Case） */
+function formatKeyToEnglishTitle(key) {
+  if (!key || typeof key !== 'string') return '';
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 /** 将 pain_point_solution 按每个 json 子项渲染为子卡片 */
 function buildPainPointSolutionSubcardsHtml(obj) {
   if (!obj || typeof obj !== 'object') return '<span class="problem-detail-role-permission-empty">—</span>';
   const entries = Object.entries(obj);
   if (!entries.length) return '<span class="problem-detail-role-permission-empty">—</span>';
-  const cards = entries.map(([key, val]) => {
-    const label = PAIN_POINT_SOLUTION_LABELS[key] || (key || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || '—';
+  const cards = entries.map(([key, val], i) => {
+    const labelZh = PAIN_POINT_SOLUTION_LABELS[key] || (key ? `解决方案 ${i + 1}` : '—');
+    const labelEn = formatKeyToEnglishTitle(key) || '—';
     const content = val == null || (typeof val === 'string' && !val.trim())
       ? '<span class="problem-detail-role-permission-empty">—</span>'
       : (typeof val === 'string'
         ? `<div class="problem-detail-role-permission-field-content markdown-body">${renderMarkdown(val.trim())}</div>`
         : `<pre class="problem-detail-role-permission-field-pre">${escapeHtml(JSON.stringify(val, null, 2))}</pre>`);
-    return `<div class="problem-detail-role-permission-inner-card"><div class="problem-detail-role-permission-inner-card-title">${escapeHtml(label)}</div><div class="problem-detail-role-permission-inner-card-body">${content}</div></div>`;
+    const titleHtml = `<div class="problem-detail-role-permission-inner-card-title"><span class="problem-detail-role-permission-title-zh">${escapeHtml(labelZh)}</span><span class="problem-detail-role-permission-title-en">${escapeHtml(labelEn)}</span></div>`;
+    return `<div class="problem-detail-role-permission-inner-card">${titleHtml}<div class="problem-detail-role-permission-inner-card-body">${content}</div></div>`;
   }).join('');
   return `<div class="problem-detail-role-permission-inner-cards">${cards}</div>`;
 }
