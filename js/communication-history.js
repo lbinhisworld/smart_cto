@@ -30,6 +30,7 @@
     if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog' || type === 'globalItGapContextLog') return 'task8';
     if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog' || type === 'localItGapContextLog') return 'task9';
     if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionSessionsBlock' || type === 'rolePermissionAnalysisCard' || type === 'rolePermissionConfirmedLog' || type === 'rolePermissionAllDoneBlock') return 'task10';
+    if (type === 'coreBusinessObjectContextBlock' || type === 'coreBusinessObjectSessionsBlock') return 'task11';
     if (type === 'taskContextBlock') return msg.taskId || null;
     if (type === 'taskCompleteBlock' || type === 'taskCompletionConfirmBlock') return msg.taskId || null;
     if (type === 'unsatisfiedBlock' || type === 'modificationResponseBlock') return msg.taskId || null;
@@ -73,6 +74,7 @@
     if (type === 'rolePermissionSessionsBlock') return true;
     if (type === 'rolePermissionAnalysisCard') return true; // 单环节推演卡片，推送即纳入过程日志
     if (type === 'rolePermissionConfirmedLog') return true;
+    if (type === 'coreBusinessObjectContextBlock' || type === 'coreBusinessObjectSessionsBlock') return true;
     if (type === 'taskContextBlock') return true;
     if (type === 'taskCompleteBlock') return true;
     if (type === 'unsatisfiedBlock') return false; // 用户点击「修正」时不向过程日志推送该块
@@ -176,10 +178,18 @@
       if (msg.type === 'rolePermissionConfirmedLog' && msg.rolePermissionModelJson) {
         payload.rolePermissionModelJson = msg.rolePermissionModelJson;
       }
+      if (msg.type === 'coreBusinessObjectContextBlock') {
+        payload.content = '上下文';
+        payload.contextJson = msg.contextJson;
+        payload.contextLabel = msg.contextLabel;
+        payload.taskId = msg.taskId || 'task11';
+      }
+      if (msg.type === 'coreBusinessObjectSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
+      if (msg.type === 'coreBusinessObjectSessionsBlock') payload.confirmed = !!msg.confirmed;
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
-      /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务；角色与权限卡片固定归入 task10 */
-      const targetTask = ((msg.type === 'rolePermissionCard' || msg.type === 'rolePermissionSessionsBlock' || msg.type === 'rolePermissionAnalysisCard') && Array.isArray(byTask['task10'])) ? 'task10' : (((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask);
+      /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务；角色与权限卡片固定归入 task10；核心业务对象归入 task11 */
+      const targetTask = ((msg.type === 'rolePermissionCard' || msg.type === 'rolePermissionSessionsBlock' || msg.type === 'rolePermissionAnalysisCard') && Array.isArray(byTask['task10'])) ? 'task10' : ((msg.type === 'coreBusinessObjectContextBlock' || msg.type === 'coreBusinessObjectSessionsBlock') && Array.isArray(byTask['task11'])) ? 'task11' : (((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask);
       byTask[targetTask].push(entry);
       lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
@@ -216,7 +226,7 @@
       const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
       if (parsed?.type === 'taskCompleteBlock') return '任务完成';
       if (parsed?.type === 'unsatisfiedBlock') return '不满意';
-      if (parsed?.type === 'taskContextBlock' || parsed?.type === 'globalItGapContextLog' || parsed?.type === 'localItGapContextLog') return '上下文';
+      if (parsed?.type === 'taskContextBlock' || parsed?.type === 'globalItGapContextLog' || parsed?.type === 'localItGapContextLog' || parsed?.type === 'coreBusinessObjectContextBlock') return '上下文';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'discussion') return '讨论';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') {
         const target = String(parsed?.data?.modificationTarget || '');
@@ -232,6 +242,7 @@
       if (parsed?.type === 'localItGapAnalysisCard') return (parsed?.analysisJson != null && parsed?.confirmed) ? '确认' : '输出';
       if (parsed?.type === 'localItGapSessionsBlock') return '确认';
       if (parsed?.type === 'rolePermissionSessionsBlock') return parsed?.confirmed ? '确认' : '输出';
+      if (parsed?.type === 'coreBusinessObjectSessionsBlock') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'rolePermissionCard') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'rolePermissionAnalysisCard') return parsed?.confirmed ? '确认' : '输出';
       if (['basicInfoCard', 'bmcCard', 'requirementLogicBlock', 'valueStreamCard', 'itStatusCard'].includes(parsed?.type)) {
@@ -432,6 +443,14 @@
                 contextNoteForHead = '价值流+全局 ITGap 分析';
                 titleLabel = '上下文（价值流+全局 ITGap 分析）';
                 contentStr = '(无)';
+              } else if (parsed?.type === 'coreBusinessObjectContextBlock') {
+                contextNoteForHead = parsed?.contextLabel || '';
+                titleLabel = parsed?.contextLabel ? `上下文（${parsed.contextLabel}）` : '上下文';
+                contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
+              } else if (parsed?.type === 'coreBusinessObjectSessionsBlock') {
+                sessionPlanNoteForHead = '核心业务对象推演 session 计划';
+                titleLabel = '核心业务对象推演 session 计划';
+                contentStr = parsed.sessions != null ? JSON.stringify(parsed.sessions, null, 2) : '(无)';
               } else if (parsed?.type === 'localItGapSessionsBlock') {
                 sessionPlanNoteForHead = 'ITGap 分析 session 计划';
                 titleLabel = 'ITGap 分析 session 计划';

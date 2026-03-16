@@ -308,6 +308,16 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /** 更新核心业务对象推演 session 列表（用于逐步按环节分析） */
+  function updateDigitalProblemCoreBusinessObjectSessions(createdAt, sessions) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    list[idx] = { ...item, coreBusinessObjectSessions: sessions };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
   /** 仅更新 valueStream 数据，不修改 workflowAlignCompletedStages（用于用户点击价值流 JSON 确认后，待用户再点「已完成」再推进阶段） */
   function updateDigitalProblemValueStreamDataOnly(createdAt, valueStream) {
     const list = getDigitalProblems();
@@ -562,6 +572,7 @@
   global.clearDigitalProblemLocalItGapStep = clearDigitalProblemLocalItGapStep;
   global.updateDigitalProblemRolePermissionSessions = updateDigitalProblemRolePermissionSessions;
   global.updateDigitalProblemRolePermissionStep = updateDigitalProblemRolePermissionStep;
+  global.updateDigitalProblemCoreBusinessObjectSessions = updateDigitalProblemCoreBusinessObjectSessions;
   global.clearDigitalProblemRolePermissionStep = clearDigitalProblemRolePermissionStep;
   global.updateDigitalProblemValueStreamDataOnly = updateDigitalProblemValueStreamDataOnly;
   global.updateDigitalProblemValueStream = updateDigitalProblemValueStream;

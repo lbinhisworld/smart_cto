@@ -1960,7 +1960,9 @@ if (el.problemDetailChatMessages) {
         return;
       }
       const contextJson = buildTaskContextJson(taskId, item);
-      pushAndSaveProblemDetailChat({ type: 'taskContextBlock', taskId, contextJson, timestamp: getTimeStr() });
+      if (taskId !== 'task11') {
+        pushAndSaveProblemDetailChat({ type: 'taskContextBlock', taskId, contextJson, timestamp: getTimeStr() });
+      }
       const chatContainer = el.problemDetailChatMessages;
       if (chatContainer) {
         chatContainer.innerHTML = '';
@@ -2067,9 +2069,35 @@ if (el.problemDetailChatMessages) {
         }
         return;
       }
-      if (['task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) {
+      if (taskId === 'task11') {
+        const valueStream = resolveValueStreamForItGap(item);
+        const result = typeof executeCoreBusinessObjectTaskOnConfirm === 'function'
+          ? executeCoreBusinessObjectTaskOnConfirm(item, valueStream, {
+              pushAndSaveProblemDetailChat,
+              updateDigitalProblemCoreBusinessObjectSessions,
+              getTimeStr,
+              getLatestConfirmedRolePermissionContent,
+            })
+          : null;
+        if (result && !result.ok) {
+          pushAndSaveProblemDetailChat({ role: 'system', content: result.error, timestamp: getTimeStr() });
+        } else if (result && result.ok) {
+          currentProblemDetailItem = result.updatedItem;
+          const container = el.problemDetailChatMessages;
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+          if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
+          itStrategyPlanViewingSubstep = 1;
+          problemDetailViewingMajorStage = 3;
+          updateProblemDetailProgressStages(3, problemDetailViewingMajorStage);
+          renderProblemDetailContent();
+        }
+        return;
+      }
+      if (['task12', 'task13', 'task14', 'task15'].includes(taskId)) {
         if (item?.createdAt) {
-          const substepMap = { task11: 1, task12: 2, task13: 3, task14: 4, task15: 5 };
+          const substepMap = { task12: 2, task13: 3, task14: 4, task15: 5 };
           itStrategyPlanViewingSubstep = substepMap[taskId] ?? 0;
           problemDetailViewingMajorStage = 3;
           updateProblemDetailProgressStages(3, problemDetailViewingMajorStage);
@@ -7688,6 +7716,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'globalItGapContextLog') {
       // 全局 ITGap 上下文仅推送到沟通历史（标签「上下文」），不在聊天区展示卡片
       return;
+    } else if (msg.type === 'coreBusinessObjectContextBlock') {
+      // 核心业务对象推演上下文仅推送到沟通历史（标签「上下文」），不在聊天区展示
+      return;
     } else if (msg.type === 'localItGapContextLog') {
       // 局部 ITGap 上下文仅推送到沟通历史（标签「上下文」+ 备注），不在聊天区展示卡片
       return;
@@ -8257,6 +8288,17 @@ function renderProblemDetailChatFromStorage(container, messages) {
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'coreBusinessObjectSessionsBlock') {
+      const item = currentProblemDetailItem;
+      const sessions = item?.coreBusinessObjectSessions || msg.sessions || [];
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-sessions-card problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.dataset.taskId = 'task11';
+      block.innerHTML = typeof buildCoreBusinessObjectSessionsBlockHtml === 'function'
+        ? buildCoreBusinessObjectSessionsBlockHtml(sessions, msg.timestamp || '', DELETE_CHAT_MSG_ICON)
+        : '';
       container.appendChild(block);
     } else if (msg.type === 'localItGapAnalysisCard') {
       const data = msg.data || {};
