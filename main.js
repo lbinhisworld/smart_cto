@@ -7276,6 +7276,7 @@ function buildRolePermissionNodeCardsHtml(model) {
         </div>
         <div class="problem-detail-card-body" hidden>
           <div class="problem-detail-role-permission-tabs">
+            <span class="problem-detail-role-permission-tabs-title">角色与权限模型推演</span>
             <button type="button" class="problem-detail-role-permission-tab problem-detail-role-permission-tab-active" data-tab="view">view</button>
             <button type="button" class="problem-detail-role-permission-tab" data-tab="json">json</button>
           </div>
@@ -9458,6 +9459,7 @@ function renderProblemDetailContent() {
                     const jsonStr = match ? JSON.stringify(match, null, 2) : '';
                     const stepBodyContent = match
                       ? `<div class="problem-detail-role-permission-tabs">
+            <span class="problem-detail-role-permission-tabs-title">角色与权限模型推演</span>
             <button type="button" class="problem-detail-role-permission-tab problem-detail-role-permission-tab-active" data-tab="view">view</button>
             <button type="button" class="problem-detail-role-permission-tab" data-tab="json">json</button>
           </div>

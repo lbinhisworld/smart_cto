@@ -1225,10 +1225,17 @@ body {
 /* 环节卡片 view/json 双 tab */
 .problem-detail-role-permission-tabs {
   display: flex;
+  align-items: center;
   gap: 0.25rem;
   margin-bottom: 0.75rem;
   border-bottom: 1px solid var(--border);
   padding-bottom: 0.35rem;
+}
+.problem-detail-role-permission-tabs-title {
+  margin-right: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #22c55e;
 }
 .problem-detail-role-permission-tab {
   padding: 0.25rem 0.6rem;
