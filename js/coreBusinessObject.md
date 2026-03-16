@@ -67,9 +67,9 @@
 
 **入参**：四类上下文的 JSON 字符串（价值流、全局 ITGap、局部 ITGap、角色与权限），以及当前环节的 `stepName`、`stageName`、`stepIndex`。
 
-**System Prompt 要点**：角色为需求分析专家；输入为四类沟通历史上下文；Task Goal 为推导支撑各环节运行的核心业务对象，**特别注意**一个环节可能涉及多个对象（新生成单据、被引用主数据、过程记录），需拆解出所有原子化对象并解决标注的 IT Gap；Core Requirement 含对象分类、属性对冲设计、状态机建模、关系图谱；Output Format 为严格 JSON 数组（当前环节仅一个元素）。
+**System Prompt 要点**：角色为需求分析专家；输入为四类沟通历史上下文；Task Goal 为推导支撑各环节运行的核心业务对象，**特别注意**一个环节可能涉及多个对象（新生成单据、被引用主数据、过程记录），需拆解出所有原子化对象并解决标注的 IT Gap；Core Requirement 含对象分类、属性对冲设计、**严谨数据类型**（String/Decimal/Date/DateTime/Boolean/Enum/Array）、状态机建模、关系图谱；Output Format 为严格 JSON 数组（当前环节仅一个元素），不要多余解释文字。
 
-**输出结构（单元素数组）**：每元素含 `stage_name`、`local_gap_resolved`、`business_objects`（每项含 `object_name`、`object_role`（环节主产出/关联引用/过程记录）、`is_newly_created`、`category`、`is_global_shared`、`key_attributes`、`lifecycle_machine`、`associations`、`global_integration_note`）、`multi_object_interaction`（本环节多对象协同逻辑）。
+**输出结构（单元素数组）**：每元素含 `stage_name`、`local_gap_resolved`、`business_objects`（每项含 `object_name`、`object_usage`（该对象的主要用途说明）、`object_role`（环节主产出/关联引用/过程记录）、`is_newly_created`、`category`、`is_global_shared`、`key_attributes`（每项含 `field`、`data_type`、`purpose`）、`lifecycle_machine`、`associations`、`global_integration_note`）、`multi_object_interaction`（本环节多对象协同逻辑）。
 
 **返回**：`fetchDeepSeekChat([...])` 的 Promise。main.js 解析 `content` 为单对象（数组取首项）后写入 `session.coreBusinessObjectJson`，并展示在工作区对应环节的「核心业务对象推演」子卡片 **json** 页（默认展示 json 页）。
 
@@ -123,7 +123,7 @@
 - **单环节格式**：`parsed` 为对象，且同时具备 `entities`（非空数组）与（`step_name` 或 `step_id` 或 `stage_name`）→ 视为单环节结果，返回 `[parsed]`（即「环节数组」仅含一项）。
 - **全局 entities 格式**：`parsed` 为对象，具备 `entities`（非空数组），但不具备 step/stage 信息 → 归一为 `[{ stage_name: '全局', step_name: '全局', entities: parsed.entities }]` 返回。
 - **环节数组格式**：`parsed` 为数组，且首项为对象且含 `entities` 数组 → 直接返回 `parsed`。
-- **严格提示词格式**（单对象或数组且首项含 `business_objects`）：将 `business_objects` 映射为 `entities`（`object_name`→`entity_name`、`key_attributes`→`fields`、`lifecycle_machine`→`state_machine`、`associations`→`relations`），并**保留 `object_role`** 到每个实体；环节对象保留 `local_gap_resolved` 等字段。返回 `[normalized]`。
+- **严格提示词格式**（单对象或数组且首项含 `business_objects`）：将 `business_objects` 映射为 `entities`（`object_name`→`entity_name`、`object_usage` 保留、`key_attributes`→`fields`（`field`/`field_name`、`data_type`/`type`、`purpose`/`description`）、`lifecycle_machine`→`state_machine`、`associations`→`relations`），并**保留 `object_role`** 到每个实体；环节对象保留 `local_gap_resolved` 等字段。返回 `[normalized]`。
 
 其他情况返回 `[]`。
 
@@ -169,7 +169,8 @@
 | `entity_name` / `entityName` / `name` | 对象名称 | 如订单、合同、任务单 |
 | `description` | 对象说明 | 可选，支持 Markdown 渲染；工作区对象卡片内容区**不展示**此块 |
 | **`object_role`** | 对象类型说明 | 严格格式解析时保留（环节主产出/关联引用/过程记录）；用于分组与标题旁标签 |
-| `fields` | 字段定义数组 | 每项：`field_name`/`fieldName`/`name`、`type`、`description`（展示时表头为「设计意图」，单元格去「设计意图：」前缀） |
+| **`object_usage`** | 设计用途 | 严格格式解析时保留（该对象的主要用途说明）；在对象卡片中单独「设计用途」栏目展示 |
+| `fields` | 字段定义数组 | 每项：`field_name`/`fieldName`/`name`、`type`/`data_type`（展示时表头为「数据类型」）、`description`（展示时表头为「设计意图」，单元格去「设计意图：」前缀） |
 | `state_machine` / `stateMachine` | 状态机数组 | 每项：`state`/`name`、`description`、`transitions`（下一状态数组） |
 | `relations` | 关联对象数组 | 每项：`target_entity`/`targetEntity`、`relation_type`/`relationType`（如 1:1、1:n、n:1） |
 
@@ -180,7 +181,7 @@
 `generateCoreBusinessObjectForStepWithStrictPrompt` 要求 LLM 针对**当前环节**仅输出一个元素的 JSON 数组，元素结构为：
 
 - **环节级**：`stage_name`、`local_gap_resolved`（该环节局部 IT Gap 解决思路）、`business_objects`、`multi_object_interaction`（本环节内多对象协同逻辑）。
-- **business_objects[]**：每项含 `object_name`、**`object_role`**（环节主产出 / 关联引用 / 过程记录）、**`is_newly_created`**（该环节是创建还是仅更新引用）、`category`（MasterData / TransactionData / ConfigData）、`is_global_shared`、`key_attributes`（含 `field`、`purpose`，purpose 对应解决哪个 Gap 或业务需求）、`lifecycle_machine`、`associations`、`global_integration_note`。
+- **business_objects[]**：每项含 `object_name`、**`object_usage`**（该对象的主要用途说明）、**`object_role`**（环节主产出 / 关联引用 / 过程记录）、**`is_newly_created`**（该环节是创建还是仅更新引用）、`category`（MasterData / TransactionData / ConfigData）、`is_global_shared`、`key_attributes`（含 `field`、`data_type`（String/Decimal/Date/DateTime/Boolean/Enum 等）、`purpose` 对应解决哪个 Gap 或需求）、`lifecycle_machine`、`associations`、`global_integration_note`。
 
 解析与工作区展示可直接使用该 JSON（或经 `parseCoreBusinessObjectModel` 归一为 6.1/6.2 结构后再渲染）。
 
@@ -201,13 +202,13 @@
 
 ### 7.2 单实体卡片：`buildEntityCardHtml(entity, opts)`
 
-- **入参**：单个实体对象（含 `entity_name`、`fields`、`state_machine`、`relations`、可选 `object_role`）；`opts.titlePrefix`（如 `'对象：'`）、`opts.roleTag`（对象类型说明，用于标题右侧标签）。
+- **入参**：单个实体对象（含 `entity_name`、`fields`、`state_machine`、`relations`、可选 `object_role`、可选 `object_usage`）；`opts.titlePrefix`（如 `'对象：'`）、`opts.roleTag`（对象类型说明，用于标题右侧标签）。
 - **字段名兼容**：同时支持 snake_case 与 camelCase。
 - **结构**：
   - 卡片标题：图标（📦）+ 标题文本（`titlePrefix + 名称`，无 prefix 时仅名称）+ 可选**圆角矩形标签**（`roleTag`，即 object_role）+ 折叠箭头。标题字体在工作区「核心业务对象设计」内为**明黄色**（与局部 ITGap 标题栏底色一致）。
-  - 卡片主体（默认折叠）：**不展示「说明」**；仅三块子卡片**垂直串列**：**字段定义**（表格）、**状态机**（列表）、**关联对象**（列表）。子卡片标题样式与角色与权限「过去操作」一致（`.problem-detail-role-card-section-title`：0.78rem、#5dc9b4）。
-- **字段定义表格**：表头为「字段名」「类型」「**设计意图**」；单元格中若 `description` 以「设计意图：」或「设计意图:」开头则去前缀后展示，否则原样展示；表格采用**淡灰色表格线**（`rgba(160,160,160,0.45)`），`border-collapse: collapse`。
-- **空数据**：无 fields/state_machine/relations 时对应子卡片仍输出，内容为占位「—」。
+  - 卡片主体（默认折叠）：**不展示「说明」**；四块子卡片**垂直串列**：**设计用途**（展示 `object_usage`，支持 Markdown；无内容时占位「—」）、**字段定义**（表格）、**状态机**（列表）、**关联对象**（列表）。子卡片标题样式与角色与权限「过去操作」一致（`.problem-detail-role-card-section-title`：0.78rem、#5dc9b4）。
+- **字段定义表格**：表头为「字段名」「**数据类型**」（对应 JSON 的 `data_type`）、「设计意图」；单元格中若 `description` 以「设计意图：」或「设计意图:」开头则去前缀后展示，否则原样展示；表格采用**淡灰色表格线**（`rgba(160,160,160,0.45)`），`border-collapse: collapse`。
+- **空数据**：无 设计用途/fields/state_machine/relations 时对应子卡片仍输出，内容为占位「—」。
 - **样式类**：`problem-detail-card-core-business-entity`、`problem-detail-core-business-entity-subcard`、`problem-detail-core-business-entity-role-tag`、`problem-detail-core-business-object-table` 等。
 
 ### 7.3 单环节视图：`buildCoreBusinessObjectStepViewHtml(match)`
@@ -347,4 +348,4 @@
 - **解析调试**：将模块内 `CORE_BUSINESS_OBJECT_LOG` 设为 `true`，可在控制台看到 `parseCoreBusinessObjectModel` 的解析步骤与识别到的格式（单环节/全局 entities/环节数组）。
 - **实体结构扩展**：若 LLM 输出增加新字段（如 `indexes`、`constraints`），只需在 `buildEntityCardHtml` 中增加对应区块与表格/列表渲染；解析层对未知字段不做校验，会保留在 JSON 中。
 - **全局一次性推演**：若产品上改为「全流程一次推演」而非按环节，可保留 `generateCoreBusinessObjectSessions` 返回单元素 session，并在 main.js 中只调用一次 `generateCoreBusinessObjectForStep`（或新增 `generateCoreBusinessObjectGlobal`），解析层已支持「仅含 entities 的对象」并归一为全局环节。
-- **样式**：所有 class 均带 `problem-detail-core-business-object-*` 或 `problem-detail-card-core-business-*` 前缀，便于在 `styles.css` 中单独维护或与角色权限卡片风格统一。关键样式：局部 ITGap 与核心业务对象设计标题栏（明黄底 #ffeb3b、深蓝字 #1a237e）；对象类型分组栏、对象卡片标题（明黄字 #ffeb3b）；对象卡片内子卡片标题与角色与权限「过去操作」一致（#5dc9b4、0.78rem）；字段定义表淡灰线、设计意图列；树形引导线（`.problem-detail-core-business-object-design-list` + `.problem-detail-core-business-object-design-item::before`）。
+- **样式**：所有 class 均带 `problem-detail-core-business-object-*` 或 `problem-detail-card-core-business-*` 前缀，便于在 `styles.css` 中单独维护或与角色权限卡片风格统一。关键样式：局部 ITGap 与核心业务对象设计标题栏（明黄底 #ffeb3b、深蓝字 #1a237e）；对象类型分组栏、对象卡片标题（明黄字 #ffeb3b）；对象卡片内子卡片标题与角色与权限「过去操作」一致（#5dc9b4、0.78rem）；字段定义表淡灰线、数据类型列与设计意图列；树形引导线（`.problem-detail-core-business-object-design-list` + `.problem-detail-core-business-object-design-item::before`）。

@@ -806,13 +806,12 @@ Task Goal:
 请基于以上输入，推导并定义出支撑各环节运行的核心业务对象。 特别注意： 一个环节可能涉及多个对象（如：新生成的单据、被引用的主数据、随附的逻辑记录）。请务必拆解出所有原子化对象，并确保它们能解决标注的 IT Gap。
 
 Core Requirement Details:
-（1）对象分类： 明确识别主数据 (Master Data)、事务数据/单据 (Transaction Data) 及状态数据。
-（2）属性对冲设计： 针对"数据不可追溯"、"信息不透明"等 Gap，在对象中强制设计关联字段（如 Trace_ID、Version_Tag）。
-（3）状态机建模： 结合权限模型，详细定义对象在各环节的状态转移逻辑。
-（4）关系图谱： 明确对象间的父子关系、引用关系（1:N / M:N）。
-
-Output Format (Strict JSON):
-请直接输出 JSON 数据，结构定义如下。针对**当前环节**仅输出一个元素的数组：
+* 对象分类： 明确识别主数据 (Master Data)、事务数据/单据 (Transaction Data) 及状态数据。
+* 属性对冲设计： 针对"数据不可追溯"、"信息不透明"等 Gap，在对象中强制设计关联字段（如 Trace_ID、Version_Tag）。
+* 严谨数据类型： 为每个字段分配准确的类型，包括但不限于：String (文本), Decimal (金额/数值), Date (日期), DateTime (时间戳), Boolean (布尔值), Enum (枚举/状态值), Array (集合)。
+* 状态机建模： 结合权限模型，详细定义对象在各环节的状态转移逻辑。
+* 关系图谱： 明确对象间的父子关系、引用关系（1:N / M:N）。
+Output Format (Strict JSON): 请直接输出 JSON 数据，不要包含任何多余的解释文字。结构如下：
 [
   {
     "stage_name": "关联的价值流环节",
@@ -820,16 +819,21 @@ Output Format (Strict JSON):
     "business_objects": [
       {
         "object_name": "业务对象名称",
+        "object_usage": "该对象的主要用途说明",
         "object_role": "环节主产出 / 关联引用 / 过程记录",
-        "is_newly_created": "boolean (该环节是创建它，还是仅更新引用它)",
+        "is_newly_created": "boolean",
         "category": "MasterData / TransactionData / ConfigData",
-        "is_global_shared": "boolean (是否为全局共享的主数据)",
+        "is_global_shared": "boolean",
         "key_attributes": [
-          {"field": "字段名", "purpose": "设计意图：对应解决哪个 Gap 或业务需求"}
+          {
+            "field": "字段名",
+            "data_type": "String/Decimal/Date/DateTime/Boolean/Enum",
+            "purpose": "设计意图：对应解决哪个 Gap 或需求"
+          }
         ],
         "lifecycle_machine": [
           {
-            "trigger_role": "Step 1 中的哪个角色触发",
+            "trigger_role": "角色名称",
             "action": "动作名称",
             "state_from": "起始状态",
             "state_to": "目标状态"
@@ -841,7 +845,7 @@ Output Format (Strict JSON):
         "global_integration_note": "在全局架构中，该对象如何解决系统间数据孤岛问题"
       }
     ],
-    "multi_object_interaction": "描述本环节内多个业务对象（如有）是如何协同工作的逻辑"
+    "multi_object_interaction": "描述本环节内多对象协同逻辑"
   }
 ]
 ```
