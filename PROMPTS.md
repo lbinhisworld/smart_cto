@@ -784,6 +784,78 @@ ${currentContent || '(空)'}
 
 ---
 
+## 17. 核心业务对象推演（按环节）
+
+**触发入口**：IT 策略规划阶段，用户确认「核心业务对象推演」任务后，在 session 卡片中点击「自动顺序执行」或「手工逐项确认」  
+**函数**：`generateCoreBusinessObjectForStepWithStrictPrompt(stepName, stageName, stepIndex, valueStreamJson, globalItGapJson, localItGapJson, rolePermissionJson)`（`js/coreBusinessObject.js`）  
+**用途**：基于价值流、全局/局部 ITGap、角色与权限四类上下文，针对当前环节推导并输出核心业务对象（主数据、事务数据、状态数据），含对象分类、属性对冲、状态机、关系图谱及多对象协同说明。
+
+### System Prompt
+
+```
+Role & Context:
+我是一名需求分析专家。我已完成前期的全局 IT Gap 分析、局部节点 IT Gap 分析以及角色权限模型模拟。现在，我需要进行核心业务对象（Business Object）推演，为后续的全局 IT 架构设计提供底层数据模型支撑。
+
+Input Data (上下文参考):
+（1）沟通历史上下文：价值流设计 json
+（2）沟通历史上下文：全局 IT Gap 分析json
+（3）沟通历史上下文：局部 ITGap 分析 json
+（4）沟通历史上下文：角色与权限模型推演 json
+
+Task Goal:
+请基于以上输入，推导并定义出支撑各环节运行的核心业务对象。 特别注意： 一个环节可能涉及多个对象（如：新生成的单据、被引用的主数据、随附的逻辑记录）。请务必拆解出所有原子化对象，并确保它们能解决标注的 IT Gap。
+
+Core Requirement Details:
+（1）对象分类： 明确识别主数据 (Master Data)、事务数据/单据 (Transaction Data) 及状态数据。
+（2）属性对冲设计： 针对"数据不可追溯"、"信息不透明"等 Gap，在对象中强制设计关联字段（如 Trace_ID、Version_Tag）。
+（3）状态机建模： 结合权限模型，详细定义对象在各环节的状态转移逻辑。
+（4）关系图谱： 明确对象间的父子关系、引用关系（1:N / M:N）。
+
+Output Format (Strict JSON):
+请直接输出 JSON 数据，结构定义如下。针对**当前环节**仅输出一个元素的数组：
+[
+  {
+    "stage_name": "关联的价值流环节",
+    "local_gap_resolved": "该环节局部 IT Gap 的具体解决思路",
+    "business_objects": [
+      {
+        "object_name": "业务对象名称",
+        "object_role": "环节主产出 / 关联引用 / 过程记录",
+        "is_newly_created": "boolean (该环节是创建它，还是仅更新引用它)",
+        "category": "MasterData / TransactionData / ConfigData",
+        "is_global_shared": "boolean (是否为全局共享的主数据)",
+        "key_attributes": [
+          {"field": "字段名", "purpose": "设计意图：对应解决哪个 Gap 或业务需求"}
+        ],
+        "lifecycle_machine": [
+          {
+            "trigger_role": "Step 1 中的哪个角色触发",
+            "action": "动作名称",
+            "state_from": "起始状态",
+            "state_to": "目标状态"
+          }
+        ],
+        "associations": [
+          {"target_object": "关联的对象", "relation_type": "1:N / M:N", "description": "关联逻辑"}
+        ],
+        "global_integration_note": "在全局架构中，该对象如何解决系统间数据孤岛问题"
+      }
+    ],
+    "multi_object_interaction": "描述本环节内多个业务对象（如有）是如何协同工作的逻辑"
+  }
+]
+```
+
+### User Message 构成
+
+- 【沟通历史上下文：价值流设计 json】+ `valueStreamJson`
+- 【沟通历史上下文：全局 IT Gap 分析 json】+ `globalItGapJson`
+- 【沟通历史上下文：局部 ITGap 分析 json】+ `localItGapJson`
+- 【沟通历史上下文：角色与权限模型推演 json】+ `rolePermissionJson`
+- 当前环节说明：`当前环节：阶段「${stageName}」，环节「${stepName}」（stepIndex: ${stepIndex}）。请仅输出该环节的一个 JSON 数组元素（即上述格式的数组且仅含一个对象），不要 markdown 代码块或说明文字。`
+
+---
+
 ## 附录：API 配置与通用规则
 
 ### API 配置
@@ -794,5 +866,5 @@ ${currentContent || '(空)'}
 
 ### 通用规则
 
-- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、讨论回复、BMC 生成、IT 现状标注、痛点标注、价值流图生成、全局 ITGap 分析、局部 ITGap 分析、角色与权限模型推演、工作区内容修改等。
+- **LLM 调用元信息**：所有大模型调用完成后，在聊天区对应内容块的时间戳下方展示：模型名称、消耗 token 数、耗时（ms）。包括：意图提炼卡片、查询结果、讨论回复、BMC 生成、IT 现状标注、痛点标注、价值流图生成、全局 ITGap 分析、局部 ITGap 分析、角色与权限模型推演、**核心业务对象推演（按环节）**、工作区内容修改等。
 - **聊天内容 Markdown 渲染**：聊天框内容块（用户消息、系统回复、查询结果等）自动渲染 Markdown 格式，使用 marked + DOMPurify 解析与安全过滤。加粗小标题（`**文本**`）使用主题强调色（`var(--accent)`）突出显示。

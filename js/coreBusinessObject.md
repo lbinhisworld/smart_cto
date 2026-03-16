@@ -61,7 +61,19 @@
 
 ## 4. 单环节 LLM 推演
 
-### 4.1 `generateCoreBusinessObjectForStep(stepName, stageName, valueStream, globalItGap, localItGap, projectName)`
+### 4.1 `generateCoreBusinessObjectForStepWithStrictPrompt(stepName, stageName, stepIndex, valueStreamJson, globalItGapJson, localItGapJson, rolePermissionJson)`
+
+**作用**：使用严格提示词（沟通历史四类上下文 + 对象分类/属性对冲/状态机/关系图谱）针对单环节调用大模型，返回该环节的 JSON。**当前「自动顺序执行」「手工逐项确认」均调用此函数**。
+
+**入参**：四类上下文的 JSON 字符串（价值流、全局 ITGap、局部 ITGap、角色与权限），以及当前环节的 `stepName`、`stageName`、`stepIndex`。
+
+**System Prompt 要点**：角色为需求分析专家；输入为四类沟通历史上下文；Task Goal 为推导支撑各环节运行的核心业务对象，**特别注意**一个环节可能涉及多个对象（新生成单据、被引用主数据、过程记录），需拆解出所有原子化对象并解决标注的 IT Gap；Core Requirement 含对象分类、属性对冲设计、状态机建模、关系图谱；Output Format 为严格 JSON 数组（当前环节仅一个元素）。
+
+**输出结构（单元素数组）**：每元素含 `stage_name`、`local_gap_resolved`、`business_objects`（每项含 `object_name`、`object_role`（环节主产出/关联引用/过程记录）、`is_newly_created`、`category`、`is_global_shared`、`key_attributes`、`lifecycle_machine`、`associations`、`global_integration_note`）、`multi_object_interaction`（本环节多对象协同逻辑）。
+
+**返回**：`fetchDeepSeekChat([...])` 的 Promise。main.js 解析 `content` 为单对象（数组取首项）后写入 `session.coreBusinessObjectJson`，并展示在工作区对应环节的「核心业务对象推演」子卡片 **json** 页（默认展示 json 页）。
+
+### 4.2 `generateCoreBusinessObjectForStep(stepName, stageName, valueStream, globalItGap, localItGap, projectName)`
 
 **作用**：针对**一个环节**调用大模型，得到该环节涉及或产生的核心业务对象（期望为单个 JSON 对象，含 `entities` 数组）。
 
@@ -161,6 +173,15 @@
 
 字段类型建议：`string`、`number`、`date`、`ref`（引用其他实体）等，由 LLM 自由发挥，解析与渲染不做强校验。
 
+### 6.3 严格提示词输出格式（Strict Prompt，当前主流程）
+
+`generateCoreBusinessObjectForStepWithStrictPrompt` 要求 LLM 针对**当前环节**仅输出一个元素的 JSON 数组，元素结构为：
+
+- **环节级**：`stage_name`、`local_gap_resolved`（该环节局部 IT Gap 解决思路）、`business_objects`、`multi_object_interaction`（本环节内多对象协同逻辑）。
+- **business_objects[]**：每项含 `object_name`、**`object_role`**（环节主产出 / 关联引用 / 过程记录）、**`is_newly_created`**（该环节是创建还是仅更新引用）、`category`（MasterData / TransactionData / ConfigData）、`is_global_shared`、`key_attributes`（含 `field`、`purpose`，purpose 对应解决哪个 Gap 或业务需求）、`lifecycle_machine`、`associations`、`global_integration_note`。
+
+解析与工作区展示可直接使用该 JSON（或经 `parseCoreBusinessObjectModel` 归一为 6.1/6.2 结构后再渲染）。
+
 ---
 
 ## 7. 渲染逻辑
@@ -247,6 +268,17 @@
 
 - **上下文卡片**：`coreBusinessObjectContextBlock` 纳入 task11 过程日志；`getCommunicationLogType` 返回「上下文」；时间线标题栏为「上下文」+ 备注（`contextNoteForHead = parsed.contextLabel`），详情内容为 `contextJson` 的 JSON。
 - **Session 计划块**：`coreBusinessObjectSessionsBlock` 纳入 task11 过程日志；未确认时标签「输出」、已确认时「确认」；时间线标题栏在标签右侧显示备注 `sessionPlanNoteForHead = '核心业务对象推演 session 计划'`，详情内容为 `sessions` 的 JSON。
+- **单环节推演卡片**：`coreBusinessObjectAnalysisCard` 纳入 task11 过程日志；未确认时标签「输出」、已确认时「确认」；时间线标签右侧显示对应环节名称（`stepNameForHead`），详情内容为该环节推演 JSON。与角色与权限单环节卡片交互一致。
+
+### 8.5 手工逐项确认与单环节卡片（main.js）
+
+- 用户点击「手工逐项确认」后，main.js 调用 `runCoreBusinessObjectForNextStep()`：对**下一待推演环节**调用 `generateCoreBusinessObjectForStepWithStrictPrompt`，将返回的 JSON 写入该 session 的 `coreBusinessObjectJson`，并 **pushAndSaveProblemDetailChat** 一条 `coreBusinessObjectAnalysisCard`（content、stepName、stepIndex、confirmed: false、llmMeta）。聊天区渲染该卡片：标题「核心业务对象推演：{环节名}」，内容为 JSON，操作区为**确认、重做、修正、讨论**。过程日志中该条显示为「输出」、右侧标注环节名称。
+- 用户点击「自动顺序执行」后，main.js 调用 `runCoreBusinessObjectAutoSequential()`：按 session 顺序逐环节调用上述 LLM 并更新 session 与工作区，直至全部推演完成。
+- 工作区环节卡片内「核心业务对象推演」子卡片**默认展示 json 页**（大模型返回的 JSON 显示在 json tab）；有数据时 view 页为解析后的实体视图或同份 JSON。
+
+### 8.6 重启当前任务时清空工作区（main.js）
+
+- 用户点击「重启当前」且当前任务为 task11 时，`applyRestartCurrentTask` → `buildItemClearCurrentTaskOnly` → `buildItemAfterRollbackToTask(item, 'task11')`。对 task11 单独处理：保留 `coreBusinessObjectSessions` 的 session 列表结构，将每个 session 的 **coreBusinessObjectJson** 置为 **null**，并更新 `completedTaskIds`。写回存储后工作区重绘，各环节「核心业务对象推演」子卡片恢复为「待推演」。聊天区中 task11 相关消息（含「正在进行…核心业务对象推演」、session 块、单环节卡片等）由 `filterChatMessagesRemoveTask(chats, 'task11')` 一并移除（过程日志推断见 communication-history 的 `inferTaskIdFromMessage`）。
 
 ---
 
@@ -255,7 +287,8 @@
 | 函数名 | 说明 |
 |--------|------|
 | `generateCoreBusinessObjectSessions(valueStream)` | 根据价值流生成推演 session 数组，不调 LLM |
-| `generateCoreBusinessObjectForStep(...)` | 针对单环节调用大模型，返回 Promise |
+| `generateCoreBusinessObjectForStepWithStrictPrompt(stepName, stageName, stepIndex, valueStreamJson, globalItGapJson, localItGapJson, rolePermissionJson)` | 单环节推演（严格提示词，当前主入口），返回该环节的 LLM 文本（严格 JSON 单元素数组） |
+| `generateCoreBusinessObjectForStep(...)` | 针对单环节调用大模型（自由提示词），返回 Promise |
 | `parseCoreBusinessObjectModel(markdown)` | 解析模型输出或历史文本为环节/实体结构 |
 | `buildCoreBusinessObjectNodeCardsHtml(model)` | 将解析后的模型数组渲染为环节/实体卡片列表 HTML |
 | `buildCoreBusinessObjectStepViewHtml(match)` | 将单个环节对象渲染为实体卡片视图 HTML |
@@ -279,9 +312,10 @@
 价值流 (valueStream)
     → generateCoreBusinessObjectSessions
     → sessions[{ stepName, stepIndex, stageName, coreBusinessObjectJson }]
-    → 主流程按 step 调用 generateCoreBusinessObjectForStep(...)
-    → LLM 返回 content (JSON 文本)
-    → parseCoreBusinessObjectModel(content)
+    → 主流程按 step 调用 generateCoreBusinessObjectForStepWithStrictPrompt(...)（自动顺序执行 或 手工逐项确认）
+    → LLM 返回 content (严格 JSON 单元素数组文本)
+    → 写入 session.coreBusinessObjectJson；手工逐项时 pushAndSaveProblemDetailChat(coreBusinessObjectAnalysisCard)
+    → parseCoreBusinessObjectModel(content) 或直接以 coreBusinessObjectJson 渲染
     → model (环节对象数组，每项含 stage_name, step_name, entities)
     → buildCoreBusinessObjectNodeCardsHtml(model) 或 buildCoreBusinessObjectStepViewHtml(match)
     → HTML 插入工作区（itStrategyPlanViewingSubstep === 1），由 main.js 绑定折叠/tab 等事件

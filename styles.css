@@ -1043,6 +1043,7 @@ body {
 .btn-redo-global-itgap,
 .btn-redo-role-permission,
 .btn-redo-role-permission-step,
+.btn-redo-core-business-object-step,
 .btn-redo-basic-info,
 .btn-redo-bmc,
 .btn-redo-value-stream,
@@ -1065,6 +1066,7 @@ body {
 .btn-redo-global-itgap:hover:not(:disabled),
 .btn-redo-role-permission:hover:not(:disabled),
 .btn-redo-role-permission-step:hover:not(:disabled),
+.btn-redo-core-business-object-step:hover:not(:disabled),
 .btn-redo-basic-info:hover:not(:disabled),
 .btn-redo-bmc:hover:not(:disabled),
 .btn-redo-value-stream:hover:not(:disabled),
@@ -1080,6 +1082,7 @@ body {
 .btn-redo-global-itgap:disabled,
 .btn-redo-role-permission:disabled,
 .btn-redo-role-permission-step:disabled,
+.btn-redo-core-business-object-step:disabled,
 .btn-redo-basic-info:disabled,
 .btn-redo-bmc:disabled,
 .btn-redo-value-stream:disabled,
@@ -1256,6 +1259,59 @@ body {
   color: var(--accent);
   background: var(--accent-dim);
   border-color: var(--accent);
+}
+
+/* 环节内子卡片：核心业务对象推演 view/json 双 tab */
+.problem-detail-step-card-core-business-object {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.problem-detail-core-business-object-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35rem;
+}
+.problem-detail-core-business-object-tabs-title {
+  margin-right: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #22c55e;
+}
+.problem-detail-core-business-object-tab {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.problem-detail-core-business-object-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.problem-detail-core-business-object-tab-active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.problem-detail-core-business-object-panel {
+  margin-top: 0.25rem;
+}
+.problem-detail-core-business-object-json {
+  margin: 0;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-code);
+  border-radius: 6px;
 }
 
 /* view 面板：角色圆角卡片列表 */
