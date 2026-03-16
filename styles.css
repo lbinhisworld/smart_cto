@@ -4308,6 +4308,13 @@ body {
   color: #1a237e;
   font-weight: 600;
 }
+.problem-detail-core-business-object-count-tag {
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #1a237e;
+  opacity: 0.85;
+}
 .problem-detail-card-core-business-design-group .problem-detail-card-header:hover {
   background: #fff176;
 }

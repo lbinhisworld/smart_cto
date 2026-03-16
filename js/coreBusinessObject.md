@@ -216,8 +216,8 @@
 - **入参**：单个环节对象 `match`，含 `local_gap_resolved`、`entities`（归一后含 `object_role`）。
 - **视图结构**（同等级两块卡片）：
   1. **局部 ITGap 解决思路**（`problem-detail-card-core-business-local-gap`）：标题栏**明黄底**（#ffeb3b）、**深蓝字**（#1a237e）；内容区不设独立背景，内容字体明黄色、比标题小一号；展示 `local_gap_resolved`。
-  2. **核心业务对象设计**（`problem-detail-card-core-business-design`）：**可折叠**，标题栏样式与局部 ITGap 一致（明黄底深蓝字）。展开后内容为 **`.problem-detail-core-business-object-design-groups`**：
-     - **按 object_role 分组的一级可折叠栏目**（`problem-detail-card-core-business-design-group`）：每栏目标题为该类型说明（object_role），样式同 ITGap 标题栏；点击展开后为该类型下的对象卡片列表。
+  2. **核心业务对象设计**（`problem-detail-card-core-business-design`）：**可折叠**，标题栏样式与局部 ITGap 一致（明黄底深蓝字）。标题栏文案为「核心业务对象设计」+ **分割线**（`｜`）+ **「N个对象」** 标签（N 为该环节实体总数，无对象时不显示）。展开后内容为 **`.problem-detail-core-business-object-design-groups`**：
+     - **按 object_role 分组的一级可折叠栏目**（`problem-detail-card-core-business-design-group`）：每栏目标题为该类型说明（object_role）+ **分割线**（`｜`）+ **「M个对象」** 标签（M 为该分组内实体数，无对象时不显示），样式同 ITGap 标题栏；点击展开后为该类型下的对象卡片列表。
      - 列表容器 **`.problem-detail-core-business-object-design-list`**：**垂直排列**，左侧**树形引导线**（竖线 + 每项前横枝，与角色与权限环节子卡片一致）；每项 **`.problem-detail-core-business-object-design-item`** 内为一张对象卡片（`buildEntityCardHtml(e, { titlePrefix: '对象：', roleTag: e.object_role })`）。
 - 无 entities 时仅输出「核心业务对象设计」卡片，内容区占位「该环节暂无业务对象数据」。
 
@@ -348,4 +348,4 @@
 - **解析调试**：将模块内 `CORE_BUSINESS_OBJECT_LOG` 设为 `true`，可在控制台看到 `parseCoreBusinessObjectModel` 的解析步骤与识别到的格式（单环节/全局 entities/环节数组）。
 - **实体结构扩展**：若 LLM 输出增加新字段（如 `indexes`、`constraints`），只需在 `buildEntityCardHtml` 中增加对应区块与表格/列表渲染；解析层对未知字段不做校验，会保留在 JSON 中。
 - **全局一次性推演**：若产品上改为「全流程一次推演」而非按环节，可保留 `generateCoreBusinessObjectSessions` 返回单元素 session，并在 main.js 中只调用一次 `generateCoreBusinessObjectForStep`（或新增 `generateCoreBusinessObjectGlobal`），解析层已支持「仅含 entities 的对象」并归一为全局环节。
-- **样式**：所有 class 均带 `problem-detail-core-business-object-*` 或 `problem-detail-card-core-business-*` 前缀，便于在 `styles.css` 中单独维护或与角色权限卡片风格统一。关键样式：局部 ITGap 与核心业务对象设计标题栏（明黄底 #ffeb3b、深蓝字 #1a237e）；对象类型分组栏、对象卡片标题（明黄字 #ffeb3b）；对象卡片内子卡片标题与角色与权限「过去操作」一致（#5dc9b4、0.78rem）；字段定义表淡灰线、数据类型列与设计意图列；树形引导线（`.problem-detail-core-business-object-design-list` + `.problem-detail-core-business-object-design-item::before`）。
+- **样式**：所有 class 均带 `problem-detail-core-business-object-*` 或 `problem-detail-card-core-business-*` 前缀，便于在 `styles.css` 中单独维护或与角色权限卡片风格统一。关键样式：局部 ITGap 与核心业务对象设计标题栏（明黄底 #ffeb3b、深蓝字 #1a237e）；对象类型分组栏、对象卡片标题（明黄字 #ffeb3b）；对象卡片内子卡片标题与角色与权限「过去操作」一致（#5dc9b4、0.78rem）；字段定义表淡灰线、数据类型列与设计意图列；树形引导线（`.problem-detail-core-business-object-design-list` + `.problem-detail-core-business-object-design-item::before`）。**个数标注**：标题与「N个对象」之间用分割线（`.problem-detail-core-business-object-count-sep`，字符 `｜`，左右留白、半透明）；个数文案使用 `.problem-detail-core-business-object-count-tag`（略小字号、同色）。
