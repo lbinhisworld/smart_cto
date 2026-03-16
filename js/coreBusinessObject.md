@@ -123,6 +123,7 @@
 - **单环节格式**：`parsed` 为对象，且同时具备 `entities`（非空数组）与（`step_name` 或 `step_id` 或 `stage_name`）→ 视为单环节结果，返回 `[parsed]`（即「环节数组」仅含一项）。
 - **全局 entities 格式**：`parsed` 为对象，具备 `entities`（非空数组），但不具备 step/stage 信息 → 归一为 `[{ stage_name: '全局', step_name: '全局', entities: parsed.entities }]` 返回。
 - **环节数组格式**：`parsed` 为数组，且首项为对象且含 `entities` 数组 → 直接返回 `parsed`。
+- **严格提示词格式**（单对象或数组且首项含 `business_objects`）：将 `business_objects` 映射为 `entities`（`object_name`→`entity_name`、`key_attributes`→`fields`、`lifecycle_machine`→`state_machine`、`associations`→`relations`），并**保留 `object_role`** 到每个实体；环节对象保留 `local_gap_resolved` 等字段。返回 `[normalized]`。
 
 其他情况返回 `[]`。
 
@@ -166,8 +167,9 @@
 | 字段 | 说明 | 备注 |
 |------|------|------|
 | `entity_name` / `entityName` / `name` | 对象名称 | 如订单、合同、任务单 |
-| `description` | 对象说明 | 可选，支持 Markdown 渲染 |
-| `fields` | 字段定义数组 | 每项：`field_name`/`fieldName`/`name`、`type`、`description` |
+| `description` | 对象说明 | 可选，支持 Markdown 渲染；工作区对象卡片内容区**不展示**此块 |
+| **`object_role`** | 对象类型说明 | 严格格式解析时保留（环节主产出/关联引用/过程记录）；用于分组与标题旁标签 |
+| `fields` | 字段定义数组 | 每项：`field_name`/`fieldName`/`name`、`type`、`description`（展示时表头为「设计意图」，单元格去「设计意图：」前缀） |
 | `state_machine` / `stateMachine` | 状态机数组 | 每项：`state`/`name`、`description`、`transitions`（下一状态数组） |
 | `relations` | 关联对象数组 | 每项：`target_entity`/`targetEntity`、`relation_type`/`relationType`（如 1:1、1:n、n:1） |
 
@@ -197,21 +199,26 @@
 
 用于实体「说明」等单值字段。
 
-### 7.2 单实体卡片：`buildEntityCardHtml(entity)`
+### 7.2 单实体卡片：`buildEntityCardHtml(entity, opts)`
 
-- **入参**：单个实体对象（含 `entity_name`、`description`、`fields`、`state_machine`、`relations`）。
-- **字段名兼容**：同时支持 snake_case（`entity_name`、`state_machine`）与 camelCase（`entityName`、`stateMachine`）。
+- **入参**：单个实体对象（含 `entity_name`、`fields`、`state_machine`、`relations`、可选 `object_role`）；`opts.titlePrefix`（如 `'对象：'`）、`opts.roleTag`（对象类型说明，用于标题右侧标签）。
+- **字段名兼容**：同时支持 snake_case 与 camelCase。
 - **结构**：
-  - 卡片标题：实体名称。
-  - 卡片主体（默认折叠）：说明（若有）→ 字段定义（表格：字段名、类型、说明）→ 状态机（列表：状态名、说明、transitions）→ 关联对象（列表：目标实体、关系类型）。
-- **空数据**：无 fields/state_machine/relations 时对应区块不输出。
-- **样式类**：`problem-detail-card-core-business-entity`、`problem-detail-core-business-object-section`、`problem-detail-core-business-object-table`、`problem-detail-core-business-object-list` 等，便于与现有 styles.css 统一或扩展。
+  - 卡片标题：图标（📦）+ 标题文本（`titlePrefix + 名称`，无 prefix 时仅名称）+ 可选**圆角矩形标签**（`roleTag`，即 object_role）+ 折叠箭头。标题字体在工作区「核心业务对象设计」内为**明黄色**（与局部 ITGap 标题栏底色一致）。
+  - 卡片主体（默认折叠）：**不展示「说明」**；仅三块子卡片**垂直串列**：**字段定义**（表格）、**状态机**（列表）、**关联对象**（列表）。子卡片标题样式与角色与权限「过去操作」一致（`.problem-detail-role-card-section-title`：0.78rem、#5dc9b4）。
+- **字段定义表格**：表头为「字段名」「类型」「**设计意图**」；单元格中若 `description` 以「设计意图：」或「设计意图:」开头则去前缀后展示，否则原样展示；表格采用**淡灰色表格线**（`rgba(160,160,160,0.45)`），`border-collapse: collapse`。
+- **空数据**：无 fields/state_machine/relations 时对应子卡片仍输出，内容为占位「—」。
+- **样式类**：`problem-detail-card-core-business-entity`、`problem-detail-core-business-entity-subcard`、`problem-detail-core-business-entity-role-tag`、`problem-detail-core-business-object-table` 等。
 
 ### 7.3 单环节视图：`buildCoreBusinessObjectStepViewHtml(match)`
 
-- **入参**：单个环节对象 `match`，含 `entities` 数组。
-- 若无 `entities` 或为空，返回占位「该环节暂无业务对象数据」。
-- 否则对每个实体调用 `buildEntityCardHtml(e)`，拼接后包在 `problem-detail-core-business-object-view-entities` 容器内。
+- **入参**：单个环节对象 `match`，含 `local_gap_resolved`、`entities`（归一后含 `object_role`）。
+- **视图结构**（同等级两块卡片）：
+  1. **局部 ITGap 解决思路**（`problem-detail-card-core-business-local-gap`）：标题栏**明黄底**（#ffeb3b）、**深蓝字**（#1a237e）；内容区不设独立背景，内容字体明黄色、比标题小一号；展示 `local_gap_resolved`。
+  2. **核心业务对象设计**（`problem-detail-card-core-business-design`）：**可折叠**，标题栏样式与局部 ITGap 一致（明黄底深蓝字）。展开后内容为 **`.problem-detail-core-business-object-design-groups`**：
+     - **按 object_role 分组的一级可折叠栏目**（`problem-detail-card-core-business-design-group`）：每栏目标题为该类型说明（object_role），样式同 ITGap 标题栏；点击展开后为该类型下的对象卡片列表。
+     - 列表容器 **`.problem-detail-core-business-object-design-list`**：**垂直排列**，左侧**树形引导线**（竖线 + 每项前横枝，与角色与权限环节子卡片一致）；每项 **`.problem-detail-core-business-object-design-item`** 内为一张对象卡片（`buildEntityCardHtml(e, { titlePrefix: '对象：', roleTag: e.object_role })`）。
+- 无 entities 时仅输出「核心业务对象设计」卡片，内容区占位「该环节暂无业务对象数据」。
 
 ### 7.4 节点/环节卡片列表：`buildCoreBusinessObjectNodeCardsHtml(model)`
 
@@ -293,7 +300,7 @@
 | `buildCoreBusinessObjectNodeCardsHtml(model)` | 将解析后的模型数组渲染为环节/实体卡片列表 HTML |
 | `buildCoreBusinessObjectStepViewHtml(match)` | 将单个环节对象渲染为实体卡片视图 HTML |
 | `formatCoreBusinessObjectField(val)` | 将字段值渲染为 HTML（字符串/Markdown/对象） |
-| `buildEntityCardHtml(entity)` | 将单个实体对象渲染为一张实体卡片 HTML |
+| `buildEntityCardHtml(entity, opts)` | 将单个实体对象渲染为一张实体卡片 HTML；opts 含 titlePrefix、roleTag |
 | `buildCoreBusinessObjectContextJson(item, valueStream, getLatestConfirmedRolePermissionContent)` | 构建任务确认时的上下文 JSON |
 | `executeCoreBusinessObjectTaskOnConfirm(item, valueStream, callbacks)` | 执行任务确认后的推送与 session 生成逻辑，返回结果或错误信息 |
 | `buildCoreBusinessObjectSessionsBlockHtml(sessions, timestamp, deleteIcon)` | 生成聊天区 session 确认内容块 HTML |
@@ -340,4 +347,4 @@
 - **解析调试**：将模块内 `CORE_BUSINESS_OBJECT_LOG` 设为 `true`，可在控制台看到 `parseCoreBusinessObjectModel` 的解析步骤与识别到的格式（单环节/全局 entities/环节数组）。
 - **实体结构扩展**：若 LLM 输出增加新字段（如 `indexes`、`constraints`），只需在 `buildEntityCardHtml` 中增加对应区块与表格/列表渲染；解析层对未知字段不做校验，会保留在 JSON 中。
 - **全局一次性推演**：若产品上改为「全流程一次推演」而非按环节，可保留 `generateCoreBusinessObjectSessions` 返回单元素 session，并在 main.js 中只调用一次 `generateCoreBusinessObjectForStep`（或新增 `generateCoreBusinessObjectGlobal`），解析层已支持「仅含 entities 的对象」并归一为全局环节。
-- **样式**：所有 class 均带 `problem-detail-core-business-object-*` 或 `problem-detail-card-core-business-*` 前缀，便于在 `styles.css` 中单独维护或与角色权限卡片风格统一。
+- **样式**：所有 class 均带 `problem-detail-core-business-object-*` 或 `problem-detail-card-core-business-*` 前缀，便于在 `styles.css` 中单独维护或与角色权限卡片风格统一。关键样式：局部 ITGap 与核心业务对象设计标题栏（明黄底 #ffeb3b、深蓝字 #1a237e）；对象类型分组栏、对象卡片标题（明黄字 #ffeb3b）；对象卡片内子卡片标题与角色与权限「过去操作」一致（#5dc9b4、0.78rem）；字段定义表淡灰线、设计意图列；树形引导线（`.problem-detail-core-business-object-design-list` + `.problem-detail-core-business-object-design-item::before`）。

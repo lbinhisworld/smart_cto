@@ -1366,6 +1366,9 @@ body {
   user-select: none;
   transition: background 0.2s;
 }
+.problem-detail-role-card-header .problem-detail-role-card-header-title {
+  color: #ffeb3b;
+}
 .problem-detail-role-card-header:hover {
   background: rgba(88, 166, 255, 0.38);
 }
@@ -4239,6 +4242,232 @@ body {
 .problem-detail-card-requirement-logic .problem-detail-card-header {
   background: rgba(63, 185, 80, 0.18);
   border-bottom-color: rgba(63, 185, 80, 0.35);
+}
+
+/* 核心业务对象推演 - 局部ITGap 解决思路：标题栏明黄底深蓝字；内容区无独立背景，字体为明黄色、比标题小一号 */
+.problem-detail-card-core-business-local-gap .problem-detail-card-header {
+  background: #ffeb3b;
+  border-bottom-color: rgba(180, 160, 0, 0.4);
+}
+.problem-detail-card-core-business-local-gap .problem-detail-card-header .problem-detail-card-header-title {
+  color: #1a237e;
+  font-weight: 600;
+}
+.problem-detail-card-core-business-local-gap .problem-detail-card-header:hover {
+  background: #fff176;
+}
+.problem-detail-card-core-business-local-gap .problem-detail-card-body {
+  font-size: 1rem;
+  color: #ffeb3b;
+}
+.problem-detail-card-core-business-local-gap .problem-detail-card-body .markdown-body,
+.problem-detail-card-core-business-local-gap .problem-detail-card-body .problem-detail-core-business-object-field-content {
+  font-size: 1rem;
+  color: #ffeb3b;
+}
+/* 与「核心业务对象推演」tabs 标题栏字号一致 */
+.problem-detail-card-core-business-local-gap .problem-detail-card-header .problem-detail-card-header-title {
+  font-size: 0.9rem;
+}
+
+/* 核心业务对象推演 view：局部 ITGap 卡片下边缘与下一卡片之间的间隔 */
+.problem-detail-core-business-object-view-local-gap {
+  margin-bottom: 1rem;
+}
+
+/* 核心业务对象设计卡片：标题栏与局部 ITGap 解决思路一致（明黄底深蓝字），可折叠 */
+.problem-detail-card-core-business-design .problem-detail-card-header {
+  background: #ffeb3b;
+  border-bottom-color: rgba(180, 160, 0, 0.4);
+}
+.problem-detail-card-core-business-design .problem-detail-card-header .problem-detail-card-header-title {
+  color: #1a237e;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.problem-detail-card-core-business-design .problem-detail-card-header:hover {
+  background: #fff176;
+}
+
+/* 核心业务对象设计：一级可折叠栏目（按 object_role 分组）+ 内容区垂直列表与树形引导线 */
+.problem-detail-core-business-object-view-design {
+  margin-bottom: 0.5rem;
+}
+.problem-detail-core-business-object-design-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.problem-detail-card-core-business-design-group .problem-detail-card-header {
+  background: #ffeb3b;
+  border-bottom-color: rgba(180, 160, 0, 0.4);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+.problem-detail-card-core-business-design-group .problem-detail-card-header .problem-detail-card-header-title {
+  color: #1a237e;
+  font-weight: 600;
+}
+.problem-detail-card-core-business-design-group .problem-detail-card-header:hover {
+  background: #fff176;
+}
+.problem-detail-core-business-object-design-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  position: relative;
+  padding: 0.75rem 0 0.75rem 1rem;
+  margin-left: 0.5rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+.problem-detail-core-business-object-design-item {
+  position: relative;
+  margin-left: 0;
+}
+.problem-detail-core-business-object-design-item .problem-detail-card-core-business-entity {
+  background: rgba(0, 0, 0, 0.15);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+.problem-detail-core-business-object-design-list .problem-detail-card-core-business-entity .problem-detail-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.28);
+  border-bottom: 1px solid var(--border);
+}
+.problem-detail-core-business-object-design-list .problem-detail-card-core-business-entity .problem-detail-card-header:hover {
+  background: rgba(88, 166, 255, 0.38);
+}
+.problem-detail-core-business-object-design-list .problem-detail-card-core-business-entity .problem-detail-card-header .problem-detail-card-header-title {
+  color: #ffeb3b;
+  flex: 1;
+  min-width: 0;
+}
+.problem-detail-core-business-object-design-item::before {
+  content: '';
+  position: absolute;
+  left: -1rem;
+  top: 0.875rem;
+  width: 0.75rem;
+  height: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
+
+/* 核心业务对象推演 view：对象卡片水平罗列 */
+.problem-detail-core-business-object-view-entities-horizontal {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+.problem-detail-core-business-object-view-entities-horizontal .problem-detail-card-core-business-entity {
+  flex: 0 1 auto;
+  min-width: 12rem;
+  max-width: 22rem;
+}
+
+/* 对象卡片标题栏：与角色与权限模型推演中的角色卡片标题栏一致，并带核心对象图标 */
+.problem-detail-core-business-object-view-entities-horizontal .problem-detail-card-core-business-entity .problem-detail-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.28);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.problem-detail-core-business-object-view-entities-horizontal .problem-detail-card-core-business-entity .problem-detail-card-header:hover {
+  background: rgba(88, 166, 255, 0.38);
+}
+.problem-detail-core-business-object-view-entities-horizontal .problem-detail-card-core-business-entity .problem-detail-card-header .problem-detail-card-header-title {
+  color: var(--accent);
+  flex: 1;
+  min-width: 0;
+}
+.problem-detail-core-business-entity-header-icon {
+  flex-shrink: 0;
+  width: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+  opacity: 0.95;
+}
+
+/* 对象名称右侧的类型说明标签（object_role）：圆角矩形 */
+.problem-detail-core-business-entity-role-tag {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #1a237e;
+  background: rgba(255, 235, 59, 0.85);
+  border-radius: 6px;
+  border: 1px solid rgba(180, 160, 0, 0.35);
+  margin-left: 0.35rem;
+}
+
+/* 对象卡片内 4 个子卡片：说明、字段定义、状态机、关联对象（标题与角色与权限「过去操作」一致） */
+.problem-detail-core-business-entity-sections {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+}
+.problem-detail-core-business-entity-subcard {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.problem-detail-core-business-entity-subcard .problem-detail-role-card-section-title {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #5dc9b4;
+}
+.problem-detail-core-business-entity-subcard-body {
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-table {
+  font-size: 0.82rem;
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid rgba(160, 160, 160, 0.45);
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-table th,
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-table td {
+  border: 1px solid rgba(160, 160, 160, 0.45);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-table thead th {
+  background: rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-list-item {
+  margin: 0.15rem 0;
 }
 
 .problem-detail-card-header-title {
