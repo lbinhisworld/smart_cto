@@ -69,7 +69,9 @@
 
 **System Prompt 要点**：角色为需求分析专家；输入为四类沟通历史上下文；Task Goal 为推导支撑各环节运行的核心业务对象，**特别注意**一个环节可能涉及多个对象（新生成单据、被引用主数据、过程记录），需拆解出所有原子化对象并解决标注的 IT Gap；Core Requirement 含对象分类、属性对冲设计、**严谨数据类型**（String/Decimal/Date/DateTime/Boolean/Enum/Array）、状态机建模、关系图谱；Output Format 为严格 JSON 数组（当前环节仅一个元素），不要多余解释文字。
 
-**输出结构（单元素数组）**：每元素含 `stage_name`、`local_gap_resolved`、`business_objects`（每项含 `object_name`、`object_usage`（该对象的主要用途说明）、`object_role`（环节主产出/关联引用/过程记录）、`is_newly_created`、`category`、`is_global_shared`、`key_attributes`（每项含 `field`、`data_type`、`purpose`）、`lifecycle_machine`、`associations`、`global_integration_note`）、`multi_object_interaction`（本环节多对象协同逻辑）。
+**提示词迭代优化要点（设计逻辑）**：提示词多次迭代的核心意图可概括为四点。（1）**强溯源闭环**：对象用途必须对应并引用前期分析中的 IT Gap，采用「业务功能 + 痛点对冲 + 设计思路」三段式，确保设计有据可依、杜绝无效建模。（2）**多对象协同与引用一致性**：明确环节主产出（Primary Output）、关联引用、过程记录三重角色，要求关联对象均在文档中有定义，防止「引用孤儿」。（3）**数据分类与高精度建模**：主数据/事务数据/状态数据/配置数据分类及 Decimal、Enum 等字段类型约定，为后续数据库设计提供准开发级底座。（4）**中文语境与架构决策**：枚举与定义全面汉化，将设计思路植入 object_usage，使输出 JSON 兼具数据模型与包含 ADR 的业务逻辑规格书属性。
+
+**输出结构（单元素数组）**：每元素含 `stage_name`、`local_gap_resolved`、`business_objects`（每项含 `object_name`、`object_usage`（业务功能 / 对冲Gap / 设计思路 三段式）、`object_role`（环节主产出/关联引用/过程记录）、`is_newly_created`、`category`、`is_global_shared`、`key_attributes`（每项含 `field`、`data_type`、`purpose`）、`lifecycle_machine`、`associations`、`global_integration_note`）、`multi_object_interaction`（本环节多对象协同逻辑）。
 
 **返回**：`fetchDeepSeekChat([...])` 的 Promise。main.js 解析 `content` 为单对象（数组取首项）后写入 `session.coreBusinessObjectJson`，并展示在工作区对应环节的「核心业务对象推演」子卡片 **json** 页（默认展示 json 页）。
 

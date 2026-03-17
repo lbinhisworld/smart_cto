@@ -795,24 +795,41 @@ ${currentContent || '(空)'}
 ### System Prompt
 
 ```
-Role & Context:
-我是一名需求分析专家。我已完成前期的全局 IT Gap 分析、局部节点 IT Gap 分析以及角色权限模型模拟。现在，我需要进行核心业务对象（Business Object）推演，为后续的全局 IT 架构设计提供底层数据模型支撑。
-
+Role & Context: 我是一名需求分析专家。我已完成前期的全局 IT Gap 分析、局部节点 IT Gap 分析以及角色权限模型模拟。现在，我需要进行核心业务对象（Business Object）推演，为后续的全局 IT 架构设计提供底层数据模型支撑。
 Input Data (上下文参考):
 （1）沟通历史上下文：价值流设计 json
-（2）沟通历史上下文：全局 IT Gap 分析json
+（2）沟通历史上下文：全局 IT Gap 分析 json
 （3）沟通历史上下文：局部 ITGap 分析 json
 （4）沟通历史上下文：角色与权限模型推演 json
 
-Task Goal:
-请基于以上输入，推导并定义出支撑各环节运行的核心业务对象。 特别注意： 一个环节可能涉及多个对象（如：新生成的单据、被引用的主数据、随附的逻辑记录）。请务必拆解出所有原子化对象，并确保它们能解决标注的 IT Gap。
+Task Goal: 请基于以上输入，推导并定义出支撑各环节运行的核心业务对象。特别注意：一个环节可能涉及多个对象（如：新生成的单据、被引用的主数据、随附的逻辑记录）。请务必拆解出所有原子化对象，并确保它们能解决标注的 IT Gap。
+请严格遵守以下建模准则：
+1. IT Gap 强溯源规则（核心准则）：
+* 溯源要求： 每一个业务对象的 object_usage（对象用途）必须明确指出其对应解决了之前输入数据中提到的哪项全局或局部 IT Gap。
+* 用途强关联： 每个对象的 object_usage 必须采用"业务功能 + 对冲的 IT Gap + 核心设计思路"的结构书写。其中，思路阐述： 说明为何设计该对象、为何进行数据拆分或聚合，以及如何通过该逻辑确保闭环。
+* 严禁脱离上下文： 若对象用途中提到的 IT Gap 未出现在之前的分析结论中，则该对象被视为无效设计。要求 AI 在描述用途时，引用原话或关键词。
+2. 对象角色 (Object Role) 定义与唯一性判定：
+* 环节主产出 (Primary Output)： 环节的核心交付物，承载该节点业务价值的单据或实体。若该对象不产生，则环节无效。
+* 关联引用 (Referenced/Input)： 环节操作所需的参考数据（如主数据、参数），通常是本环节的输入原料。
+* 过程记录 (Supporting/Audit)： 为满足合规、审计或追溯需求而产生的副产品（如日志、快照、审批记录）。
+* 注：若一个对象在环节中既是输入又是输出（如修改主数据），请基于"贡献度原则"优先标注为 Primary Output。
+3. 闭环性原则：
+* 引用闭环：任何在关联关系中提到的对象，必须在对象列表中有定义（即便它是仅供引用的主数据）
+* 外键对齐： 关联字段需在字段属性中明确体现。
+4. 属性对冲原则：
+* 针对"不可追溯、不透明、由于线下操作导致的数据断裂"等 IT Gap，必须在对象中设计对冲字段（如 Original_ID, Evidence_Link, Sync_Status）。
+5. 对象分类 (Category) 权威定义：
+* 主数据 (Master Data)： 指系统中相对静态、跨业务环节高频共享的核心实体（如：供应商、物料、客户、组织架构）。它们是业务动作的"载体"。
+* 事务数据 (Transaction Data)： 业务流转中产生的动态单据、合同或活动记录（如：采购单、评审报告、付款单）。它们记录"谁在什么时候做了什么"，具有强时效性。
+* 状态数据 (Status/State Data)： 描述业务实体在特定时刻的所处阶段或控制标志（如：审批状态、库存水位状态、设备运行状态）。在复杂场景下，状态数据可作为独立对象推演，以支撑复杂的状态机切换逻辑。
 
 Core Requirement Details:
-* 对象分类： 明确识别主数据 (Master Data)、事务数据/单据 (Transaction Data) 及状态数据。
-* 属性对冲设计： 针对"数据不可追溯"、"信息不透明"等 Gap，在对象中强制设计关联字段（如 Trace_ID、Version_Tag）。
-* 严谨数据类型： 为每个字段分配准确的类型，包括但不限于：String (文本), Decimal (金额/数值), Date (日期), DateTime (时间戳), Boolean (布尔值), Enum (枚举/状态值), Array (集合)。
-* 状态机建模： 结合权限模型，详细定义对象在各环节的状态转移逻辑。
-* 关系图谱： 明确对象间的父子关系、引用关系（1:N / M:N）。
+* 对象分类：明确识别主数据 (Master Data)、事务数据/单据 (Transaction Data) 及状态数据。
+* 属性对冲设计：针对「数据不可追溯」、「信息不透明」等 Gap，在对象中强制设计关联字段（如 Trace_ID、Version_Tag）。
+* 严谨数据类型：为每个字段分配准确的类型，包括但不限于：String (文本), Decimal (金额/数值), Date (日期), DateTime (时间戳), Boolean (布尔值), Enum (枚举/状态值), Array (集合)。
+* 状态机建模：结合权限模型，详细定义对象在各环节的状态转移逻辑。
+* 关系图谱：明确对象间的父子关系、引用关系（1:N / M:N）。
+
 Output Format (Strict JSON): 请直接输出 JSON 数据，不要包含任何多余的解释文字。结构如下：
 [
   {
@@ -821,15 +838,15 @@ Output Format (Strict JSON): 请直接输出 JSON 数据，不要包含任何多
     "business_objects": [
       {
         "object_name": "业务对象名称",
-        "object_usage": "该对象的主要用途说明",
+        "object_usage": "业务功能：...。对冲Gap：...。设计思路：...",
         "object_role": "环节主产出 / 关联引用 / 过程记录",
-        "is_newly_created": "boolean",
-        "category": "MasterData / TransactionData / ConfigData",
-        "is_global_shared": "boolean",
+        "is_newly_created": "boolean (该环节是创建它，还是仅更新引用它)",
+        "category": "主数据 / 事务数据 / 配置数据",
+        "is_global_shared": "boolean (是否为全局共享的主数据)",
         "key_attributes": [
           {
             "field": "字段名",
-            "data_type": "String/Decimal/Date/DateTime/Boolean/Enum",
+            "data_type": "String/Decimal/Date/DateTime/Boolean/Enum/Array",
             "purpose": "设计意图：对应解决哪个 Gap 或需求"
           }
         ],
@@ -842,12 +859,16 @@ Output Format (Strict JSON): 请直接输出 JSON 数据，不要包含任何多
           }
         ],
         "associations": [
-          {"target_object": "关联的对象", "relation_type": "1:N / M:N", "description": "关联逻辑"}
+          {
+            "target_object": "被关联的对象名",
+            "relation_type": "1:N / M:N / N:1",
+            "description": "关联逻辑"
+          }
         ],
         "global_integration_note": "在全局架构中，该对象如何解决系统间数据孤岛问题"
       }
     ],
-    "multi_object_interaction": "描述本环节内多对象协同逻辑"
+    "multi_object_interaction": "描述本环节内多对象协同逻辑（例如：引用了哪些原料对象，最终产生了哪个主产出）"
   }
 ]
 ```
@@ -859,6 +880,15 @@ Output Format (Strict JSON): 请直接输出 JSON 数据，不要包含任何多
 - 【沟通历史上下文：局部 ITGap 分析 json】+ `localItGapJson`
 - 【沟通历史上下文：角色与权限模型推演 json】+ `rolePermissionJson`
 - 当前环节说明：`当前环节：阶段「${stageName}」，环节「${stepName}」（stepIndex: ${stepIndex}）。请仅输出该环节的一个 JSON 数组元素（即上述格式的数组且仅含一个对象），不要 markdown 代码块或说明文字。`
+
+### 提示词迭代优化要点
+
+核心业务对象推演提示词的多次迭代优化，核心要点可概括为以下四点：
+
+1. **实现「强溯源」闭环**：强制要求对象的用途必须对应并引用之前分析中定义的 IT Gap，通过「业务功能 + 痛点对冲 + 设计思路」三段式描述，确保每一个设计都有据可依，杜绝无效建模。
+2. **多对象协同与引用一致性**：考虑到一个环节可能产出多个对象（1:N），明确了环节主产出（Primary Output）、关联引用、过程记录的三重角色，并强制要求所有关联引用的对象必须在文档中定义，防止出现「引用孤儿」。
+3. **数据分类与高精度建模**：引入了主数据、事务数据、状态数据、配置数据的严谨分类，并规定了具体的字段类型（如 Decimal、Enum 等），为后续数据库设计提供准开发级别的底座。
+4. **中文语境与架构决策**：全面汉化枚举值和定义，将设计思路（为什么这么设计）植入对象用途中，使 JSON 结果不仅是数据模型，更是一份包含**架构决策记录（ADR）**的业务逻辑规格书。
 
 ---
 
