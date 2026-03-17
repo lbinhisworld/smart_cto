@@ -67,11 +67,11 @@
 
 **入参**：四类上下文的 JSON 字符串（价值流、全局 ITGap、局部 ITGap、角色与权限），以及当前环节的 `stepName`、`stageName`、`stepIndex`。
 
-**System Prompt 要点**：角色为需求分析专家；输入为四类沟通历史上下文；Task Goal 为推导支撑各环节运行的核心业务对象，**特别注意**一个环节可能涉及多个对象（新生成单据、被引用主数据、过程记录），需拆解出所有原子化对象并解决标注的 IT Gap；Core Requirement 含对象分类、属性对冲设计、**严谨数据类型**（String/Decimal/Date/DateTime/Boolean/Enum/Array）、状态机建模、关系图谱；Output Format 为严格 JSON 数组（当前环节仅一个元素），不要多余解释文字。
+**System Prompt 要点**：角色为需求分析专家；输入为四类沟通历史上下文；Task Goal 为推导支撑各环节运行的核心业务对象，**特别注意**一个环节可能涉及多个对象（新生成单据、被引用主数据、过程记录），需拆解出所有原子化对象并解决标注的 IT Gap。**五大建模准则**：1）IT Gap 强溯源（object_usage 须引用原话/关键词、采用「业务功能 + 对冲的 IT Gap + 核心设计思路」结构）；2）对象角色（环节主产出/关联引用/过程记录，贡献度原则）；3）闭环性（引用闭环、外键对齐）；4）属性对冲（针对数据断裂等 Gap 设计对冲字段）；5）对象分类权威定义（主数据/事务数据/状态数据）。Core Requirement Details 含对象分类、属性对冲设计、严谨数据类型（String/Decimal/Date/DateTime/Boolean/Enum/Array）、状态机建模、关系图谱；Output Format 为严格 JSON 数组（当前环节仅一个元素），不要多余解释文字。
 
 **提示词迭代优化要点（设计逻辑）**：提示词多次迭代的核心意图可概括为四点。（1）**强溯源闭环**：对象用途必须对应并引用前期分析中的 IT Gap，采用「业务功能 + 痛点对冲 + 设计思路」三段式，确保设计有据可依、杜绝无效建模。（2）**多对象协同与引用一致性**：明确环节主产出（Primary Output）、关联引用、过程记录三重角色，要求关联对象均在文档中有定义，防止「引用孤儿」。（3）**数据分类与高精度建模**：主数据/事务数据/状态数据/配置数据分类及 Decimal、Enum 等字段类型约定，为后续数据库设计提供准开发级底座。（4）**中文语境与架构决策**：枚举与定义全面汉化，将设计思路植入 object_usage，使输出 JSON 兼具数据模型与包含 ADR 的业务逻辑规格书属性。
 
-**输出结构（单元素数组）**：每元素含 `stage_name`、`local_gap_resolved`、`business_objects`（每项含 `object_name`、`object_usage`（业务功能 / 对冲Gap / 设计思路 三段式）、`object_role`（环节主产出/关联引用/过程记录）、`is_newly_created`、`category`、`is_global_shared`、`key_attributes`（每项含 `field`、`data_type`、`purpose`）、`lifecycle_machine`、`associations`、`global_integration_note`）、`multi_object_interaction`（本环节多对象协同逻辑）。
+**输出结构（单元素数组）**：每元素含 `stage_name`、`local_gap_resolved`、`business_objects`（每项含 `object_name`、`object_usage`（**格式**：「业务功能：...。对冲Gap：...。设计思路：...」）、`object_role`（环节主产出/关联引用/过程记录）、`is_newly_created`、`category`（主数据/事务数据/配置数据）、`is_global_shared`（boolean）、`key_attributes`（每项含 `field`、`data_type`、`purpose`）、`lifecycle_machine`、`associations`、`global_integration_note`）、`multi_object_interaction`（本环节多对象协同逻辑，例如引用了哪些原料对象、产生了哪个主产出）。
 
 **返回**：`fetchDeepSeekChat([...])` 的 Promise。main.js 解析 `content` 为单对象（数组取首项）后写入 `session.coreBusinessObjectJson`，并展示在工作区对应环节的「核心业务对象推演」子卡片 **json** 页（默认展示 json 页）。
 
@@ -125,7 +125,7 @@
 - **单环节格式**：`parsed` 为对象，且同时具备 `entities`（非空数组）与（`step_name` 或 `step_id` 或 `stage_name`）→ 视为单环节结果，返回 `[parsed]`（即「环节数组」仅含一项）。
 - **全局 entities 格式**：`parsed` 为对象，具备 `entities`（非空数组），但不具备 step/stage 信息 → 归一为 `[{ stage_name: '全局', step_name: '全局', entities: parsed.entities }]` 返回。
 - **环节数组格式**：`parsed` 为数组，且首项为对象且含 `entities` 数组 → 直接返回 `parsed`。
-- **严格提示词格式**（单对象或数组且首项含 `business_objects`）：将 `business_objects` 映射为 `entities`（`object_name`→`entity_name`、`object_usage` 保留、`key_attributes`→`fields`（`field`/`field_name`、`data_type`/`type`、`purpose`/`description`）、`lifecycle_machine`→`state_machine`、`associations`→`relations`），并**保留 `object_role`** 到每个实体；环节对象保留 `local_gap_resolved` 等字段。返回 `[normalized]`。
+- **严格提示词格式**（单对象或数组且首项含 `business_objects`）：将 `business_objects` 映射为 `entities`（`object_name`→`entity_name`、`object_usage` 保留、**`category`、`is_global_shared` 保留**、`key_attributes`→`fields`（`field`/`field_name`、`data_type`/`type`、`purpose`/`description`）、`lifecycle_machine`→`state_machine`、`associations`→`relations`），并**保留 `object_role`** 到每个实体；环节对象保留 `local_gap_resolved` 等字段。返回 `[normalized]`。
 
 其他情况返回 `[]`。
 
@@ -170,8 +170,10 @@
 |------|------|------|
 | `entity_name` / `entityName` / `name` | 对象名称 | 如订单、合同、任务单 |
 | `description` | 对象说明 | 可选，支持 Markdown 渲染；工作区对象卡片内容区**不展示**此块 |
-| **`object_role`** | 对象类型说明 | 严格格式解析时保留（环节主产出/关联引用/过程记录）；用于分组与标题旁标签 |
-| **`object_usage`** | 设计用途 | 严格格式解析时保留（该对象的主要用途说明）；在对象卡片中单独「设计用途」栏目展示 |
+| **`object_role`** | 对象角色说明 | 严格格式解析时保留（环节主产出/关联引用/过程记录）；用于分组与标题栏**角色标签** |
+| **`object_usage`** | 设计用途 | 严格格式解析时保留；**格式**为「业务功能：...。对冲Gap：...。设计思路：...」；在对象卡片「设计用途」栏目内以**表格**展示（项目列：业务功能、对冲 Gap、设计思路；内容列为解析后的三段文本） |
+| **`category`** | 对象类型 | 严格格式解析时保留（主数据/事务数据/配置数据等）；**仅在标题栏以标签展示**，内容区不展示 |
+| **`is_global_shared`** | 是否全局引用数据 | 严格格式解析时保留（boolean）；**仅在标题栏以标签展示**：为 true 时显示「全局引用数据」，为 false 时显示「非全局引用数据」，内容区不展示 |
 | `fields` | 字段定义数组 | 每项：`field_name`/`fieldName`/`name`、`type`/`data_type`（展示时表头为「数据类型」）、`description`（展示时表头为「设计意图」，单元格去「设计意图：」前缀） |
 | `state_machine` / `stateMachine` | 状态机数组 | 每项：`state`/`name`、`description`、`transitions`（下一状态数组） |
 | `relations` | 关联对象数组 | 每项：`target_entity`/`targetEntity`、`relation_type`/`relationType`（如 1:1、1:n、n:1） |
@@ -183,7 +185,7 @@
 `generateCoreBusinessObjectForStepWithStrictPrompt` 要求 LLM 针对**当前环节**仅输出一个元素的 JSON 数组，元素结构为：
 
 - **环节级**：`stage_name`、`local_gap_resolved`（该环节局部 IT Gap 解决思路）、`business_objects`、`multi_object_interaction`（本环节内多对象协同逻辑）。
-- **business_objects[]**：每项含 `object_name`、**`object_usage`**（该对象的主要用途说明）、**`object_role`**（环节主产出 / 关联引用 / 过程记录）、**`is_newly_created`**（该环节是创建还是仅更新引用）、`category`（MasterData / TransactionData / ConfigData）、`is_global_shared`、`key_attributes`（含 `field`、`data_type`（String/Decimal/Date/DateTime/Boolean/Enum 等）、`purpose` 对应解决哪个 Gap 或需求）、`lifecycle_machine`、`associations`、`global_integration_note`。
+- **business_objects[]**：每项含 `object_name`、**`object_usage`**（格式：「业务功能：...。对冲Gap：...。设计思路：...」）、**`object_role`**（环节主产出 / 关联引用 / 过程记录）、**`is_newly_created`**（该环节是创建还是仅更新引用）、**`category`**（主数据 / 事务数据 / 配置数据）、**`is_global_shared`**（boolean）、`key_attributes`（含 `field`、`data_type`（String/Decimal/Date/DateTime/Boolean/Enum/Array）、`purpose`）、`lifecycle_machine`、`associations`、`global_integration_note`。
 
 解析与工作区展示可直接使用该 JSON（或经 `parseCoreBusinessObjectModel` 归一为 6.1/6.2 结构后再渲染）。
 
@@ -204,14 +206,15 @@
 
 ### 7.2 单实体卡片：`buildEntityCardHtml(entity, opts)`
 
-- **入参**：单个实体对象（含 `entity_name`、`fields`、`state_machine`、`relations`、可选 `object_role`、可选 `object_usage`）；`opts.titlePrefix`（如 `'对象：'`）、`opts.roleTag`（对象类型说明，用于标题右侧标签）。
+- **入参**：单个实体对象（含 `entity_name`、`fields`、`state_machine`、`relations`、可选 `object_role`、`object_usage`、`category`、`is_global_shared`）；`opts.titlePrefix`（如 `'对象：'`）、`opts.roleTag`（对象角色说明，用于标题栏标签）。
 - **字段名兼容**：同时支持 snake_case 与 camelCase。
-- **结构**：
-  - 卡片标题：图标（📦）+ 标题文本（`titlePrefix + 名称`，无 prefix 时仅名称）+ 可选**圆角矩形标签**（`roleTag`，即 object_role）+ 折叠箭头。标题字体在工作区「核心业务对象设计」内为**明黄色**（与局部 ITGap 标题栏底色一致）。
-  - 卡片主体（默认折叠）：**不展示「说明」**；四块子卡片**垂直串列**：**设计用途**（展示 `object_usage`，支持 Markdown；无内容时占位「—」）、**字段定义**（表格）、**状态机**（列表）、**关联对象**（列表）。子卡片标题样式与角色与权限「过去操作」一致（`.problem-detail-role-card-section-title`：0.78rem、#5dc9b4）。
-- **字段定义表格**：表头为「字段名」「**数据类型**」（对应 JSON 的 `data_type`）、「设计意图」；单元格中若 `description` 以「设计意图：」或「设计意图:」开头则去前缀后展示，否则原样展示；表格采用**淡灰色表格线**（`rgba(160,160,160,0.45)`），`border-collapse: collapse`。
-- **空数据**：无 设计用途/fields/state_machine/relations 时对应子卡片仍输出，内容为占位「—」。
-- **样式类**：`problem-detail-card-core-business-entity`、`problem-detail-core-business-entity-subcard`、`problem-detail-core-business-entity-role-tag`、`problem-detail-core-business-object-table` 等。
+- **标题栏**：图标（📦）+ 标题文本（`titlePrefix + 名称`）+ **对象类型标签**（`category`，有值时显示，样式 `.problem-detail-core-business-entity-category-tag` 蓝底）+ **全局引用标签**（`is_global_shared` 为 true 时「全局引用数据」、为 false 时「非全局引用数据」，样式 `.problem-detail-core-business-entity-global-tag` 绿底）+ **角色标签**（`roleTag`/object_role，样式 `.problem-detail-core-business-entity-role-tag` 黄底）+ 折叠箭头。**对象类型**与**是否全局引用数据**仅在标题栏以标签展示，内容区不展示。
+- **内容区（默认折叠）**：四块子卡片**垂直串列**：
+  1. **设计用途**：以**表格**展示，表头「项目」「内容」；三行分别为**业务功能**、**对冲 Gap**、**设计思路**，内容由 `parseObjectUsageTriple(object_usage)` 从 `object_usage` 字符串解析得到（格式「业务功能：...。对冲Gap：...。设计思路：...」）；无内容时占位「—」。表格类 `problem-detail-core-business-usage-table`。
+  2. **字段定义**（表格）、**状态机**（列表）、**关联对象**（列表）。
+- **字段定义表格**：表头为「字段名」「数据类型」「设计意图」；单元格中若 `description` 以「设计意图：」开头则去前缀后展示；表格采用淡灰色表格线。
+- **空数据**：无设计用途/fields/state_machine/relations 时对应子卡片仍输出，内容为占位「—」。
+- **样式类**：`problem-detail-card-core-business-entity`、`problem-detail-core-business-entity-subcard`、`problem-detail-core-business-entity-category-tag`、`problem-detail-core-business-entity-global-tag`、`problem-detail-core-business-entity-role-tag`、`problem-detail-core-business-usage-table`、`problem-detail-core-business-object-table` 等。
 
 ### 7.3 单环节视图：`buildCoreBusinessObjectStepViewHtml(match)`
 

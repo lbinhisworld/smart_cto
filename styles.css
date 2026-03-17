@@ -4414,6 +4414,28 @@ body {
 }
 
 /* 对象名称右侧的类型说明标签（object_role）：圆角矩形 */
+.problem-detail-core-business-entity-category-tag {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #0d47a1;
+  background: rgba(187, 222, 251, 0.9);
+  border-radius: 6px;
+  border: 1px solid rgba(25, 118, 210, 0.35);
+  margin-left: 0.35rem;
+}
+.problem-detail-core-business-entity-global-tag {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #1b5e20;
+  background: rgba(200, 230, 201, 0.9);
+  border-radius: 6px;
+  border: 1px solid rgba(76, 175, 80, 0.35);
+  margin-left: 0.35rem;
+}
 .problem-detail-core-business-entity-role-tag {
   flex-shrink: 0;
   padding: 0.15rem 0.5rem;
@@ -4475,6 +4497,24 @@ body {
 }
 .problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-list-item {
   margin: 0.15rem 0;
+}
+
+.problem-detail-core-business-usage-table {
+  margin-top: 0.25rem;
+}
+.problem-detail-core-business-usage-table .problem-detail-core-business-usage-table-label {
+  font-weight: 600;
+  color: var(--text-muted);
+  width: 6rem;
+  vertical-align: top;
+  padding-top: 0.4rem;
+}
+.problem-detail-core-business-usage-table td {
+  vertical-align: top;
+}
+.problem-detail-core-business-usage-table td .problem-detail-core-business-object-field-content,
+.problem-detail-core-business-usage-table td .problem-detail-core-business-object-field-pre {
+  margin: 0;
 }
 
 .problem-detail-card-header-title {
