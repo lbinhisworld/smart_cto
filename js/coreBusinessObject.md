@@ -1,5 +1,7 @@
 # 核心业务对象推演模块（coreBusinessObject.js）详细设计
 
+> 最近更新：2025-03-18。与 main.js、js/communication-history.js 中 task11 流程及过程日志展示一致。
+
 ## 1. 概述
 
 `coreBusinessObject.js` 负责 **核心业务对象推演**（IT 策略规划 task11）的完整链路：按价值流生成推演会话、针对单环节调用大模型、解析模型输出、将解析结果渲染为工作区使用的 HTML，以及**任务确认时的交互逻辑**（构建上下文 JSON、推送过程日志、生成并推送 session 确认内容块）。与主流程的编排（聊天容器重绘、子步骤切换、工作区刷新）解耦，main.js 只负责传入回调并执行 UI 刷新。

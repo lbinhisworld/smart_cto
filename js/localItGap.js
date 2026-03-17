@@ -111,8 +111,8 @@ Output Format (Strict Minified JSON):
     });
   }
 
-  /** 针对单环节调用大模型进行局部 IT Gap 分析 */
-  async function generateLocalItGapAnalysis(stepName, globalItGapJson, fullProcessVsm) {
+  /** 构建单环节局部 IT Gap 分析的真实提交内容（systemPrompt + userContent），与 generateLocalItGapAnalysis 发送的完全一致 */
+  function buildLocalItGapAnalysisFullInput(stepName, globalItGapJson, fullProcessVsm) {
     const systemPrompt = LOCAL_ITGAP_PROMPT.replace(/【替换环节名称】/g, stepName || '当前环节');
     const userContent = `## 全局 ITGap 分析 json
 \`\`\`json
@@ -125,6 +125,16 @@ ${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProce
 \`\`\`
 
 请针对环节「${(stepName || '').replace(/"/g, '\\"')}」进行局部 IT Gap 分析，按 JSON 格式返回。`;
+    return { systemPrompt, userContent };
+  }
+
+  /** 针对单环节调用大模型进行局部 IT Gap 分析；若传入 fullInput 则直接使用，否则按参数构建 */
+  async function generateLocalItGapAnalysis(stepName, globalItGapJson, fullProcessVsm, fullInput) {
+    const systemPrompt = fullInput?.systemPrompt ?? LOCAL_ITGAP_PROMPT.replace(/【替换环节名称】/g, stepName || '当前环节');
+    const userContent = fullInput?.userContent ?? (() => {
+      const built = buildLocalItGapAnalysisFullInput(stepName, globalItGapJson, fullProcessVsm);
+      return built.userContent;
+    })();
     const { content, usage, model, durationMs } = await fetchDeepSeekChat([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userContent },
@@ -323,6 +333,8 @@ ${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProce
     const step = allSteps[nextIndex];
     const stepName = step?.name || `环节${nextIndex + 1}`;
     const getTimeStr = deps.getTimeStr || (() => '');
+    const fullInput = buildLocalItGapAnalysisFullInput(stepName, globalItGap, valueStream);
+    if (typeof deps.pushLocalItGapInputBlock === 'function') deps.pushLocalItGapInputBlock(stepName, nextIndex, fullInput);
     deps.pushAndSaveProblemDetailChat({ role: 'system', content: '正在分析环节【' + stepName + '】', timestamp: getTimeStr() });
     container.innerHTML = '';
     if (typeof deps.renderProblemDetailChatFromStorage === 'function') deps.renderProblemDetailChatFromStorage(container, deps.problemDetailChatMessages);
@@ -333,11 +345,23 @@ ${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProce
     container.appendChild(parsingBlock);
     container.scrollTop = container.scrollHeight;
     try {
-      const { content, usage, model, durationMs } = await generateLocalItGapAnalysis(stepName, globalItGap, valueStream);
+      const { content, usage, model, durationMs } = await generateLocalItGapAnalysis(stepName, globalItGap, valueStream, fullInput);
       parsingBlock.remove();
+      const llmMeta = { usage, model, durationMs };
+      const messages = deps.problemDetailChatMessages;
+      if (Array.isArray(messages) && typeof deps.saveProblemDetailChat === 'function' && item?.createdAt) {
+        for (let idx = messages.length - 1; idx >= 0; idx--) {
+          const m = messages[idx];
+          if (m && m.type === 'localItGapInputBlock' && m.stepIndex === nextIndex) {
+            messages[idx] = { ...m, llmMeta };
+            deps.saveProblemDetailChat(item.createdAt, messages);
+            if (typeof deps.renderProblemDetailHistory === 'function') deps.renderProblemDetailHistory();
+            break;
+          }
+        }
+      }
       let analysisJson = parseLocalItGapFromContent(content);
       if (!Object.values(analysisJson).some((v) => v)) analysisJson = { statusQuo: content || '（解析失败）', itGap3DMap: '', actionableRequirements: '', businessValuePrediction: '' };
-      const llmMeta = { usage, model, durationMs };
       const llmMetaHtml = typeof deps.buildLlmMetaHtml === 'function' ? deps.buildLlmMetaHtml(llmMeta) : '';
       const structuredHtml = buildLocalItGapStructuredHtml(analysisJson);
       const analysisMarkdown = buildLocalItGapMarkdown(analysisJson);
@@ -368,12 +392,9 @@ ${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProce
       <div class="problem-detail-chat-local-itgap-card-meta">${llmMetaHtml}</div>`;
       container.appendChild(cardBlock);
       deps.pushAndSaveProblemDetailChat({ type: 'localItGapAnalysisCard', data: analysisJson, stepName, stepIndex: nextIndex, timestamp: getTimeStr(), confirmed: false, llmMeta });
+      /* 不再推送 localItGapOutputBlock，时间线仅保留带 JSON 与 token/耗时的分析卡片条目 */
       container.scrollTop = container.scrollHeight;
       if (typeof deps.renderProblemDetailContent === 'function') deps.renderProblemDetailContent();
-      container.innerHTML = '';
-      if (typeof deps.renderProblemDetailChatFromStorage === 'function') deps.renderProblemDetailChatFromStorage(container, deps.problemDetailChatMessages);
-      container.scrollTop = container.scrollHeight;
-      if (typeof deps.renderProblemDetailHistory === 'function') deps.renderProblemDetailHistory();
     } catch (err) {
       parsingBlock.remove();
       const errBlock = document.createElement('div');

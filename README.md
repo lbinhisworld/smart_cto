@@ -102,6 +102,9 @@ npx serve .
 | `对话模型管理.md` | 意图类型、过程日志纳入/展示规则、ITGap 流程与代码位置 |
 | `数字化问题跟进阶段设计.md` | 大阶段与任务定义、评价体系、阶段切换与聊天区提示块设计 |
 | `docs/knowledge-base-design.md` | 知识库功能设计（话题、时间线、意图与存储） |
+| `js/coreBusinessObject.md` | 核心业务对象推演模块（task11）设计 |
+| `js/localItGap.md` | 局部 ITGap 分析模块（task9）实现说明 |
+| `js/rolePermission.md` | 角色与权限模型推演模块（task10）实现说明 |
 
 ---
 

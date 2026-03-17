@@ -1712,6 +1712,24 @@ body {
   margin-bottom: 0.75rem;
 }
 
+.problem-detail-chat-local-itgap-io-block .problem-detail-chat-local-itgap-io-title {
+  font-weight: 600;
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.9rem;
+}
+
+.problem-detail-chat-local-itgap-io-block .problem-detail-chat-local-itgap-prompt-pre {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .problem-detail-local-itgap-trigger {
   margin: 1rem;
 }
@@ -2992,9 +3010,32 @@ body {
 }
 
 .problem-detail-history-summary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.72rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.problem-detail-history-summary-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.problem-detail-history-summary-icon svg {
+  display: block;
+}
+
+.problem-detail-history-summary-icon-in {
+  color: #86efac;
+}
+
+.problem-detail-history-summary-icon-out {
+  color: #a5b4fc;
 }
 
 .problem-detail-history-summary-value {
@@ -3007,8 +3048,18 @@ body {
   color: #ffeb3b;
 }
 
-.problem-detail-history-summary-tokens {
+.problem-detail-history-summary-tokens,
+.problem-detail-history-summary-tokens-in,
+.problem-detail-history-summary-tokens-out {
   color: #64b5f6;
+}
+
+.problem-detail-history-summary-tokens-in {
+  color: #86efac;
+}
+
+.problem-detail-history-summary-tokens-out {
+  color: #a5b4fc;
 }
 
 .problem-detail-history-summary-duration {
@@ -3417,32 +3468,59 @@ body {
   color: #64b5f6; /* 明蓝色：token 消耗 */
 }
 
+.problem-detail-history-timeline-token-in,
+.problem-detail-history-timeline-token-out {
+  font-size: 0.68rem;
+  text-align: left;
+}
+
+.problem-detail-history-timeline-token-in {
+  color: #86efac; /* 与顶部输入 token 颜色一致 */
+}
+
+.problem-detail-history-timeline-token-out {
+  color: #a5b4fc; /* 与顶部输出 token 颜色一致 */
+}
+
+.problem-detail-history-timeline-token-in {
+  color: #86efac; /* 输入 token */
+}
+
+.problem-detail-history-timeline-token-out {
+  color: #a5b4fc; /* 输出 token */
+}
+
 .problem-detail-history-timeline-duration {
   color: #fff; /* 白色：耗时 */
 }
 
+/* 时间线标签：每种独立色相以示区隔 */
+/* 输入：绿色系，与确认明显区分 */
 .problem-detail-history-log-type-input {
-  background: rgba(99, 179, 237, 0.25);
-  color: #93c5fd;
-}
-
-.problem-detail-history-log-type-confirm {
-  background: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.4);
   color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.5);
 }
 
 .problem-detail-history-log-type-output {
-  background: rgba(59, 130, 246, 0.25);
-  color: #93c5fd;
+  background: rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+}
+
+/* 确认：蓝紫色系，与输入（绿）明显区分 */
+.problem-detail-history-log-type-confirm {
+  background: rgba(129, 140, 248, 0.35);
+  color: #c7d2fe;
+  border: 1px solid rgba(129, 140, 248, 0.5);
 }
 
 .problem-detail-history-log-type-modify {
-  background: rgba(234, 179, 8, 0.25);
+  background: rgba(245, 158, 11, 0.3);
   color: #fde047;
 }
 
 .problem-detail-history-log-type-discuss {
-  background: rgba(168, 85, 247, 0.25);
+  background: rgba(139, 92, 246, 0.3);
   color: #e9d5ff;
 }
 
@@ -3452,17 +3530,18 @@ body {
 }
 
 .problem-detail-history-log-type-complete {
-  background: rgba(22, 163, 74, 0.3);
-  color: #4ade80;
+  background: rgba(20, 184, 166, 0.3);
+  color: #5eead4;
 }
 
 .problem-detail-history-log-type-unsatisfied {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
 }
 
 .problem-detail-history-log-type-compress {
-  background: rgba(20, 184, 166, 0.3);
-  color: #fca5a5;
+  background: rgba(249, 115, 22, 0.3);
+  color: #fdba74;
 }
 
 .problem-detail-chat-context-block .problem-detail-chat-context-json {

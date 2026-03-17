@@ -1544,11 +1544,16 @@ if (el.btnProblemDetailRollback) {
 /** 重新开始当前任务：清空当前任务已形成的聊天、工作区、沟通历史数据，不改变当前任务设置，并推送当前任务启动通知 */
 function applyRestartCurrentTask() {
   const item = currentProblemDetailItem;
-  if (!item?.createdAt) return;
+  if (!item?.createdAt) {
+    return;
+  }
   const list = getDigitalProblems();
   const dataItem = list.find((p) => String(p.createdAt) === String(item.createdAt)) || item;
   const currentTask = getFirstUncompletedTask(dataItem);
-  if (!currentTask) return;
+  if (!currentTask) {
+    if (typeof alert === 'function') alert('当前没有可重启的任务（所有任务已完成）');
+    return;
+  }
   const taskId = currentTask.id;
   const updated = buildItemClearCurrentTaskOnly(dataItem, taskId);
   if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
@@ -1581,8 +1586,15 @@ function applyRestartCurrentTask() {
   showTaskStartNotificationIfNeeded(taskId, true);
 }
 
-if (el.btnProblemDetailRestartTask) {
-  el.btnProblemDetailRestartTask.addEventListener('click', () => applyRestartCurrentTask());
+if (el.problemDetailView) {
+  el.problemDetailView.addEventListener('click', (e) => {
+    const restartBtn = e.target.closest('#btnProblemDetailRestartTask, .btn-problem-detail-restart-task');
+    if (restartBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      applyRestartCurrentTask();
+    }
+  });
 }
 
 if (el.rollbackModalOverlay) {
@@ -1879,7 +1891,7 @@ if (el.problemDetailChatMessages) {
           if (isGlobalItGapMsg && currentProblemDetailItem?.createdAt) {
             problemDetailChatMessages = problemDetailChatMessages.filter((m) => {
               const t = m.type;
-              return t !== 'globalItGapStartBlock' && t !== 'globalItGapAnalysisCard' && t !== 'globalItGapAnalysisLog' && t !== 'localItGapStartBlock' && t !== 'localItGapSessionsBlock' && t !== 'localItGapAnalysisCard' && t !== 'localItGapAnalysisLog' && t !== 'rolePermissionSessionsBlock' && t !== 'rolePermissionCard' && t !== 'rolePermissionAnalysisCard';
+              return t !== 'globalItGapStartBlock' && t !== 'globalItGapAnalysisCard' && t !== 'globalItGapAnalysisLog' && t !== 'localItGapStartBlock' && t !== 'localItGapSessionsBlock' && t !== 'localItGapInputBlock' && t !== 'localItGapOutputBlock' && t !== 'localItGapAnalysisCard' && t !== 'localItGapAnalysisLog' && t !== 'localItGapAllDoneConfirmBlock' && t !== 'localItGapTaskCompleteConfirmBlock' && t !== 'rolePermissionSessionsBlock' && t !== 'rolePermissionCard' && t !== 'rolePermissionAnalysisCard';
             });
             saveProblemDetailChat(currentProblemDetailItem.createdAt, problemDetailChatMessages);
             clearDigitalProblemGlobalItGapAnalysis(currentProblemDetailItem.createdAt);
@@ -2063,7 +2075,7 @@ if (el.problemDetailChatMessages) {
           renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
           container.scrollTop = container.scrollHeight;
           renderProblemDetailHistory();
-          requestAnimationFrame(() => { if (typeof runLocalItGapAnalysisForNextStep === 'function') runLocalItGapAnalysisForNextStep(getLocalItGapDeps()); });
+          /* 第一环节在用户点击「自动顺序执行」或「手动逐项执行」后才开始执行 */
         }
         return;
       }
@@ -2390,6 +2402,7 @@ if (el.problemDetailChatMessages) {
       const item = currentProblemDetailItem;
       const valueStream = resolveValueStreamForItGap(item);
       if (!valueStream || valueStream.raw) return;
+      const globalItGap = item.globalItGapAnalysisJson ?? null;
       const sessions = generateLocalItGapSessions(valueStream);
       updateDigitalProblemLocalItGapSessions(item.createdAt, sessions);
       currentProblemDetailItem = { ...item, localItGapSessions: sessions };
@@ -2398,7 +2411,6 @@ if (el.problemDetailChatMessages) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
         saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
       }
-      const globalItGap = item.globalItGapAnalysisJson ?? null;
       pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '价值流图 json', contextJson: valueStream, timestamp: getTimeStr() });
       pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '全局 ITGap 分析 json', contextJson: globalItGap, timestamp: getTimeStr() });
       pushAndSaveProblemDetailChat({ type: 'localItGapSessionsBlock', sessions, timestamp: getTimeStr() });
@@ -2695,23 +2707,48 @@ if (el.problemDetailChatMessages) {
       requestAnimationFrame(() => runCoreBusinessObjectForNextStep && runCoreBusinessObjectForNextStep());
       return;
     }
-    const confirmLocalItGapSessionsBtn = e.target.closest('.btn-confirm-local-itgap-sessions');
-    if (confirmLocalItGapSessionsBtn && !confirmLocalItGapSessionsBtn.disabled) {
-      const item = currentProblemDetailItem;
-      const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapSessionsBlock');
-      if (sessionsIdx >= 0) {
-        problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], confirmed: true };
-        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
-      }
-      confirmLocalItGapSessionsBtn.disabled = true;
-      confirmLocalItGapSessionsBtn.textContent = '已确认';
-      const container = el.problemDetailChatMessages;
-      container.innerHTML = '';
-      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
-      container.scrollTop = container.scrollHeight;
-      renderProblemDetailContent();
-      renderProblemDetailHistory();
-      requestAnimationFrame(() => { if (typeof runLocalItGapAnalysisForNextStep === 'function') runLocalItGapAnalysisForNextStep(getLocalItGapDeps()); });
+    const autoLocalItGapSessionsBtn = e.target.closest('.btn-auto-local-itgap-sessions');
+    if (autoLocalItGapSessionsBtn && !autoLocalItGapSessionsBtn.disabled) {
+      autoLocalItGapSessionsBtn.disabled = true;
+      (async function runLocalItGapAutoSequential() {
+        const deps = getLocalItGapDeps();
+        while (true) {
+          const item = deps.currentProblemDetailItem;
+          const sessions = item?.localItGapSessions || [];
+          const nextIdx = sessions.findIndex((s) => !s.analysisJson);
+          if (nextIdx < 0) break;
+          if (typeof runLocalItGapAnalysisForNextStep !== 'function') break;
+          await runLocalItGapAnalysisForNextStep(deps);
+        }
+        const container = el.problemDetailChatMessages;
+        if (container) {
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+        }
+        renderProblemDetailContent();
+        renderProblemDetailHistory();
+        if (autoLocalItGapSessionsBtn) {
+          const item = currentProblemDetailItem;
+          const sessions = item?.localItGapSessions || [];
+          const hasUnfinished = sessions.some((s) => !s.analysisJson);
+          autoLocalItGapSessionsBtn.disabled = !hasUnfinished;
+          autoLocalItGapSessionsBtn.textContent = hasUnfinished ? '自动顺序执行' : '全部已完成';
+        }
+        pushAndSaveProblemDetailChat({
+          type: 'localItGapAllDoneConfirmBlock',
+          taskId: 'task9',
+          content: '已经完成所有环节局部 ITGap 分析，是否自动确认所有输出？',
+          confirmed: false,
+          timestamp: getTimeStr(),
+        });
+        if (container) {
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+        }
+        renderProblemDetailHistory();
+      })();
       return;
     }
     const continueLocalItGapSessionsBtn = e.target.closest('.btn-continue-local-itgap-sessions');
@@ -2772,9 +2809,9 @@ if (el.problemDetailChatMessages) {
           requestAnimationFrame(() => { if (typeof runLocalItGapAnalysisForNextStep === 'function') runLocalItGapAnalysisForNextStep(getLocalItGapDeps()); });
         } else {
           pushAndSaveProblemDetailChat({
-            type: 'localItGapCompressionIntentBlock',
+            type: 'localItGapAllDoneConfirmBlock',
             taskId: 'task9',
-            content: '我即将开始对局部 ITGap 分析做上下文压缩，便于后续环节的处理。',
+            content: '已经完成所有环节局部 ITGap 分析，是否自动确认所有输出？',
             confirmed: false,
             timestamp: getTimeStr(),
           });
@@ -2784,6 +2821,48 @@ if (el.problemDetailChatMessages) {
           renderProblemDetailHistory();
         }
       } catch (_) {}
+      return;
+    }
+    const confirmAllLocalItGapOutputsBtn = e.target.closest('.btn-confirm-all-local-itgap-outputs');
+    if (confirmAllLocalItGapOutputsBtn && !confirmAllLocalItGapOutputsBtn.disabled) {
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      const allDoneIdx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapAllDoneConfirmBlock');
+      if (allDoneIdx >= 0) {
+        problemDetailChatMessages[allDoneIdx] = { ...problemDetailChatMessages[allDoneIdx], confirmed: true };
+      }
+      const cards = problemDetailChatMessages.filter((m) => m.type === 'localItGapAnalysisCard');
+      for (const card of cards) {
+        if (card.confirmed) continue;
+        const stepName = card.stepName || '';
+        const stepIndex = card.stepIndex ?? -1;
+        const data = card.data || {};
+        const analysisMarkdown = typeof buildLocalItGapMarkdown === 'function' ? buildLocalItGapMarkdown(data) : '';
+        const cardIdx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapAnalysisCard' && m.stepIndex === stepIndex);
+        if (cardIdx >= 0) problemDetailChatMessages[cardIdx] = { ...problemDetailChatMessages[cardIdx], data, confirmed: true };
+        if (typeof updateDigitalProblemLocalItGapAnalysis === 'function') updateDigitalProblemLocalItGapAnalysis(item.createdAt, stepName, stepIndex, data, analysisMarkdown);
+      }
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const list = getDigitalProblems();
+      const updated = list.find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      pushAndSaveProblemDetailChat({
+        type: 'localItGapCompressionIntentBlock',
+        taskId: 'task9',
+        content: '我即将开始对局部 ITGap 分析做上下文压缩，便于后续环节的处理。',
+        confirmed: false,
+        timestamp: getTimeStr(),
+      });
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailHistory();
       return;
     }
     const confirmLocalItGapCompressionBtn = e.target.closest('.btn-confirm-local-itgap-compression');
@@ -2800,9 +2879,54 @@ if (el.problemDetailChatMessages) {
         renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
         container.scrollTop = container.scrollHeight;
         renderProblemDetailHistory();
-        const taskNameTask9 = (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task9')?.name) || '局部 ITGap 分析';
-        requestAnimationFrame(() => { if (typeof runLocalItGapCompressionSequentially === 'function') runLocalItGapCompressionSequentially({ ...getLocalItGapDeps(), onAllCompressionDone: () => requestAnimationFrame(() => showTaskCompletionConfirm('task9', taskNameTask9)) }); });
+        const onAllCompressionDone = () => {
+          requestAnimationFrame(() => {
+            pushAndSaveProblemDetailChat({
+              type: 'localItGapTaskCompleteConfirmBlock',
+              taskId: 'task9',
+              content: '是否确认局部 ITGap 分析任务已经完成？',
+              confirmed: false,
+              timestamp: getTimeStr(),
+            });
+            const c = el.problemDetailChatMessages;
+            if (c) {
+              c.innerHTML = '';
+              renderProblemDetailChatFromStorage(c, problemDetailChatMessages);
+              c.scrollTop = c.scrollHeight;
+            }
+            renderProblemDetailHistory();
+          });
+        };
+        requestAnimationFrame(() => { if (typeof runLocalItGapCompressionSequentially === 'function') runLocalItGapCompressionSequentially({ ...getLocalItGapDeps(), onAllCompressionDone }); else onAllCompressionDone(); });
       }
+      return;
+    }
+    const confirmLocalItGapTaskCompleteBtn = e.target.closest('.btn-confirm-local-itgap-task-complete');
+    if (confirmLocalItGapTaskCompleteBtn && !confirmLocalItGapTaskCompleteBtn.disabled) {
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      const idx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapTaskCompleteConfirmBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      }
+      const alreadyCompleted = problemDetailChatMessages.some((m) => m.type === 'taskCompleteBlock' && m.taskId === 'task9');
+      if (!alreadyCompleted) {
+        pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId: 'task9', content: '用户确认任务完成', timestamp: getTimeStr() });
+        advanceProblemStateOnTaskComplete(item.createdAt, 'task9');
+      }
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      problemDetailViewingMajorStage = updated?.currentMajorStage ?? 3;
+      updateProblemDetailProgressStages(updated?.currentMajorStage ?? 3, problemDetailViewingMajorStage);
+      renderProblemDetailContent();
+      requestAnimationFrame(() => { focusWorkspaceOnCurrentTask('task10'); });
       return;
     }
     const startItStrategyPlanBtn = e.target.closest('.btn-confirm-start-it-strategy-plan');
@@ -7071,6 +7195,7 @@ function getLocalItGapDeps() {
     get problemDetailChatMessages() { return problemDetailChatMessages; },
     getTimeStr,
     pushAndSaveProblemDetailChat,
+    saveProblemDetailChat: typeof saveProblemDetailChat === 'function' ? saveProblemDetailChat : undefined,
     renderProblemDetailChatFromStorage,
     renderProblemDetailHistory,
     renderProblemDetailContent,
@@ -7080,6 +7205,29 @@ function getLocalItGapDeps() {
     DEEPSEEK_API_KEY,
     buildLlmMetaHtml,
     DELETE_CHAT_MSG_ICON,
+    pushLocalItGapInputBlock(stepName, stepIndex, payload) {
+      const isFullInput = payload && typeof payload === 'object' && ('systemPrompt' in payload || 'userContent' in payload);
+      const msg = { type: 'localItGapInputBlock', stepName, stepIndex, timestamp: getTimeStr() };
+      if (isFullInput) msg.fullInput = payload; else msg.prompt = typeof payload === 'string' ? payload : '';
+      pushAndSaveProblemDetailChat(msg);
+      const container = el.problemDetailChatMessages;
+      if (container) {
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+      }
+      renderProblemDetailHistory();
+    },
+    pushLocalItGapOutputBlock(stepName, stepIndex) {
+      pushAndSaveProblemDetailChat({ type: 'localItGapOutputBlock', stepName, stepIndex, timestamp: getTimeStr() });
+      const container = el.problemDetailChatMessages;
+      if (container) {
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+      }
+      renderProblemDetailHistory();
+    },
   };
 }
 
@@ -7891,20 +8039,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'localItGapContextBlock') {
       return;
     } else if (msg.type === 'taskContextBlock') {
-      if (msg.taskId === 'task8') {
-        return;
-      }
-      const ctxJson = msg.contextJson && typeof msg.contextJson === 'object' ? JSON.stringify(msg.contextJson, null, 2) : (msg.contextJson != null ? String(msg.contextJson) : '{}');
-      const block = document.createElement('div');
-      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-context-block';
-      block.dataset.msgIndex = String(idx);
-      block.innerHTML = `
-        <div class="problem-detail-chat-msg-content-wrap">
-          <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-context">上下文</span>
-          <pre class="problem-detail-chat-context-json">${escapeHtml(ctxJson)}</pre>
-        </div>
-        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
-      container.appendChild(block);
+      /* 上下文内容块仅时间线展示，聊天区不渲染 */
+      return;
     } else if (msg.type === 'taskCompletionConfirmBlock') {
       const taskId = msg.taskId || '';
       const taskName = msg.taskName || (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === taskId)?.name) || taskId;
@@ -8498,18 +8634,20 @@ function renderProblemDetailChatFromStorage(container, messages) {
       block.innerHTML = `
         <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-local-itgap-sessions-card-wrap">
-          <div class="problem-detail-chat-local-itgap-sessions-card-header">局部 ITGap 分析 Session</div>
+          <div class="problem-detail-chat-local-itgap-sessions-card-header">局部 ITGap 分析 Session 计划</div>
           <div class="problem-detail-chat-local-itgap-sessions-card-body">
             <div class="problem-detail-chat-local-itgap-sessions-header">已为 ${sessions.length} 个环节生成局部 ITGap 分析 session</div>
             <div class="problem-detail-chat-local-itgap-sessions-list">${sessionsListHtml}</div>
           </div>
           <div class="problem-detail-chat-local-itgap-sessions-actions">
-            <button type="button" class="btn-confirm-local-itgap-sessions btn-confirm-primary" ${sessionsConfirmed || !hasUnfinished ? 'disabled' : ''}>${sessionsConfirmed ? '已确认' : !hasUnfinished ? '全部已完成' : '确认'}</button>
-            <button type="button" class="btn-continue-local-itgap-sessions" ${!hasUnfinished ? 'disabled' : ''}>继续</button>
+            <button type="button" class="btn-auto-local-itgap-sessions btn-confirm-primary" ${!hasUnfinished ? 'disabled' : ''}>${!hasUnfinished ? '全部已完成' : '自动顺序执行'}</button>
+            <button type="button" class="btn-continue-local-itgap-sessions" ${!hasUnfinished ? 'disabled' : ''}>手动逐项执行</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
+    } else if (msg.type === 'localItGapInputBlock' || msg.type === 'localItGapOutputBlock') {
+      /* 输入/输出内容块仅时间线展示，聊天区不渲染 */
     } else if (msg.type === 'rolePermissionSessionsBlock') {
       const item = currentProblemDetailItem;
       const sessions = item?.rolePermissionSessions || msg.sessions || [];
@@ -8598,6 +8736,38 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(block);
+    } else if (msg.type === 'localItGapAllDoneConfirmBlock') {
+      const confirmed = !!msg.confirmed;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-all-done-confirm problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = msg.taskId || 'task9';
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '已经完成所有环节局部 ITGap 分析，是否自动确认所有输出？')}</div>
+          <div class="problem-detail-chat-task-completion-actions">
+            <button type="button" class="btn-confirm-all-local-itgap-outputs btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认所有输出'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
+    } else if (msg.type === 'localItGapTaskCompleteConfirmBlock') {
+      const confirmed = !!msg.confirmed;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-task-complete-confirm problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = msg.taskId || 'task9';
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '是否确认局部 ITGap 分析任务已经完成？')}</div>
+          <div class="problem-detail-chat-task-completion-actions">
+            <button type="button" class="btn-confirm-local-itgap-task-complete btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
     } else if (msg.type === 'localItGapCompressionIntentBlock') {
       const confirmed = !!msg.confirmed;
       const cardBlock = document.createElement('div');
@@ -8615,25 +8785,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(cardBlock);
     } else if (msg.type === 'localItGapCompressionBlock') {
-      const stepName = msg.stepName || '';
-      const compressedJson = msg.compressedJson;
-      const jsonStr = typeof compressedJson === 'string' ? compressedJson : (compressedJson != null ? JSON.stringify(compressedJson, null, 2) : '');
-      const llmMeta = msg.llmMeta || {};
-      const llmMetaHtml = buildLlmMetaHtml(llmMeta);
-      const cardBlock = document.createElement('div');
-      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-compression-card problem-detail-chat-msg-with-delete';
-      cardBlock.dataset.msgIndex = String(idx);
-      cardBlock.dataset.taskId = msg.taskId || 'task9';
-      cardBlock.dataset.stepName = stepName;
-      cardBlock.innerHTML = `
-        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-        <div class="problem-detail-chat-local-itgap-card-wrap">
-          <div class="problem-detail-chat-local-itgap-card-header">压缩：${escapeHtml(stepName)}</div>
-          <pre class="problem-detail-chat-json-pre">${escapeHtml(jsonStr || '')}</pre>
-        </div>
-        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>
-        <div class="problem-detail-chat-local-itgap-card-meta">${llmMetaHtml}</div>`;
-      container.appendChild(cardBlock);
+      /* 压缩内容块仅时间线展示，聊天区不渲染 */
     } else if (msg.type === 'intentExtractionCard') {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;

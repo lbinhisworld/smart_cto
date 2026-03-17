@@ -1,5 +1,7 @@
 # 局部 ITGap 分析模块（localItGap.js）实现说明
 
+> 最近更新：2025-03-18。与 main.js、过程日志（压缩块、任务完成确认）及 getLocalItGapDeps 一致。
+
 ## 1. 概述
 
 `localItGap.js` 负责**局部 IT Gap 分析**的完整链路：按价值流生成分析会话（session）、针对单环节调用大模型、解析模型输出、将解析结果渲染为结构化 HTML/Markdown，以及**按环节顺序执行分析**与**上下文压缩**的流程控制。与主流程的编排（聊天容器、问题详情状态、任务确认）解耦，main.js 通过注入依赖（`getLocalItGapDeps()`）调用本模块暴露的流程函数与工具函数。
@@ -185,11 +187,12 @@
 1. 解析价值流，得到 `allSteps`；取 `item.localItGapSessions` 或 `item.localItGapAnalyses` 确定 `nextIndex`（第一个未完成 session 或 analyses 长度）。
 2. 若 `nextIndex >= allSteps.length` 则 return。
 3. 推送「正在分析环节【stepName】」系统消息，展示 parsing 块，调用 `generateLocalItGapAnalysis(stepName, globalItGap, valueStream)`。
-4. 解析 `content` 为 `analysisJson`（`parseLocalItGapFromContent`），失败则用 `content` 填 `statusQuo`。
-5. 调用 `deps.updateDigitalProblemLocalItGapAnalysis(item.createdAt, stepName, nextIndex, analysisJson, analysisMarkdown)`，并 `getDigitalProblems` + `setCurrentProblemDetailItem(updated)` 更新当前项。
-6. 构建分析卡片 DOM（含 `buildLocalItGapStructuredHtml`、LLM meta、确认/重做/修正/讨论按钮），追加到容器，`pushAndSaveProblemDetailChat` 类型为 `localItGapAnalysisCard`，再 `renderProblemDetailChatFromStorage`、`renderProblemDetailHistory`、`renderProblemDetailContent`。
+4. LLM 返回后，在 `problemDetailChatMessages` 中查找本环节对应的 `localItGapInputBlock`（同 `stepIndex`），为其补写 `llmMeta`（含 usage），并调用 `deps.saveProblemDetailChat` 保存，以便过程日志在「输入」卡片上显示 prompt_tokens。
+5. 解析 `content` 为 `analysisJson`（`parseLocalItGapFromContent`），失败则用 `content` 填 `statusQuo`。
+6. 调用 `deps.updateDigitalProblemLocalItGapAnalysis(item.createdAt, stepName, nextIndex, analysisJson, analysisMarkdown)`，并 `getDigitalProblems` + `setCurrentProblemDetailItem(updated)` 更新当前项。
+7. 构建分析卡片 DOM（含 `buildLocalItGapStructuredHtml`、LLM meta、确认/重做/修正/讨论按钮），追加到容器，`pushAndSaveProblemDetailChat` 类型为 `localItGapAnalysisCard`，再 `renderProblemDetailChatFromStorage`、`renderProblemDetailHistory`、`renderProblemDetailContent`。
 
-**依赖**：`el`、`currentProblemDetailItem`、`setCurrentProblemDetailItem`、`problemDetailChatMessages`、`pushAndSaveProblemDetailChat`、`renderProblemDetailChatFromStorage`、`renderProblemDetailHistory`、`renderProblemDetailContent`、`updateDigitalProblemLocalItGapAnalysis`、`getDigitalProblems`、`resolveValueStreamForItGap`、`getTimeStr`、`buildLlmMetaHtml`、`DEEPSEEK_API_KEY`、`DELETE_CHAT_MSG_ICON`。
+**依赖**：`el`、`currentProblemDetailItem`、`setCurrentProblemDetailItem`、`problemDetailChatMessages`、`pushAndSaveProblemDetailChat`、`saveProblemDetailChat`、`renderProblemDetailChatFromStorage`、`renderProblemDetailHistory`、`renderProblemDetailContent`、`updateDigitalProblemLocalItGapAnalysis`、`getDigitalProblems`、`resolveValueStreamForItGap`、`getTimeStr`、`buildLlmMetaHtml`、`DEEPSEEK_API_KEY`、`DELETE_CHAT_MSG_ICON`。
 
 ### 9.2 `runLocalItGapCompressionSequentially(deps)`
 
@@ -260,17 +263,17 @@ main.js 在调用流程函数前通过 `getLocalItGapDeps()` 组装 `deps`，并
     → analysisJson { statusQuo, itGap3DMap, actionableRequirements, businessValuePrediction }
     → buildLocalItGapStructuredHtml(analysisJson) → 卡片 HTML
     → updateDigitalProblemLocalItGapAnalysis + pushAndSaveProblemDetailChat(localItGapAnalysisCard)
-    → 用户确认全部环节后，主流程触发 runLocalItGapCompressionSequentially(deps)
+    → 用户确认全部环节后，主流程推送「压缩确认块」，用户确认后触发 runLocalItGapCompressionSequentially(deps)
     → 按 session 顺序 compressLocalItGapJson(...) → 推送 localItGapCompressionBlock
-    → onAllCompressionDone() → 主流程弹出任务完成确认等
+    → onAllCompressionDone() → 主流程推送「任务完成确认块」（是否确认局部 ITGap 分析任务已经完成？），用户确认后推送任务完成并切换 task10
 ```
 
 ---
 
 ## 13. 与 main.js 的协作
 
-- **getLocalItGapDeps()**：在 main.js 中定义，返回包含 `el`、`currentProblemDetailItem`、`setCurrentProblemDetailItem`、`problemDetailChatMessages`、`pushAndSaveProblemDetailChat`、`renderProblemDetailChatFromStorage`、`renderProblemDetailHistory`、`renderProblemDetailContent`、`updateDigitalProblemLocalItGapAnalysis`、`getDigitalProblems`、`resolveValueStreamForItGap`、`getTimeStr`、`buildLlmMetaHtml`、`DEEPSEEK_API_KEY`、`DELETE_CHAT_MSG_ICON` 等属性的对象（部分以 getter 形式保证每次取到最新值）。流程函数仅通过 `deps` 访问这些能力，不直接依赖全局变量。
+- **getLocalItGapDeps()**：在 main.js 中定义，返回包含 `el`、`currentProblemDetailItem`、`setCurrentProblemDetailItem`、`problemDetailChatMessages`、`pushAndSaveProblemDetailChat`、`saveProblemDetailChat`、`renderProblemDetailChatFromStorage`、`renderProblemDetailHistory`、`renderProblemDetailContent`、`updateDigitalProblemLocalItGapAnalysis`、`getDigitalProblems`、`resolveValueStreamForItGap`、`getTimeStr`、`buildLlmMetaHtml`、`DEEPSEEK_API_KEY`、`DELETE_CHAT_MSG_ICON` 等属性的对象（部分以 getter 形式保证每次取到最新值）。流程函数仅通过 `deps` 访问这些能力，不直接依赖全局变量。
 - **调用示例**：  
   - 分析下一步：`runLocalItGapAnalysisForNextStep(getLocalItGapDeps())`  
-  - 压缩并完成后确认：`runLocalItGapCompressionSequentially({ ...getLocalItGapDeps(), onAllCompressionDone: () => requestAnimationFrame(() => showTaskCompletionConfirm('task9', taskNameTask9)) })`
+  - 压缩并完成后：`runLocalItGapCompressionSequentially({ ...getLocalItGapDeps(), onAllCompressionDone: () => { 推送 localItGapTaskCompleteConfirmBlock（「是否确认局部 ITGap 分析任务已经完成？」）；用户确认该块后再推送任务完成、推进状态并 focusWorkspaceOnCurrentTask('task10') } })`
 - **渲染从存储恢复**：main.js 在从 `problemDetailChatMessages` 恢复 `localItGapAnalysisCard` / `localItGapCompressionBlock` 时，会调用 `buildLocalItGapStructuredHtml(data)` 或展示压缩 JSON，均通过 `typeof buildLocalItGapStructuredHtml === 'function'` 判断后再调用，避免本模块未加载时报错。

@@ -28,7 +28,7 @@
     if (type === 'e2eFlowGeneratedLog') return 'task7';
     if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
     if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog' || type === 'globalItGapContextLog') return 'task8';
-    if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog' || type === 'localItGapContextLog' || type === 'localItGapContextBlock' || type === 'localItGapCompressionIntentBlock' || type === 'localItGapCompressionBlock') return 'task9';
+    if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapInputBlock' || type === 'localItGapOutputBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog' || type === 'localItGapContextLog' || type === 'localItGapContextBlock' || type === 'localItGapAllDoneConfirmBlock' || type === 'localItGapTaskCompleteConfirmBlock' || type === 'localItGapCompressionIntentBlock' || type === 'localItGapCompressionBlock') return 'task9';
     if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionSessionsBlock' || type === 'rolePermissionAnalysisCard' || type === 'rolePermissionConfirmedLog' || type === 'rolePermissionAllDoneBlock') return 'task10';
     if (type === 'coreBusinessObjectContextBlock' || type === 'coreBusinessObjectSessionsBlock' || type === 'coreBusinessObjectAnalysisCard' || type === 'coreBusinessObjectAllDoneBlock') return 'task11';
     if (type === 'globalArchitectureContextBlock') return 'task12';
@@ -69,10 +69,13 @@
     if (type === 'globalItGapContextLog') return true;
     if (type === 'localItGapStartBlock') return !!msg.confirmed;
     if (type === 'localItGapSessionsBlock') return true;
+    if (type === 'localItGapInputBlock' || type === 'localItGapOutputBlock') return true;
     if (type === 'localItGapAnalysisCard') return true; // 推送即纳入过程日志，未确认标签「输出」，确认后「确认」
     if (type === 'localItGapAnalysisLog') return true;
     if (type === 'localItGapContextLog') return true;
     if (type === 'localItGapContextBlock') return true;
+    if (type === 'localItGapAllDoneConfirmBlock') return true;
+    if (type === 'localItGapTaskCompleteConfirmBlock') return true;
     if (type === 'localItGapCompressionIntentBlock') return true;
     if (type === 'localItGapCompressionBlock') return true;
     if (type === 'rolePermissionCard') return true; // 推送即纳入过程日志，未确认时标签为「输出」，确认后为「确认」
@@ -173,7 +176,29 @@
       if ((msg.type === 'localItGapAnalysisCard' && msg.data) || (msg.type === 'localItGapAnalysisLog' && msg.analysisJson)) payload.analysisJson = msg.data || msg.analysisJson;
       if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.stepName) payload.stepName = msg.stepName;
       if (msg.type === 'localItGapSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
+      if (msg.type === 'localItGapInputBlock') {
+        if (msg.stepName) payload.stepName = msg.stepName;
+        if (msg.stepIndex != null) payload.stepIndex = msg.stepIndex;
+        if (msg.fullInput != null) payload.fullInput = msg.fullInput;
+        if (msg.prompt != null) payload.prompt = msg.prompt;
+        payload.taskId = msg.taskId || 'task9';
+      }
+      if (msg.type === 'localItGapOutputBlock') {
+        if (msg.stepName) payload.stepName = msg.stepName;
+        if (msg.stepIndex != null) payload.stepIndex = msg.stepIndex;
+        payload.taskId = msg.taskId || 'task9';
+      }
       if (msg.type === 'localItGapAnalysisCard') payload.confirmed = !!msg.confirmed;
+      if (msg.type === 'localItGapAllDoneConfirmBlock') {
+        payload.content = msg.content;
+        payload.confirmed = !!msg.confirmed;
+        if (msg.taskId) payload.taskId = msg.taskId;
+      }
+      if (msg.type === 'localItGapTaskCompleteConfirmBlock') {
+        payload.content = msg.content;
+        payload.confirmed = !!msg.confirmed;
+        if (msg.taskId) payload.taskId = msg.taskId;
+      }
       if (msg.type === 'localItGapCompressionIntentBlock') {
         payload.content = msg.content;
         payload.confirmed = !!msg.confirmed;
@@ -273,7 +298,11 @@
       if (parsed?.type === 'valueStreamConfirmLog') return '确认';
       if (parsed?.type === 'itStatusOutputLog') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'e2eFlowJsonBlock') return (parsed?.valueStreamJson != null && parsed?.confirmed) ? '确认' : '输出';
+      if (parsed?.type === 'localItGapInputBlock') return '输入';
+      if (parsed?.type === 'localItGapOutputBlock') return '输出';
       if (parsed?.type === 'localItGapAnalysisCard') return (parsed?.analysisJson != null && parsed?.confirmed) ? '确认' : '输出';
+      if (parsed?.type === 'localItGapAllDoneConfirmBlock') return parsed?.confirmed ? '确认' : '输出';
+      if (parsed?.type === 'localItGapTaskCompleteConfirmBlock') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'localItGapCompressionIntentBlock') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'localItGapCompressionBlock') return '压缩';
       if (parsed?.type === 'localItGapSessionsBlock') return '确认';
@@ -376,7 +405,7 @@
     const trackingData = createdAt ? (getTaskTrackingData()[createdAt] || {}) : {};
     const communications = createdAt && getChatsForProblem ? getCommunicationsByTask(createdAt, getChatsForProblem(createdAt)) : {};
     const allHistoryTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
-    const totals = { chars: 0, tokens: 0, durationMs: 0 };
+    const totals = { tokens: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
     const taskListHtml = allHistoryTasks.map((task) => {
       const taskData = trackingData[task.id] || {};
       const objective = (taskData.objective ?? task.objective) || '—';
@@ -392,7 +421,7 @@
         return ta - tb;
       });
       const commCount = comms.length;
-      const taskTotals = { chars: 0, tokens: 0, durationMs: 0 };
+      const taskTotals = { tokens: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
       const timelineHtml = comms.length === 0
         ? '<p class="problem-detail-history-comm-empty">暂无沟通记录</p>'
         : comms.map((c, i) => {
@@ -511,6 +540,16 @@
                 sessionPlanNoteForHead = 'ITGap 分析 session 计划';
                 titleLabel = 'ITGap 分析 session 计划';
                 contentStr = parsed.sessions != null ? JSON.stringify(parsed.sessions, null, 2) : '(无)';
+              } else if (parsed?.type === 'localItGapInputBlock') {
+                stepNameForHead = parsed?.stepName || `环节${(parsed?.stepIndex ?? 0) + 1}`;
+                titleLabel = `输入（${stepNameForHead}）`;
+                contentStr = parsed?.fullInput && typeof parsed.fullInput === 'object'
+                  ? JSON.stringify(parsed.fullInput, null, 2)
+                  : ((parsed?.prompt && String(parsed.prompt).trim()) || '(无)');
+              } else if (parsed?.type === 'localItGapOutputBlock') {
+                stepNameForHead = parsed?.stepName || `环节${(parsed?.stepIndex ?? 0) + 1}`;
+                titleLabel = `输出（${stepNameForHead}）`;
+                contentStr = '(环节分析结果见下方分析卡片)';
               } else if (parsed?.type === 'localItGapAnalysisCard') {
                 stepNameForHead = parsed?.stepName || '环节';
                 titleLabel = parsed?.confirmed ? `局部 ITGap 分析（${stepNameForHead}）（已确认）` : `局部 ITGap 分析（${stepNameForHead}）`;
@@ -519,6 +558,12 @@
                 stepNameForHead = parsed?.stepName || '环节';
                 titleLabel = parsed.content || `局部 ITGap 分析（${stepNameForHead}）`;
                 contentStr = parsed.analysisJson != null ? JSON.stringify(parsed.analysisJson, null, 2) : (parsed.content || '(无)');
+              } else if (parsed?.type === 'localItGapAllDoneConfirmBlock') {
+                titleLabel = parsed?.confirmed ? '已确认所有环节输出' : '是否自动确认所有输出';
+                contentStr = (parsed?.content && String(parsed.content).trim()) || '已经完成所有环节局部 ITGap 分析，是否自动确认所有输出？';
+              } else if (parsed?.type === 'localItGapTaskCompleteConfirmBlock') {
+                titleLabel = parsed?.confirmed ? '已确认任务完成' : '是否确认任务已经完成';
+                contentStr = (parsed?.content && String(parsed.content).trim()) || '是否确认局部 ITGap 分析任务已经完成？';
               } else if (parsed?.type === 'localItGapCompressionIntentBlock') {
                 titleLabel = parsed?.confirmed ? '局部 ITGap 压缩（已确认）' : '局部 ITGap 压缩';
                 contentStr = (parsed?.content && String(parsed.content).trim()) || '我即将开始对局部 ITGap 分析做上下文压缩，便于后续环节的处理。';
@@ -534,32 +579,58 @@
                 contentStr = (typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content || {}, null, 2)).slice(0, 2000) + (String(parsed.content || '').length > 2000 ? '\n…' : '');
               }
             } catch (_) {}
-            let tokenCount = 0;
-            let durationMs = 0;
+            // 所有时间线卡片备注统一为：耗时，输入 token，输出 token
+            let durationMsForEntry = 0;
+            let inputTokenCount = 0;
+            let outputTokenCount = 0;
             try {
               const parsedForToken = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
               const usage = parsedForToken?.llmMeta?.usage;
-              if (usage && typeof usage === 'object') {
-                tokenCount = usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
-              }
-              if (parsedForToken?.llmMeta && typeof parsedForToken.llmMeta.durationMs === 'number') {
-                durationMs = parsedForToken.llmMeta.durationMs;
+              const currentPrompt = usage?.prompt_tokens ?? 0;
+              const currentCompletion = usage?.completion_tokens ?? 0;
+              const currentDuration = (parsedForToken?.llmMeta && typeof parsedForToken.llmMeta.durationMs === 'number') ? parsedForToken.llmMeta.durationMs : 0;
+              if (logType === '输入') {
+                // 输入卡片：耗时为 0，输出 token 为 0，输入 token 为后续大模型调用返回的 prompt_tokens
+                durationMsForEntry = 0;
+                outputTokenCount = 0;
+                const nextContent = comms[i + 1]?.content;
+                try {
+                  const nextParsed = typeof nextContent === 'string' ? JSON.parse(nextContent) : nextContent;
+                  inputTokenCount = nextParsed?.llmMeta?.usage?.prompt_tokens ?? 0;
+                } catch (_) {
+                  inputTokenCount = 0;
+                }
+              } else if (logType === '输出' || logType === '确认') {
+                // 输出/确认卡片：耗时为大模型返回耗时，输入 token 为 0，输出 token 为 completion_tokens
+                durationMsForEntry = currentDuration;
+                inputTokenCount = 0;
+                outputTokenCount = currentCompletion;
+              } else if (logType === '压缩') {
+                // 压缩卡片：耗时为该次大模型返回耗时，输入/输出 token 为该次调用的 prompt_tokens / completion_tokens
+                durationMsForEntry = currentDuration;
+                inputTokenCount = currentPrompt;
+                outputTokenCount = currentCompletion;
+              } else {
+                durationMsForEntry = 0;
+                inputTokenCount = 0;
+                outputTokenCount = 0;
               }
             } catch (_) {}
-            const charCount = (typeof contentStr === 'string' ? contentStr : (contentStr != null ? JSON.stringify(contentStr) : '')).length;
-            totals.chars += charCount;
-            totals.tokens += tokenCount;
-            totals.durationMs += durationMs;
-            taskTotals.chars += charCount;
-            taskTotals.tokens += tokenCount;
-            taskTotals.durationMs += durationMs;
-            const charCountFormatted = charCount.toLocaleString();
-            const tokenCountFormatted = tokenCount.toLocaleString();
-            const charCountLabel = `<span class="problem-detail-history-timeline-char-count" title="内容字数">${charCountFormatted}字</span>`;
-            const tokenCountLabel = `<span class="problem-detail-history-timeline-token-count" title="token 消耗数">${tokenCountFormatted} token</span>`;
-            const durationSec = durationMs >= 0 ? (durationMs / 1000).toFixed(1) : '0';
+            // 累计总耗时、输入 token、输出 token
+            totals.durationMs += durationMsForEntry;
+            taskTotals.durationMs += durationMsForEntry;
+            totals.inputTokens += inputTokenCount;
+            taskTotals.inputTokens += inputTokenCount;
+            totals.outputTokens += outputTokenCount;
+            taskTotals.outputTokens += outputTokenCount;
+            // 每条卡片统一展示：耗时，输入 token，输出 token（顺序一致）
+            const durationSec = durationMsForEntry >= 0 ? (durationMsForEntry / 1000).toFixed(1) : '0';
             const durationLabel = `<span class="problem-detail-history-timeline-duration" title="大模型耗时">${durationSec}秒</span>`;
-            const metaCountsHtml = `<span class="problem-detail-history-timeline-meta-counts">${charCountLabel}${durationLabel}${tokenCountLabel}</span>`;
+            const inputTokenStr = inputTokenCount.toLocaleString();
+            const outputTokenStr = outputTokenCount.toLocaleString();
+            const inputLabel = `<span class="problem-detail-history-timeline-token-in" title="输入 token">输入 ${inputTokenStr}</span>`;
+            const outputLabel = `<span class="problem-detail-history-timeline-token-out" title="输出 token">输出 ${outputTokenStr}</span>`;
+            const metaCountsHtml = `<span class="problem-detail-history-timeline-meta-counts">${durationLabel}${inputLabel}${outputLabel}</span>`;
             return `
           <div class="problem-detail-history-timeline-node" data-index="${i}" data-log-type="${escapeHtml(logType)}">
             <div class="problem-detail-history-timeline-dot-wrap">
@@ -581,13 +652,13 @@
             </div>
           </div>`;
           }).join('');
-      const taskCharsStr = taskTotals.chars.toLocaleString();
-      const taskTokensStr = taskTotals.tokens.toLocaleString();
+      const taskInputTokensStr = taskTotals.inputTokens.toLocaleString();
+      const taskOutputTokensStr = taskTotals.outputTokens.toLocaleString();
       const taskDurationSec = (taskTotals.durationMs / 1000).toFixed(1);
       const taskMetaHtml = `<span class="problem-detail-history-task-node-meta problem-detail-history-timeline-meta-counts">
-        <span class="problem-detail-history-timeline-char-count" title="本任务生成字数">${escapeHtml(taskCharsStr)}字</span>
         <span class="problem-detail-history-timeline-duration" title="本任务耗时">${escapeHtml(taskDurationSec)}秒</span>
-        <span class="problem-detail-history-timeline-token-count" title="本任务 token 消耗">${escapeHtml(taskTokensStr)} token</span>
+        <span class="problem-detail-history-timeline-token-in" title="本任务输入 token 总和">输入 ${escapeHtml(taskInputTokensStr)}</span>
+        <span class="problem-detail-history-timeline-token-out" title="本任务输出 token 总和">输出 ${escapeHtml(taskOutputTokensStr)}</span>
       </span>`;
       const statusClass = taskStatusText === '已完成' ? 'problem-detail-history-task-done' : taskStatusText === '进行中' ? 'problem-detail-history-task-current' : '';
       const taskInfoHtml = `
@@ -624,25 +695,28 @@
         </div>
       </div>`;
     }).join('');
-    const totalCharsStr = totals.chars.toLocaleString();
-    const totalTokensStr = totals.tokens.toLocaleString();
+    const totalInputTokensStr = totals.inputTokens.toLocaleString();
+    const totalOutputTokensStr = totals.outputTokens.toLocaleString();
     const totalSecNum = totals.durationMs / 1000;
     const totalMinutes = Math.floor(totalSecNum / 60);
     const totalSecRem = (totalSecNum % 60).toFixed(1);
     const totalDurationStr = totalMinutes >= 1 ? `${totalMinutes}分${totalSecRem}秒` : `${totalSecRem}秒`;
+    const iconDuration = '<span class="problem-detail-history-summary-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>';
+    const iconInput = '<span class="problem-detail-history-summary-icon problem-detail-history-summary-icon-in" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg></span>';
+    const iconOutput = '<span class="problem-detail-history-summary-icon problem-detail-history-summary-icon-out" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>';
     const summaryHtml = `
     <div class="problem-detail-history-summary">
-      <div class="problem-detail-history-summary-item" title="所有过程日志条目的处理字数之和">
-        <span class="problem-detail-history-summary-label">总处理字数</span>
-        <span class="problem-detail-history-summary-value problem-detail-history-summary-chars">${escapeHtml(totalCharsStr)}字</span>
-      </div>
       <div class="problem-detail-history-summary-item" title="所有过程日志条目的大模型耗时之和">
-        <span class="problem-detail-history-summary-label">总耗时</span>
+        <span class="problem-detail-history-summary-label">${iconDuration}总耗时</span>
         <span class="problem-detail-history-summary-value problem-detail-history-summary-duration">${escapeHtml(totalDurationStr)}</span>
       </div>
-      <div class="problem-detail-history-summary-item" title="所有过程日志条目的 token 消耗之和">
-        <span class="problem-detail-history-summary-label">总消耗 token</span>
-        <span class="problem-detail-history-summary-value problem-detail-history-summary-tokens">${escapeHtml(totalTokensStr)}</span>
+      <div class="problem-detail-history-summary-item" title="所有过程日志条目的输入 token 总和">
+        <span class="problem-detail-history-summary-label">${iconInput}输入 token</span>
+        <span class="problem-detail-history-summary-value problem-detail-history-summary-tokens-in">${escapeHtml(totalInputTokensStr)}</span>
+      </div>
+      <div class="problem-detail-history-summary-item" title="所有过程日志条目的输出 token 总和">
+        <span class="problem-detail-history-summary-label">${iconOutput}输出 token</span>
+        <span class="problem-detail-history-summary-value problem-detail-history-summary-tokens-out">${escapeHtml(totalOutputTokensStr)}</span>
       </div>
     </div>`;
     container.innerHTML = summaryHtml + taskListHtml;
