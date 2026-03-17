@@ -2905,7 +2905,7 @@ body {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 656px; /* 570 * 1.15 */
+  width: 722px; /* 656 * 1.1，再扩大 10% */
   max-width: 90vw;
   display: flex;
   flex-direction: column;
@@ -2913,10 +2913,10 @@ body {
   z-index: 100;
   transform: translateX(100%);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
-  background: rgba(55, 48, 72, 0.88);
+  background: #1a0a2e; /* 更深紫底色 */
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border-left: 1px solid rgba(85, 75, 110, 0.55);
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px 0 0 8px;
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.25);
 }
@@ -2936,10 +2936,10 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.6rem 1rem;
-  border-bottom: 1px solid rgba(85, 75, 110, 0.55);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--text);
+  color: #fff;
 }
 
 .problem-detail-history-close {
@@ -2964,6 +2964,55 @@ body {
   padding: 0.5rem 0;
   overflow-y: auto;
   overflow-x: hidden;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* 沟通历史顶部汇总：总处理字数、总消耗 token、总耗时 */
+.problem-detail-history-summary {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(85, 75, 110, 0.4);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.problem-detail-history-summary-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.4rem 0.5rem;
+  min-width: 0;
+}
+
+.problem-detail-history-summary-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.problem-detail-history-summary-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.problem-detail-history-summary-chars {
+  color: #ffeb3b;
+}
+
+.problem-detail-history-summary-tokens {
+  color: #64b5f6;
+}
+
+.problem-detail-history-summary-duration {
+  color: #fff;
 }
 
 /* 回退任务选择弹窗 */
@@ -3113,9 +3162,10 @@ body {
   color: #3b82f6;
 }
 
-.problem-detail-history-task-node .task-node-badge {
-  font-size: 0.7rem;
-  color: var(--text-muted);
+/* 任务标题右侧三列指标（与时间线内容块三列对齐，复用 timeline 同款 class） */
+.problem-detail-history-task-node .problem-detail-history-task-node-meta {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .problem-detail-history-task-children {
@@ -3342,8 +3392,9 @@ body {
 .problem-detail-history-timeline-meta-counts {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.575rem; /* 0.5rem + 15% */
   margin-left: auto;
+  margin-right: 1.25rem; /* token 列与右边缘保持美观间隔，三列整体左移 */
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -3353,7 +3404,9 @@ body {
 .problem-detail-history-timeline-duration {
   font-size: 0.68rem;
   text-align: left;
-  min-width: 5em;
+  min-width: 5.5em;
+  width: 5.5em;
+  box-sizing: border-box;
 }
 
 .problem-detail-history-timeline-char-count {
@@ -3362,12 +3415,10 @@ body {
 
 .problem-detail-history-timeline-token-count {
   color: #64b5f6; /* 明蓝色：token 消耗 */
-  min-width: 6em;
 }
 
 .problem-detail-history-timeline-duration {
   color: #fff; /* 白色：耗时 */
-  min-width: 4em;
 }
 
 .problem-detail-history-log-type-input {

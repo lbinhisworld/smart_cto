@@ -346,7 +346,8 @@
     const trackingData = createdAt ? (getTaskTrackingData()[createdAt] || {}) : {};
     const communications = createdAt && getChatsForProblem ? getCommunicationsByTask(createdAt, getChatsForProblem(createdAt)) : {};
     const allHistoryTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
-    container.innerHTML = allHistoryTasks.map((task) => {
+    const totals = { chars: 0, tokens: 0, durationMs: 0 };
+    const taskListHtml = allHistoryTasks.map((task) => {
       const taskData = trackingData[task.id] || {};
       const objective = (taskData.objective ?? task.objective) || '—';
       const evaluationCriteria = (taskData.evaluationCriteria ?? task.evaluationCriteria) || '—';
@@ -361,6 +362,7 @@
         return ta - tb;
       });
       const commCount = comms.length;
+      const taskTotals = { chars: 0, tokens: 0, durationMs: 0 };
       const timelineHtml = comms.length === 0
         ? '<p class="problem-detail-history-comm-empty">暂无沟通记录</p>'
         : comms.map((c, i) => {
@@ -500,13 +502,19 @@
               }
             } catch (_) {}
             const charCount = (typeof contentStr === 'string' ? contentStr : (contentStr != null ? JSON.stringify(contentStr) : '')).length;
+            totals.chars += charCount;
+            totals.tokens += tokenCount;
+            totals.durationMs += durationMs;
+            taskTotals.chars += charCount;
+            taskTotals.tokens += tokenCount;
+            taskTotals.durationMs += durationMs;
             const charCountFormatted = charCount.toLocaleString();
             const tokenCountFormatted = tokenCount.toLocaleString();
             const charCountLabel = `<span class="problem-detail-history-timeline-char-count" title="内容字数">${charCountFormatted}字</span>`;
             const tokenCountLabel = `<span class="problem-detail-history-timeline-token-count" title="token 消耗数">${tokenCountFormatted} token</span>`;
             const durationSec = durationMs >= 0 ? (durationMs / 1000).toFixed(1) : '0';
             const durationLabel = `<span class="problem-detail-history-timeline-duration" title="大模型耗时">${durationSec}秒</span>`;
-            const metaCountsHtml = `<span class="problem-detail-history-timeline-meta-counts">${charCountLabel}${tokenCountLabel}${durationLabel}</span>`;
+            const metaCountsHtml = `<span class="problem-detail-history-timeline-meta-counts">${charCountLabel}${durationLabel}${tokenCountLabel}</span>`;
             return `
           <div class="problem-detail-history-timeline-node" data-index="${i}" data-log-type="${escapeHtml(logType)}">
             <div class="problem-detail-history-timeline-dot-wrap">
@@ -528,6 +536,14 @@
             </div>
           </div>`;
           }).join('');
+      const taskCharsStr = taskTotals.chars.toLocaleString();
+      const taskTokensStr = taskTotals.tokens.toLocaleString();
+      const taskDurationSec = (taskTotals.durationMs / 1000).toFixed(1);
+      const taskMetaHtml = `<span class="problem-detail-history-task-node-meta problem-detail-history-timeline-meta-counts">
+        <span class="problem-detail-history-timeline-char-count" title="本任务生成字数">${escapeHtml(taskCharsStr)}字</span>
+        <span class="problem-detail-history-timeline-duration" title="本任务耗时">${escapeHtml(taskDurationSec)}秒</span>
+        <span class="problem-detail-history-timeline-token-count" title="本任务 token 消耗">${escapeHtml(taskTokensStr)} token</span>
+      </span>`;
       const statusClass = taskStatusText === '已完成' ? 'problem-detail-history-task-done' : taskStatusText === '进行中' ? 'problem-detail-history-task-current' : '';
       const taskInfoHtml = `
       <div class="problem-detail-history-task-info">
@@ -551,7 +567,7 @@
         <button type="button" class="problem-detail-history-task-node" data-task-id="${task.id}" role="button">
           <span class="task-node-expand">▸</span>
           <span class="task-node-name">${escapeHtml(task.id.charAt(0).toUpperCase() + task.id.slice(1) + '｜' + task.name)}</span>
-          ${commCount > 0 ? `<span class="task-node-badge">${commCount} 条</span>` : ''}
+          ${taskMetaHtml}
         </button>
         <div class="problem-detail-history-task-children" hidden>
           <div class="problem-detail-history-task-tabs" role="tablist">
@@ -563,6 +579,28 @@
         </div>
       </div>`;
     }).join('');
+    const totalCharsStr = totals.chars.toLocaleString();
+    const totalTokensStr = totals.tokens.toLocaleString();
+    const totalSecNum = totals.durationMs / 1000;
+    const totalMinutes = Math.floor(totalSecNum / 60);
+    const totalSecRem = (totalSecNum % 60).toFixed(1);
+    const totalDurationStr = totalMinutes >= 1 ? `${totalMinutes}分${totalSecRem}秒` : `${totalSecRem}秒`;
+    const summaryHtml = `
+    <div class="problem-detail-history-summary">
+      <div class="problem-detail-history-summary-item" title="所有过程日志条目的处理字数之和">
+        <span class="problem-detail-history-summary-label">总处理字数</span>
+        <span class="problem-detail-history-summary-value problem-detail-history-summary-chars">${escapeHtml(totalCharsStr)}字</span>
+      </div>
+      <div class="problem-detail-history-summary-item" title="所有过程日志条目的大模型耗时之和">
+        <span class="problem-detail-history-summary-label">总耗时</span>
+        <span class="problem-detail-history-summary-value problem-detail-history-summary-duration">${escapeHtml(totalDurationStr)}</span>
+      </div>
+      <div class="problem-detail-history-summary-item" title="所有过程日志条目的 token 消耗之和">
+        <span class="problem-detail-history-summary-label">总消耗 token</span>
+        <span class="problem-detail-history-summary-value problem-detail-history-summary-tokens">${escapeHtml(totalTokensStr)}</span>
+      </div>
+    </div>`;
+    container.innerHTML = summaryHtml + taskListHtml;
     /* 任务节点展开由 main.js 在 problemDetailHistoryPanel 上的事件委托处理 */
     container.querySelectorAll('.problem-detail-history-tab').forEach((tab) => {
       tab.addEventListener('click', () => {
