@@ -291,7 +291,7 @@
 - **全部确认触发条件**：（1）自动顺序执行跑完所有环节后自动推送上述提示块；（2）**刷新页面后**：若当前问题处于核心业务对象推演阶段、所有 session 已有大模型输出且聊天中存在未确认的 `coreBusinessObjectAnalysisCard`，main.js 在 `initProblemDetailChat` 后调用 **`ensureCoreBusinessObjectAllDoneBlockIfNeeded()`**，若无该块则追加同一条「全部确认」提示块并保存。
 - **全部确认按钮**：用户点击「全部确认」后，main.js 将聊天中所有 `coreBusinessObjectAnalysisCard` 置为 `confirmed: true`，将 `coreBusinessObjectAllDoneBlock` 置为 `allConfirmed: true`，保存并重绘聊天、工作区、过程日志；过程日志中对应环节的 JSON 条目由「输出」变为「确认」。若有未确认项被确认，则弹出 task11「是否视为完成」确认。
 - **刷新时任务通知**：当任务处于核心业务对象推演阶段且当前状态会触发「全部确认」提示块（所有 session 有输出且存在未确认 CBO 卡片）时，**不再**下发「任务通知：我即将开始【核心业务对象推演】任务」（`showTaskStartNotificationIfNeeded('task11', …)` 内判断并 return）。
-- 工作区环节卡片内「核心业务对象推演」子卡片**默认展示 json 页**（大模型返回的 JSON 显示在 json tab）；有数据时 view 页为解析后的实体视图或同份 JSON。
+- 工作区环节卡片内「核心业务对象推演」子卡片**仅在「核心业务对象推演」任务页**（`itStrategyPlanViewingSubstep === 1`）展示；在「角色与权限模型推演」任务页（substep 0）不展示，由 main.js 在 `renderProblemDetailContent` 中按子步骤决定是否拼接该块。子卡片**默认展示 json 页**（大模型返回的 JSON 显示在 json tab）；有数据时 view 页为解析后的实体视图或同份 JSON。
 
 ### 8.6 重启当前任务时清空工作区（main.js）
 

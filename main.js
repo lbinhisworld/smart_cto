@@ -1649,6 +1649,19 @@ if (el.problemDetailBody) {
     }
   });
 }
+// 刷新或关闭前保存问题详情工作区滚动位置，便于恢复
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    const item = currentProblemDetailItem;
+    if (!item || item.createdAt == null) return;
+    const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+    if (wsScroll) {
+      try {
+        sessionStorage.setItem('problemDetailScroll_' + String(item.createdAt), String(wsScroll.scrollTop));
+      } catch (_) {}
+    }
+  });
+}
 if (el.problemDetailChatSend) {
   el.problemDetailChatSend.addEventListener('click', handleProblemDetailChatSend);
 }
@@ -6164,6 +6177,12 @@ function openProblemDetail(item) {
     }
   }
   problemDetailViewingMajorStage = majorStage;
+  // IT 策略规划阶段：根据「当前任务」（第一个未完成任务）恢复子步骤，避免刷新后总是回到角色与权限
+  if (majorStage === 3) {
+    const firstUncompleted = getFirstUncompletedTask(item);
+    const substepMap = { task10: 0, task11: 1, task12: 2, task13: 3, task14: 4, task15: 5 };
+    itStrategyPlanViewingSubstep = (firstUncompleted && substepMap[firstUncompleted.id] !== undefined) ? substepMap[firstUncompleted.id] : 0;
+  }
   updateProblemDetailProgressStages(majorStage, problemDetailViewingMajorStage);
   renderProblemDetailContent();
   initProblemDetailChat();
@@ -6172,6 +6191,23 @@ function openProblemDetail(item) {
   switchView('problemDetail');
   updateProblemDetailChatHeaderLabel();
   updateProblemDetailChatInputForMode();
+  // 恢复刷新前工作区滚动位置
+  const scrollKey = 'problemDetailScroll_' + String(item.createdAt);
+  const savedScroll = sessionStorage.getItem(scrollKey);
+  if (savedScroll !== null) {
+    const scrollTop = parseInt(savedScroll, 10);
+    if (!isNaN(scrollTop)) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+          if (wsScroll) {
+            wsScroll.scrollTop = scrollTop;
+          }
+          sessionStorage.removeItem(scrollKey);
+        });
+      });
+    }
+  }
   // 双重 rAF：确保视图已渲染（含刷新后恢复路由），再触发当前任务开始通知
   requestAnimationFrame(() => {
     requestAnimationFrame(() => showNextTaskStartNotification());
@@ -9567,7 +9603,7 @@ function renderProblemDetailContent() {
           <div class="problem-detail-core-business-object-panel" data-panel="json"><pre class="problem-detail-core-business-object-json">${escapeHtml(cboJsonStr)}</pre></div>
         </div>`
                       : '<div class="problem-detail-step-card-core-business-object"><div class="problem-detail-role-permission-placeholder">待推演</div></div>';
-                    const stepBodyContent = rolePermissionBlock + cboSubCardHtml;
+                    const stepBodyContent = itStrategyPlanViewingSubstep === 0 ? rolePermissionBlock : (rolePermissionBlock + cboSubCardHtml);
                     return `
                   <div class="problem-detail-card problem-detail-card-role-permission">
                     <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
@@ -9647,7 +9683,7 @@ function renderProblemDetailContent() {
           <div class="problem-detail-core-business-object-panel" data-panel="json"><pre class="problem-detail-core-business-object-json">${escapeHtml(cboJsonStr)}</pre></div>
         </div>`
                     : '<div class="problem-detail-step-card-core-business-object"><div class="problem-detail-role-permission-placeholder">待推演</div></div>';
-                  const stepBodyContent = rolePermissionBlock + cboSubCardHtml;
+                  const stepBodyContent = itStrategyPlanViewingSubstep === 0 ? rolePermissionBlock : (rolePermissionBlock + cboSubCardHtml);
                   return `
                   <div class="problem-detail-card problem-detail-card-role-permission">
                     <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">

@@ -132,8 +132,8 @@
       const speaker = (msg.role === 'user' || msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock') ? '用户' : '系统大模型';
       const payload = { role: msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock' ? 'user' : (msg.role || 'system'), content: msg.content, type: msg.type, timestamp: msg.timestamp };
       if (msg._logType) payload._logType = msg._logType;
+      if (msg.llmMeta) payload.llmMeta = msg.llmMeta;
       if ((msg.type === 'taskCompleteBlock' || msg.type === 'unsatisfiedBlock' || msg.type === 'modificationResponseBlock') && msg.taskId) payload.taskId = msg.taskId;
-      if (msg.type === 'modificationResponseBlock' && msg.llmMeta) payload.llmMeta = msg.llmMeta;
       if (msg.type === 'taskContextBlock') {
         payload.content = '任务上下文';
         payload.contextJson = msg.contextJson;
@@ -163,7 +163,6 @@
       if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.stepName) payload.stepName = msg.stepName;
       if (msg.type === 'localItGapSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
       if (msg.type === 'localItGapAnalysisCard') payload.confirmed = !!msg.confirmed;
-      if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.llmMeta) payload.llmMeta = msg.llmMeta;
       if (msg.type === 'rolePermissionCard') {
         payload.confirmed = !!msg.confirmed;
         if (msg.confirmed && typeof msg.content === 'string') payload.rolePermissionModelJson = parseRolePermissionModel(msg.content);
@@ -488,6 +487,26 @@
                 contentStr = (typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content || {}, null, 2)).slice(0, 2000) + (String(parsed.content || '').length > 2000 ? '\n…' : '');
               }
             } catch (_) {}
+            let tokenCount = 0;
+            let durationMs = 0;
+            try {
+              const parsedForToken = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
+              const usage = parsedForToken?.llmMeta?.usage;
+              if (usage && typeof usage === 'object') {
+                tokenCount = usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0));
+              }
+              if (parsedForToken?.llmMeta && typeof parsedForToken.llmMeta.durationMs === 'number') {
+                durationMs = parsedForToken.llmMeta.durationMs;
+              }
+            } catch (_) {}
+            const charCount = (typeof contentStr === 'string' ? contentStr : (contentStr != null ? JSON.stringify(contentStr) : '')).length;
+            const charCountFormatted = charCount.toLocaleString();
+            const tokenCountFormatted = tokenCount.toLocaleString();
+            const charCountLabel = `<span class="problem-detail-history-timeline-char-count" title="内容字数">${charCountFormatted}字</span>`;
+            const tokenCountLabel = `<span class="problem-detail-history-timeline-token-count" title="token 消耗数">${tokenCountFormatted} token</span>`;
+            const durationSec = durationMs >= 0 ? (durationMs / 1000).toFixed(1) : '0';
+            const durationLabel = `<span class="problem-detail-history-timeline-duration" title="大模型耗时">${durationSec}秒</span>`;
+            const metaCountsHtml = `<span class="problem-detail-history-timeline-meta-counts">${charCountLabel}${tokenCountLabel}${durationLabel}</span>`;
             return `
           <div class="problem-detail-history-timeline-node" data-index="${i}" data-log-type="${escapeHtml(logType)}">
             <div class="problem-detail-history-timeline-dot-wrap">
@@ -497,7 +516,7 @@
               <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
                 <span class="problem-detail-history-timeline-expand">▸</span>
                 <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
-                <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-${LOG_TYPE_CLASS[logType] || 'confirm'}">${escapeHtml(logType)}</span>${stepNameForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(stepNameForHead)}</span>` : ''}${contextNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(contextNoteForHead)}</span>` : ''}${sessionPlanNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(sessionPlanNoteForHead)}</span>` : ''}
+                <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-${LOG_TYPE_CLASS[logType] || 'confirm'}">${escapeHtml(logType)}</span>${stepNameForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(stepNameForHead)}</span>` : ''}${contextNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(contextNoteForHead)}</span>` : ''}${sessionPlanNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(sessionPlanNoteForHead)}</span>` : ''}${metaCountsHtml}
               </button>
               <div class="problem-detail-history-timeline-detail" hidden>
                 <div class="problem-detail-history-timeline-detail-meta">

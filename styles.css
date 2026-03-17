@@ -2899,13 +2899,13 @@ body {
   margin-left: 1rem;
 }
 
-/* 问题详情页 - 历史侧滑面板（悬浮 overlay，半透明磨砂，背景色与首页区分） */
+/* 问题详情页 - 历史侧滑面板（悬浮 overlay，半透明磨砂，背景色与首页区分；宽度 +15% 以容纳过程日志标题栏备注不换行） */
 .problem-detail-history-panel {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 570px;
+  width: 656px; /* 570 * 1.15 */
   max-width: 90vw;
   display: flex;
   flex-direction: column;
@@ -3284,6 +3284,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   width: 100%;
+  min-width: 0;
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
   font-family: inherit;
@@ -3294,6 +3295,8 @@ body {
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
+  white-space: nowrap;
+  overflow-x: auto;
 }
 
 .problem-detail-history-timeline-head:hover {
@@ -3332,6 +3335,39 @@ body {
   margin-left: 0.25rem;
   font-size: 0.7rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.problem-detail-history-timeline-meta-counts {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.problem-detail-history-timeline-char-count,
+.problem-detail-history-timeline-token-count,
+.problem-detail-history-timeline-duration {
+  font-size: 0.68rem;
+  text-align: left;
+  min-width: 5em;
+}
+
+.problem-detail-history-timeline-char-count {
+  color: #ffeb3b; /* 明黄色：生成字数 */
+}
+
+.problem-detail-history-timeline-token-count {
+  color: #64b5f6; /* 明蓝色：token 消耗 */
+  min-width: 6em;
+}
+
+.problem-detail-history-timeline-duration {
+  color: #fff; /* 白色：耗时 */
+  min-width: 4em;
 }
 
 .problem-detail-history-log-type-input {
