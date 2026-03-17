@@ -3458,6 +3458,10 @@ body {
 
 .problem-detail-history-log-type-unsatisfied {
   background: rgba(239, 68, 68, 0.25);
+}
+
+.problem-detail-history-log-type-compress {
+  background: rgba(20, 184, 166, 0.3);
   color: #fca5a5;
 }
 

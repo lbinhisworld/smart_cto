@@ -28,9 +28,10 @@
     if (type === 'e2eFlowGeneratedLog') return 'task7';
     if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
     if (type === 'globalItGapStartBlock' || type === 'globalItGapAnalysisCard' || type === 'globalItGapAnalysisLog' || type === 'globalItGapContextLog') return 'task8';
-    if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog' || type === 'localItGapContextLog') return 'task9';
+    if (type === 'localItGapStartBlock' || type === 'localItGapSessionsBlock' || type === 'localItGapAnalysisCard' || type === 'localItGapAnalysisLog' || type === 'localItGapContextLog' || type === 'localItGapContextBlock' || type === 'localItGapCompressionIntentBlock' || type === 'localItGapCompressionBlock') return 'task9';
     if (type === 'rolePermissionStartBlock' || type === 'rolePermissionCard' || type === 'rolePermissionSessionsBlock' || type === 'rolePermissionAnalysisCard' || type === 'rolePermissionConfirmedLog' || type === 'rolePermissionAllDoneBlock') return 'task10';
     if (type === 'coreBusinessObjectContextBlock' || type === 'coreBusinessObjectSessionsBlock' || type === 'coreBusinessObjectAnalysisCard' || type === 'coreBusinessObjectAllDoneBlock') return 'task11';
+    if (type === 'globalArchitectureContextBlock') return 'task12';
     if (type === 'taskContextBlock') return msg.taskId || null;
     if (type === 'taskCompleteBlock' || type === 'taskCompletionConfirmBlock') return msg.taskId || null;
     if (type === 'unsatisfiedBlock' || type === 'modificationResponseBlock') return msg.taskId || null;
@@ -71,11 +72,15 @@
     if (type === 'localItGapAnalysisCard') return true; // 推送即纳入过程日志，未确认标签「输出」，确认后「确认」
     if (type === 'localItGapAnalysisLog') return true;
     if (type === 'localItGapContextLog') return true;
+    if (type === 'localItGapContextBlock') return true;
+    if (type === 'localItGapCompressionIntentBlock') return true;
+    if (type === 'localItGapCompressionBlock') return true;
     if (type === 'rolePermissionCard') return true; // 推送即纳入过程日志，未确认时标签为「输出」，确认后为「确认」
     if (type === 'rolePermissionSessionsBlock') return true;
     if (type === 'rolePermissionAnalysisCard') return true; // 单环节推演卡片，推送即纳入过程日志
     if (type === 'rolePermissionConfirmedLog') return true;
     if (type === 'coreBusinessObjectContextBlock' || type === 'coreBusinessObjectSessionsBlock' || type === 'coreBusinessObjectAnalysisCard' || type === 'coreBusinessObjectAllDoneBlock') return true;
+    if (type === 'globalArchitectureContextBlock') return true;
     if (type === 'taskContextBlock') return true;
     if (type === 'taskCompleteBlock') return true;
     if (type === 'unsatisfiedBlock') return false; // 用户点击「修正」时不向过程日志推送该块
@@ -148,6 +153,12 @@
         payload.content = '上下文';
         payload.taskId = msg.taskId || 'task9';
       }
+      if (msg.type === 'localItGapContextBlock') {
+        payload.content = '上下文';
+        payload.contextLabel = msg.contextLabel;
+        payload.contextJson = msg.contextJson;
+        payload.taskId = msg.taskId || 'task9';
+      }
       if (msg.data) payload.data = msg.data;
       if (msg.type === 'valueStreamConfirmLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog' && msg.taskId) payload.taskId = msg.taskId;
@@ -163,6 +174,17 @@
       if ((msg.type === 'localItGapAnalysisCard' || msg.type === 'localItGapAnalysisLog') && msg.stepName) payload.stepName = msg.stepName;
       if (msg.type === 'localItGapSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
       if (msg.type === 'localItGapAnalysisCard') payload.confirmed = !!msg.confirmed;
+      if (msg.type === 'localItGapCompressionIntentBlock') {
+        payload.content = msg.content;
+        payload.confirmed = !!msg.confirmed;
+        if (msg.taskId) payload.taskId = msg.taskId;
+      }
+      if (msg.type === 'localItGapCompressionBlock') {
+        if (msg.stepName) payload.stepName = msg.stepName;
+        if (msg.compressedJson != null) payload.compressedJson = msg.compressedJson;
+        if (msg.llmMeta) payload.llmMeta = msg.llmMeta;
+        if (msg.taskId) payload.taskId = msg.taskId;
+      }
       if (msg.type === 'rolePermissionCard') {
         payload.confirmed = !!msg.confirmed;
         if (msg.confirmed && typeof msg.content === 'string') payload.rolePermissionModelJson = parseRolePermissionModel(msg.content);
@@ -184,6 +206,12 @@
         payload.contextLabel = msg.contextLabel;
         payload.taskId = msg.taskId || 'task11';
       }
+      if (msg.type === 'globalArchitectureContextBlock') {
+        payload.content = '上下文';
+        payload.contextJson = msg.contextJson;
+        payload.contextLabel = msg.contextLabel;
+        payload.taskId = msg.taskId || 'task12';
+      }
       if (msg.type === 'coreBusinessObjectSessionsBlock' && msg.sessions) payload.sessions = msg.sessions;
       if (msg.type === 'coreBusinessObjectSessionsBlock') payload.confirmed = !!msg.confirmed;
       if (msg.type === 'coreBusinessObjectAnalysisCard') {
@@ -195,7 +223,7 @@
       const contentJson = JSON.stringify(payload, null, 2);
       const entry = { speaker, time: msg.timestamp || '', content: contentJson };
       /** 任务完成块、价值流确认日志、IT 现状输出日志必须归入其 msg.taskId 对应任务；角色与权限卡片固定归入 task10；核心业务对象归入 task11 */
-      const targetTask = ((msg.type === 'rolePermissionCard' || msg.type === 'rolePermissionSessionsBlock' || msg.type === 'rolePermissionAnalysisCard' || msg.type === 'rolePermissionAllDoneBlock') && Array.isArray(byTask['task10'])) ? 'task10' : ((msg.type === 'coreBusinessObjectContextBlock' || msg.type === 'coreBusinessObjectSessionsBlock' || msg.type === 'coreBusinessObjectAnalysisCard' || msg.type === 'coreBusinessObjectAllDoneBlock') && Array.isArray(byTask['task11'])) ? 'task11' : (((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask);
+      const targetTask = ((msg.type === 'rolePermissionCard' || msg.type === 'rolePermissionSessionsBlock' || msg.type === 'rolePermissionAnalysisCard' || msg.type === 'rolePermissionAllDoneBlock') && Array.isArray(byTask['task10'])) ? 'task10' : ((msg.type === 'coreBusinessObjectContextBlock' || msg.type === 'coreBusinessObjectSessionsBlock' || msg.type === 'coreBusinessObjectAnalysisCard' || msg.type === 'coreBusinessObjectAllDoneBlock') && Array.isArray(byTask['task11'])) ? 'task11' : ((msg.type === 'globalArchitectureContextBlock') && Array.isArray(byTask['task12'])) ? 'task12' : (((msg.type === 'taskCompleteBlock' || msg.type === 'valueStreamConfirmLog' || msg.type === 'itStatusOutputLog' || msg.type === 'globalItGapContextLog' || msg.type === 'localItGapContextLog' || msg.type === 'localItGapContextBlock') && msg.taskId && Array.isArray(byTask[msg.taskId])) ? msg.taskId : currentTask);
       byTask[targetTask].push(entry);
       lastUserComm = msg.role === 'user' ? { task: targetTask, entry } : null;
     }
@@ -232,7 +260,7 @@
       const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
       if (parsed?.type === 'taskCompleteBlock') return '任务完成';
       if (parsed?.type === 'unsatisfiedBlock') return '不满意';
-      if (parsed?.type === 'taskContextBlock' || parsed?.type === 'globalItGapContextLog' || parsed?.type === 'localItGapContextLog' || parsed?.type === 'coreBusinessObjectContextBlock') return '上下文';
+      if (parsed?.type === 'taskContextBlock' || parsed?.type === 'globalItGapContextLog' || parsed?.type === 'localItGapContextLog' || parsed?.type === 'localItGapContextBlock' || parsed?.type === 'coreBusinessObjectContextBlock' || parsed?.type === 'globalArchitectureContextBlock') return '上下文';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'discussion') return '讨论';
       if (parsed?.type === 'intentExtractionCard' && parsed?.data?.intent === 'modification') {
         const target = String(parsed?.data?.modificationTarget || '');
@@ -246,6 +274,8 @@
       if (parsed?.type === 'itStatusOutputLog') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'e2eFlowJsonBlock') return (parsed?.valueStreamJson != null && parsed?.confirmed) ? '确认' : '输出';
       if (parsed?.type === 'localItGapAnalysisCard') return (parsed?.analysisJson != null && parsed?.confirmed) ? '确认' : '输出';
+      if (parsed?.type === 'localItGapCompressionIntentBlock') return parsed?.confirmed ? '确认' : '输出';
+      if (parsed?.type === 'localItGapCompressionBlock') return '压缩';
       if (parsed?.type === 'localItGapSessionsBlock') return '确认';
       if (parsed?.type === 'rolePermissionSessionsBlock') return parsed?.confirmed ? '确认' : '输出';
       if (parsed?.type === 'coreBusinessObjectSessionsBlock') return parsed?.confirmed ? '确认' : '输出';
@@ -260,7 +290,7 @@
     return '确认';
   }
 
-  const LOG_TYPE_CLASS = { '输入': 'input', '输出': 'output', '确认': 'confirm', '修正': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied' };
+  const LOG_TYPE_CLASS = { '输入': 'input', '输出': 'output', '确认': 'confirm', '修正': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied', '压缩': 'compress' };
   const INTENT_LABELS = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
 
   /** 在重新渲染前采集当前展开状态，刷新后恢复，避免沟通历史面板更新时折叠已展开的任务/时间线 */
@@ -453,7 +483,15 @@
                 contextNoteForHead = '价值流+全局 ITGap 分析';
                 titleLabel = '上下文（价值流+全局 ITGap 分析）';
                 contentStr = '(无)';
+              } else if (parsed?.type === 'localItGapContextBlock') {
+                contextNoteForHead = parsed?.contextLabel || '';
+                titleLabel = parsed?.contextLabel ? `上下文（${parsed.contextLabel}）` : '上下文';
+                contentStr = parsed?.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
               } else if (parsed?.type === 'coreBusinessObjectContextBlock') {
+                contextNoteForHead = parsed?.contextLabel || '';
+                titleLabel = parsed?.contextLabel ? `上下文（${parsed.contextLabel}）` : '上下文';
+                contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
+              } else if (parsed?.type === 'globalArchitectureContextBlock') {
                 contextNoteForHead = parsed?.contextLabel || '';
                 titleLabel = parsed?.contextLabel ? `上下文（${parsed.contextLabel}）` : '上下文';
                 contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
@@ -481,6 +519,13 @@
                 stepNameForHead = parsed?.stepName || '环节';
                 titleLabel = parsed.content || `局部 ITGap 分析（${stepNameForHead}）`;
                 contentStr = parsed.analysisJson != null ? JSON.stringify(parsed.analysisJson, null, 2) : (parsed.content || '(无)');
+              } else if (parsed?.type === 'localItGapCompressionIntentBlock') {
+                titleLabel = parsed?.confirmed ? '局部 ITGap 压缩（已确认）' : '局部 ITGap 压缩';
+                contentStr = (parsed?.content && String(parsed.content).trim()) || '我即将开始对局部 ITGap 分析做上下文压缩，便于后续环节的处理。';
+              } else if (parsed?.type === 'localItGapCompressionBlock') {
+                stepNameForHead = parsed?.stepName || '环节';
+                titleLabel = `压缩（${stepNameForHead}）`;
+                contentStr = typeof parsed?.compressedJson === 'string' ? parsed.compressedJson : (parsed?.compressedJson != null ? JSON.stringify(parsed.compressedJson, null, 2) : '(无)');
               } else if (parsed?.type === 'taskCompleteBlock') {
                 titleLabel = '任务完成';
                 contentStr = (parsed?.content && String(parsed.content).trim()) || '用户确认任务完成';

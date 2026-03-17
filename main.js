@@ -1973,7 +1973,7 @@ if (el.problemDetailChatMessages) {
         return;
       }
       const contextJson = buildTaskContextJson(taskId, item);
-      if (taskId !== 'task11') {
+      if (taskId !== 'task9' && taskId !== 'task11' && taskId !== 'task12') {
         pushAndSaveProblemDetailChat({ type: 'taskContextBlock', taskId, contextJson, timestamp: getTimeStr() });
       }
       const chatContainer = el.problemDetailChatMessages;
@@ -2054,6 +2054,9 @@ if (el.problemDetailChatMessages) {
           const sessions = generateLocalItGapSessions(valueStream);
           updateDigitalProblemLocalItGapSessions(item.createdAt, sessions);
           currentProblemDetailItem = { ...item, localItGapSessions: sessions };
+          const globalItGap = item.globalItGapAnalysisJson ?? null;
+          pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '价值流图 json', contextJson: valueStream, timestamp: getTimeStr() });
+          pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '全局 ITGap 分析 json', contextJson: globalItGap, timestamp: getTimeStr() });
           pushAndSaveProblemDetailChat({ type: 'localItGapSessionsBlock', sessions, timestamp: getTimeStr() });
           const container = el.problemDetailChatMessages;
           container.innerHTML = '';
@@ -2108,9 +2111,36 @@ if (el.problemDetailChatMessages) {
         }
         return;
       }
-      if (['task12', 'task13', 'task14', 'task15'].includes(taskId)) {
+      if (taskId === 'task12') {
         if (item?.createdAt) {
-          const substepMap = { task12: 2, task13: 3, task14: 4, task15: 5 };
+          const timestamp = getTimeStr();
+          const globalItGap = item.globalItGapAnalysisJson ?? null;
+          const localItGap = item.localItGapSessions ?? null;
+          const roleContent = typeof getLatestConfirmedRolePermissionContent === 'function' ? getLatestConfirmedRolePermissionContent(item) : null;
+          const rolePermissionJson = (roleContent && typeof parseRolePermissionModel === 'function') ? parseRolePermissionModel(typeof roleContent === 'string' ? roleContent : JSON.stringify(roleContent)) : (Array.isArray(roleContent) ? roleContent : null);
+          const coreBusinessObjectJson = item.coreBusinessObjectSessions ?? null;
+          pushAndSaveProblemDetailChat({ type: 'globalArchitectureContextBlock', taskId: 'task12', contextLabel: '全局 ITGap 分析 json', contextJson: globalItGap, timestamp });
+          pushAndSaveProblemDetailChat({ type: 'globalArchitectureContextBlock', taskId: 'task12', contextLabel: '局部 ITGap 分析 json', contextJson: Array.isArray(localItGap) ? localItGap : null, timestamp });
+          pushAndSaveProblemDetailChat({ type: 'globalArchitectureContextBlock', taskId: 'task12', contextLabel: '角色与权限模型推演 json', contextJson: Array.isArray(rolePermissionJson) ? rolePermissionJson : null, timestamp });
+          pushAndSaveProblemDetailChat({ type: 'globalArchitectureContextBlock', taskId: 'task12', contextLabel: '核心业务对象推演 json', contextJson: Array.isArray(coreBusinessObjectJson) ? coreBusinessObjectJson : null, timestamp });
+          itStrategyPlanViewingSubstep = 2;
+          problemDetailViewingMajorStage = 3;
+          updateProblemDetailProgressStages(3, problemDetailViewingMajorStage);
+          const chatContainer = el.problemDetailChatMessages;
+          if (chatContainer) {
+            chatContainer.innerHTML = '';
+            renderProblemDetailChatFromStorage(chatContainer, problemDetailChatMessages);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+          if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
+          renderProblemDetailContent();
+          updateProblemDetailChatHeaderLabel();
+        }
+        return;
+      }
+      if (['task13', 'task14', 'task15'].includes(taskId)) {
+        if (item?.createdAt) {
+          const substepMap = { task13: 3, task14: 4, task15: 5 };
           itStrategyPlanViewingSubstep = substepMap[taskId] ?? 0;
           problemDetailViewingMajorStage = 3;
           updateProblemDetailProgressStages(3, problemDetailViewingMajorStage);
@@ -2368,6 +2398,9 @@ if (el.problemDetailChatMessages) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
         saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
       }
+      const globalItGap = item.globalItGapAnalysisJson ?? null;
+      pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '价值流图 json', contextJson: valueStream, timestamp: getTimeStr() });
+      pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '全局 ITGap 分析 json', contextJson: globalItGap, timestamp: getTimeStr() });
       pushAndSaveProblemDetailChat({ type: 'localItGapSessionsBlock', sessions, timestamp: getTimeStr() });
       const container = el.problemDetailChatMessages;
       container.innerHTML = '';
@@ -2672,7 +2705,6 @@ if (el.problemDetailChatMessages) {
       }
       confirmLocalItGapSessionsBtn.disabled = true;
       confirmLocalItGapSessionsBtn.textContent = '已确认';
-      pushAndSaveProblemDetailChat({ type: 'localItGapContextLog', taskId: 'task9', timestamp: getTimeStr() });
       const container = el.problemDetailChatMessages;
       container.innerHTML = '';
       renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
@@ -2739,9 +2771,37 @@ if (el.problemDetailChatMessages) {
         if (allSteps.length > stepIndex + 1) {
           requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
         } else {
-          requestAnimationFrame(() => showTaskCompletionConfirm('task9', taskNameTask9));
+          pushAndSaveProblemDetailChat({
+            type: 'localItGapCompressionIntentBlock',
+            taskId: 'task9',
+            content: '我即将开始对局部 ITGap 分析做上下文压缩，便于后续环节的处理。',
+            confirmed: false,
+            timestamp: getTimeStr(),
+          });
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+          renderProblemDetailHistory();
         }
       } catch (_) {}
+      return;
+    }
+    const confirmLocalItGapCompressionBtn = e.target.closest('.btn-confirm-local-itgap-compression');
+    if (confirmLocalItGapCompressionBtn && !confirmLocalItGapCompressionBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const idx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapCompressionIntentBlock');
+      if (idx >= 0 && item?.createdAt) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        confirmLocalItGapCompressionBtn.disabled = true;
+        confirmLocalItGapCompressionBtn.textContent = '已确认';
+        const container = el.problemDetailChatMessages;
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+        requestAnimationFrame(() => runLocalItGapCompressionSequentially());
+      }
       return;
     }
     const startItStrategyPlanBtn = e.target.closest('.btn-confirm-start-it-strategy-plan');
@@ -5483,6 +5543,32 @@ const LOCAL_ITGAP_PROMPT = `# 角色设定
 \`\`\`
 重要：只返回上述 JSON，不要用 Markdown 标题分段，每个维度的内容必须放入对应字段中。`;
 
+const LOCAL_ITGAP_COMPRESSION_PROMPT = `Role & Context:
+我正在进行大规模系统架构推演，目前"局部 IT Gap 分析"文档字数过多。请作为需求架构师，将详尽的分析报告压缩为"元数据摘要"，仅保留能驱动"角色权限推演"和"业务对象建模"的关键逻辑。
+
+Task Goal:
+遍历每一个流程环节的 JSON，提取其灵魂要素，剔除所有 Markdown 格式、修饰性词汇和背景说明。
+
+Compression Logic (严格执行):
+- 保留 stepIndex 和 stepName：这是唯一标识符。
+- 精简 statusQuo：只保留一个关键词描述痛点（如：全人工、Excel 记录）。
+- 重组 itGap3DMap 为 coreGaps：提取 1-3 个最致命的技术断点（如：库存数据不实时、缺少基准价模型）。
+- 精简 actionableRequirements 为 sysFeatures：提取具体的功能点（如：集成行情 API、建立价格预警规则）。
+- 剔除 businessValuePrediction：仅保留其核心指标名称（如：毛利提升、风险降低）。
+
+Output Format (Strict Minified JSON):
+请直接输出 JSON 数组，格式如下，每个环节对应一个元素：
+[
+  {
+    "idx": 0,
+    "step": "市场行情监控与价格预判",
+    "pain": "人工经验决策/数据滞后",
+    "gaps": ["行情数据未入库", "无自动化对标模型"],
+    "feats": ["外部API行情抓取", "动态价格看板", "阈值预警规则"],
+    "val": "毛利/风险控制"
+  }
+]`;
+
 const LOCAL_ITGAP_STRUCTURED_SECTIONS = [
   { key: 'statusQuo', label: '现状透视 (Status Quo)', isPrimary: true },
   { key: 'itGap3DMap', label: 'IT Gap 三维映射表', isPrimary: true },
@@ -5881,6 +5967,82 @@ function buildLocalItGapMarkdown(analysis) {
     if (content) parts.push(`## ${label}\n\n${content}`);
   }
   return parts.join('\n\n');
+}
+
+/** 调用大模型对单环节局部 ITGap 分析 JSON 进行上下文压缩，返回压缩后的内容及 usage、durationMs */
+async function compressLocalItGapJson(analysisJson, stepName, stepIndex) {
+  const userContent = `以下为环节「${(stepName || '').replace(/"/g, '\\"')}」（stepIndex: ${stepIndex}）的局部 IT Gap 分析 JSON，请按压缩逻辑输出一个仅含一个元素的 JSON 数组（idx、step、pain、gaps、feats、val）：\n\n\`\`\`json\n${typeof analysisJson === 'string' ? analysisJson : JSON.stringify(analysisJson, null, 2)}\n\`\`\``;
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
+    { role: 'system', content: LOCAL_ITGAP_COMPRESSION_PROMPT },
+    { role: 'user', content: userContent },
+  ]);
+  return { content, usage, model, durationMs };
+}
+
+/** 当用户确认「开始上下文压缩」后，按环节顺序依次压缩每个局部 ITGap 分析 JSON，每环节完成后向 task9 时间线推送压缩块，全部完成后弹出「是否视为完成」 */
+async function runLocalItGapCompressionSequentially() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  const sessions = item.localItGapSessions || [];
+  const withAnalysis = sessions
+    .map((s, i) => ({ ...s, stepIndex: i }))
+    .filter((s) => s.analysisJson != null);
+  if (withAnalysis.length === 0) {
+    const taskNameTask9 = (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task9')?.name) || '局部 ITGap 分析';
+    requestAnimationFrame(() => showTaskCompletionConfirm('task9', taskNameTask9));
+    return;
+  }
+  for (let i = 0; i < withAnalysis.length; i++) {
+    const session = withAnalysis[i];
+    const stepName = session.stepName || `环节${session.stepIndex + 1}`;
+    const analysisJson = typeof session.analysisJson === 'object' ? session.analysisJson : (() => { try { return JSON.parse(session.analysisJson); } catch (_) { return session.analysisJson; } })();
+    let parsingBlock = container.querySelector('.problem-detail-chat-msg-parsing');
+    if (!parsingBlock) {
+      parsingBlock = document.createElement('div');
+      parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+      container.appendChild(parsingBlock);
+    }
+    parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在压缩环节「${escapeHtml(stepName)}」的局部 ITGap 分析…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.scrollTop = container.scrollHeight;
+    try {
+      const { content, usage, model, durationMs } = await compressLocalItGapJson(analysisJson, stepName, session.stepIndex);
+      parsingBlock.remove();
+      let compressedJson = content;
+      try {
+        const text = (typeof content === 'string' ? content : JSON.stringify(content || '')).trim();
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const arr = JSON.parse(jsonMatch[0]);
+          compressedJson = Array.isArray(arr) && arr.length > 0 ? arr[0] : arr;
+        }
+      } catch (_) {}
+      const llmMeta = { usage, model, durationMs };
+      const compressedStr = typeof compressedJson === 'object' ? JSON.stringify(compressedJson, null, 2) : String(compressedJson);
+      pushAndSaveProblemDetailChat({
+        type: 'localItGapCompressionBlock',
+        taskId: 'task9',
+        stepName,
+        stepIndex: session.stepIndex,
+        compressedJson: compressedStr,
+        llmMeta,
+        timestamp: getTimeStr(),
+      });
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
+    } catch (err) {
+      parsingBlock.remove();
+      pushAndSaveProblemDetailChat({ role: 'system', content: '局部 ITGap 压缩失败（' + (stepName || '') + '）：' + (err.message || String(err)), timestamp: getTimeStr() });
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
+    }
+  }
+  const taskNameTask9 = (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task9')?.name) || '局部 ITGap 分析';
+  requestAnimationFrame(() => showTaskCompletionConfirm('task9', taskNameTask9));
 }
 
 const PARSE_PREVIEW_FIELDS = [
@@ -8088,6 +8250,10 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
+    } else if (msg.type === 'globalArchitectureContextBlock') {
+      return;
+    } else if (msg.type === 'localItGapContextBlock') {
+      return;
     } else if (msg.type === 'taskContextBlock') {
       if (msg.taskId === 'task8') {
         return;
@@ -8796,6 +8962,42 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(block);
+    } else if (msg.type === 'localItGapCompressionIntentBlock') {
+      const confirmed = !!msg.confirmed;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-compression-intent problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = msg.taskId || 'task9';
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '我即将开始对局部 ITGap 分析做上下文压缩，便于后续环节的处理。')}</div>
+          <div class="problem-detail-chat-task-completion-actions">
+            <button type="button" class="btn-confirm-local-itgap-compression btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
+    } else if (msg.type === 'localItGapCompressionBlock') {
+      const stepName = msg.stepName || '';
+      const compressedJson = msg.compressedJson;
+      const jsonStr = typeof compressedJson === 'string' ? compressedJson : (compressedJson != null ? JSON.stringify(compressedJson, null, 2) : '');
+      const llmMeta = msg.llmMeta || {};
+      const llmMetaHtml = buildLlmMetaHtml(llmMeta);
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-compression-card problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = msg.taskId || 'task9';
+      cardBlock.dataset.stepName = stepName;
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-local-itgap-card-wrap">
+          <div class="problem-detail-chat-local-itgap-card-header">压缩：${escapeHtml(stepName)}</div>
+          <pre class="problem-detail-chat-json-pre">${escapeHtml(jsonStr || '')}</pre>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>
+        <div class="problem-detail-chat-local-itgap-card-meta">${llmMetaHtml}</div>`;
+      container.appendChild(cardBlock);
     } else if (msg.type === 'intentExtractionCard') {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
