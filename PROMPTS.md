@@ -790,6 +790,8 @@ ${currentContent || '(空)'}
 **函数**：`generateCoreBusinessObjectForStepWithStrictPrompt(stepName, stageName, stepIndex, valueStreamJson, globalItGapJson, localItGapJson, rolePermissionJson)`（`js/coreBusinessObject.js`）  
 **用途**：基于价值流、全局/局部 ITGap、角色与权限四类上下文，针对当前环节推导并输出核心业务对象（主数据、事务数据、状态数据），含对象分类、属性对冲、状态机、关系图谱及多对象协同说明。
 
+**全部确认**：自动顺序执行跑完所有环节后，或刷新页面且所有 session 已有输出但存在未确认环节卡片时，聊天区展示「所有环节的核心业务对象推演已经结束，是否全部确认？」与「全部确认」按钮；用户点击后，所有环节卡片视为已确认，过程日志中对应 JSON 由「输出」变为「确认」。若当前会触发该提示块，则不再下发「任务通知：我即将开始【核心业务对象推演】任务」。
+
 ### System Prompt
 
 ```

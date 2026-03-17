@@ -277,11 +277,15 @@
 - **上下文卡片**：`coreBusinessObjectContextBlock` 纳入 task11 过程日志；`getCommunicationLogType` 返回「上下文」；时间线标题栏为「上下文」+ 备注（`contextNoteForHead = parsed.contextLabel`），详情内容为 `contextJson` 的 JSON。
 - **Session 计划块**：`coreBusinessObjectSessionsBlock` 纳入 task11 过程日志；未确认时标签「输出」、已确认时「确认」；时间线标题栏在标签右侧显示备注 `sessionPlanNoteForHead = '核心业务对象推演 session 计划'`，详情内容为 `sessions` 的 JSON。
 - **单环节推演卡片**：`coreBusinessObjectAnalysisCard` 纳入 task11 过程日志；未确认时标签「输出」、已确认时「确认」；时间线标签右侧显示对应环节名称（`stepNameForHead`），详情内容为该环节推演 JSON。与角色与权限单环节卡片交互一致。
+- **全部确认提示块**：`coreBusinessObjectAllDoneBlock` 纳入 task11 过程日志；未全部确认时标签「输出」、已全部确认时「确认」；时间线标题为「核心业务对象推演全部结束」/「核心业务对象推演全部确认」，详情为提示文案。
 
-### 8.5 手工逐项确认与单环节卡片（main.js）
+### 8.5 手工逐项确认、自动顺序执行与全部确认（main.js）
 
 - 用户点击「手工逐项确认」后，main.js 调用 `runCoreBusinessObjectForNextStep()`：对**下一待推演环节**调用 `generateCoreBusinessObjectForStepWithStrictPrompt`，将返回的 JSON 写入该 session 的 `coreBusinessObjectJson`，并 **pushAndSaveProblemDetailChat** 一条 `coreBusinessObjectAnalysisCard`（content、stepName、stepIndex、confirmed: false、llmMeta）。聊天区渲染该卡片：标题「核心业务对象推演：{环节名}」，内容为 JSON，操作区为**确认、重做、修正、讨论**。过程日志中该条显示为「输出」、右侧标注环节名称。
-- 用户点击「自动顺序执行」后，main.js 调用 `runCoreBusinessObjectAutoSequential()`：按 session 顺序逐环节调用上述 LLM 并更新 session 与工作区，直至全部推演完成。
+- 用户点击「自动顺序执行」后，main.js 调用 `runCoreBusinessObjectAutoSequential()`：按 session 顺序逐环节调用上述 LLM 并更新 session 与工作区；**当所有 session 均有 `coreBusinessObjectJson` 时**，推送一条 **`coreBusinessObjectAllDoneBlock`**（文案：「所有环节的核心业务对象推演已经结束，是否全部确认？」+ 按钮「全部确认」），不自动确认，由用户后续操作。
+- **全部确认触发条件**：（1）自动顺序执行跑完所有环节后自动推送上述提示块；（2）**刷新页面后**：若当前问题处于核心业务对象推演阶段、所有 session 已有大模型输出且聊天中存在未确认的 `coreBusinessObjectAnalysisCard`，main.js 在 `initProblemDetailChat` 后调用 **`ensureCoreBusinessObjectAllDoneBlockIfNeeded()`**，若无该块则追加同一条「全部确认」提示块并保存。
+- **全部确认按钮**：用户点击「全部确认」后，main.js 将聊天中所有 `coreBusinessObjectAnalysisCard` 置为 `confirmed: true`，将 `coreBusinessObjectAllDoneBlock` 置为 `allConfirmed: true`，保存并重绘聊天、工作区、过程日志；过程日志中对应环节的 JSON 条目由「输出」变为「确认」。若有未确认项被确认，则弹出 task11「是否视为完成」确认。
+- **刷新时任务通知**：当任务处于核心业务对象推演阶段且当前状态会触发「全部确认」提示块（所有 session 有输出且存在未确认 CBO 卡片）时，**不再**下发「任务通知：我即将开始【核心业务对象推演】任务」（`showTaskStartNotificationIfNeeded('task11', …)` 内判断并 return）。
 - 工作区环节卡片内「核心业务对象推演」子卡片**默认展示 json 页**（大模型返回的 JSON 显示在 json tab）；有数据时 view 页为解析后的实体视图或同份 JSON。
 
 ### 8.6 重启当前任务时清空工作区（main.js）

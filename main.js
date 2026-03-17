@@ -2557,6 +2557,43 @@ if (el.problemDetailChatMessages) {
       requestAnimationFrame(() => runRolePermissionModelingForNextStep && runRolePermissionModelingForNextStep());
       return;
     }
+    const btnCoreBusinessObjectConfirmAll = e.target.closest('.btn-core-business-object-confirm-all');
+    if (btnCoreBusinessObjectConfirmAll && !btnCoreBusinessObjectConfirmAll.disabled) {
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      const allDoneBlock = btnCoreBusinessObjectConfirmAll.closest('[data-msg-index]');
+      const allDoneIdx = allDoneBlock ? parseInt(allDoneBlock.dataset.msgIndex, 10) : -1;
+      let hasUnconfirmed = false;
+      for (let i = 0; i < problemDetailChatMessages.length; i++) {
+        const m = problemDetailChatMessages[i];
+        if (m.type === 'coreBusinessObjectAnalysisCard' && !m.confirmed) {
+          hasUnconfirmed = true;
+          problemDetailChatMessages[i] = { ...m, confirmed: true };
+        }
+      }
+      if (allDoneIdx >= 0 && allDoneIdx < problemDetailChatMessages.length && problemDetailChatMessages[allDoneIdx].type === 'coreBusinessObjectAllDoneBlock') {
+        problemDetailChatMessages[allDoneIdx] = { ...problemDetailChatMessages[allDoneIdx], allConfirmed: true };
+      }
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      btnCoreBusinessObjectConfirmAll.disabled = true;
+      btnCoreBusinessObjectConfirmAll.textContent = '已全部确认';
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      if (hasUnconfirmed) {
+        requestAnimationFrame(() => {
+          const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+          if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          showTaskCompletionConfirm('task11', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task11')?.name) || '核心业务对象推演');
+        });
+      }
+      return;
+    }
     const confirmCoreBusinessObjectStepBtn = e.target.closest('.btn-confirm-core-business-object-step');
     if (confirmCoreBusinessObjectStepBtn && !confirmCoreBusinessObjectStepBtn.disabled) {
       const card = confirmCoreBusinessObjectStepBtn.closest('[data-msg-index]');
@@ -6399,6 +6436,13 @@ function showTaskStartNotificationIfNeeded(taskId, forceShow) {
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   const task = allTasks.find((t) => t.id === taskId);
   if (!task) return;
+  if (taskId === 'task11') {
+    const sessions = item.coreBusinessObjectSessions || [];
+    if (sessions.length > 0 && !sessions.some((s) => !s.coreBusinessObjectJson)) {
+      const hasUnconfirmed = problemDetailChatMessages.some((m) => m.type === 'coreBusinessObjectAnalysisCard' && !m.confirmed);
+      if (hasUnconfirmed) return;
+    }
+  }
   const existingIdx = problemDetailChatMessages.findIndex((m) => m.type === 'taskStartNotification' && m.taskId === taskId);
   if (existingIdx >= 0) {
     const existing = problemDetailChatMessages[existingIdx];
@@ -6610,6 +6654,24 @@ function showTaskCompletionConfirm(taskId, taskName) {
   }
 }
 
+/** 若当前为核心业务对象推演且所有环节已有大模型输出但存在未确认卡片，则追加「全部确认」提示块（用于刷新页面后恢复） */
+function ensureCoreBusinessObjectAllDoneBlockIfNeeded() {
+  const item = currentProblemDetailItem;
+  if (!item?.createdAt) return false;
+  const sessions = item.coreBusinessObjectSessions || [];
+  if (sessions.length === 0) return false;
+  if (sessions.some((s) => !s.coreBusinessObjectJson)) return false;
+  const hasUnconfirmed = problemDetailChatMessages.some((m) => m.type === 'coreBusinessObjectAnalysisCard' && !m.confirmed);
+  if (!hasUnconfirmed) return false;
+  if (problemDetailChatMessages.some((m) => m.type === 'coreBusinessObjectAllDoneBlock')) return false;
+  pushAndSaveProblemDetailChat({
+    type: 'coreBusinessObjectAllDoneBlock',
+    content: '所有环节的核心业务对象推演已经结束，是否全部确认？',
+    timestamp: getTimeStr(),
+  });
+  return true;
+}
+
 function initProblemDetailChat() {
   const container = el.problemDetailChatMessages;
   if (!container) return;
@@ -6620,6 +6682,10 @@ function initProblemDetailChat() {
   if (storedChat && Array.isArray(storedChat) && storedChat.length > 0) {
     problemDetailChatMessages = storedChat;
     renderProblemDetailChatFromStorage(container, storedChat);
+    if (typeof ensureCoreBusinessObjectAllDoneBlockIfNeeded === 'function' && ensureCoreBusinessObjectAllDoneBlockIfNeeded()) {
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+    }
   } else {
     problemDetailChatMessages = [{ role: 'system', content: '请输入客户基本信息', timestamp: getTimeStr() }];
     appendProblemDetailChatMessage(container, 'system', '请输入客户基本信息', { noSave: true });
@@ -7497,11 +7563,23 @@ async function runCoreBusinessObjectAutoSequential() {
     let sessions = (item.coreBusinessObjectSessions || []).slice();
     const nextIdx = sessions.findIndex((s) => !s.coreBusinessObjectJson);
     if (nextIdx < 0) {
+      const hasAllDoneBlock = problemDetailChatMessages.some((m) => m.type === 'coreBusinessObjectAllDoneBlock');
+      if (!hasAllDoneBlock) {
+        pushAndSaveProblemDetailChat({
+          type: 'coreBusinessObjectAllDoneBlock',
+          content: '所有环节的核心业务对象推演已经结束，是否全部确认？',
+          timestamp: getTimeStr(),
+        });
+      }
       container.innerHTML = '';
       renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
       container.scrollTop = container.scrollHeight;
       renderProblemDetailContent();
       renderProblemDetailHistory();
+      requestAnimationFrame(() => {
+        const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+        if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
       return;
     }
     const session = sessions[nextIdx];
@@ -7517,9 +7595,10 @@ async function runCoreBusinessObjectAutoSequential() {
     container.appendChild(parsingBlock);
     container.scrollTop = container.scrollHeight;
     try {
-      const { content } = await (typeof generateCoreBusinessObjectForStepWithStrictPrompt === 'function'
+      const resp = await (typeof generateCoreBusinessObjectForStepWithStrictPrompt === 'function'
         ? generateCoreBusinessObjectForStepWithStrictPrompt(stepName, stageName, nextIdx, valueStreamJson, globalItGapJson, localItGapJson, rolePermissionJson)
         : Promise.resolve({ content: null }));
+      const { content, usage, model, durationMs } = resp || {};
       parsingBlock.remove();
       let stepJson = null;
       if (content != null) {
@@ -7533,6 +7612,16 @@ async function runCoreBusinessObjectAutoSequential() {
       }
       sessions[nextIdx] = { ...sessions[nextIdx], coreBusinessObjectJson: stepJson };
       if (typeof updateDigitalProblemCoreBusinessObjectSessions === 'function') updateDigitalProblemCoreBusinessObjectSessions(item.createdAt, sessions);
+      const llmMeta = (usage != null || model != null || durationMs != null) ? { usage, model, durationMs } : undefined;
+      pushAndSaveProblemDetailChat({
+        type: 'coreBusinessObjectAnalysisCard',
+        content: stepJson,
+        stepName,
+        stepIndex: nextIdx,
+        timestamp: getTimeStr(),
+        confirmed: false,
+        llmMeta,
+      });
       const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
       if (updated) currentProblemDetailItem = updated;
       const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'coreBusinessObjectSessionsBlock');
@@ -8383,6 +8472,20 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '全部环节已推演完毕，请逐项确认各卡片。')}</div>
           <div class="problem-detail-chat-role-permission-all-done-actions">
             <button type="button" class="btn-role-permission-confirm-all btn-confirm-primary" ${allConfirmed ? 'disabled' : ''}>${allConfirmed ? '已全部确认' : '全部确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'coreBusinessObjectAllDoneBlock') {
+      const allConfirmed = !!msg.allConfirmed;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-all-done problem-detail-chat-core-business-object-all-done';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '所有环节的核心业务对象推演已经结束，是否全部确认？')}</div>
+          <div class="problem-detail-chat-role-permission-all-done-actions">
+            <button type="button" class="btn-core-business-object-confirm-all btn-confirm-primary" ${allConfirmed ? 'disabled' : ''}>${allConfirmed ? '已全部确认' : '全部确认'}</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
