@@ -11,6 +11,11 @@
   const DEEPSEEK_MODEL = cfg.DEEPSEEK_MODEL || 'deepseek-chat';
   const BACKEND_API_URL = (cfg.BACKEND_API_URL || '').replace(/\/$/, '');
 
+  /**
+   * 调用 DeepSeek Chat Completion 接口。
+   * @param {Array<{role: string, content: string}>} messages - 对话消息数组。
+   * @returns {Promise<{content: string, usage: Object, model: string, durationMs: number}>} 模型返回结果。
+   */
   async function fetchDeepSeekChat(messages) {
     if (mode === 'online') {
       const res = await fetch(BACKEND_API_URL + '/ai/chat', {
@@ -45,11 +50,16 @@
     return { content, usage, model: DEEPSEEK_MODEL, durationMs };
   }
 
-  /** 是否有 AI 配置：Backend 代理 或 直连 Key */
+  /** 是否有 AI 配置 */
   function hasAiConfig() {
     return mode === 'online' ? Boolean(BACKEND_API_URL) : Boolean(DEEPSEEK_API_KEY);
   }
 
+  /**
+   * 构建 LLM 消耗信息 HTML 片段。
+   * @param {{usage?: Object, model?: string, durationMs?: number}} meta - 模型元信息。
+   * @returns {string} 可直接插入页面的 HTML。
+   */
   function buildLlmMetaHtml(meta) {
     if (!meta) return '';
     const totalTokens = meta.usage?.total_tokens ?? ((meta.usage?.prompt_tokens || 0) + (meta.usage?.completion_tokens || 0));

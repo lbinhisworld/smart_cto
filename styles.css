@@ -1043,6 +1043,7 @@ body {
 .btn-redo-global-itgap,
 .btn-redo-role-permission,
 .btn-redo-role-permission-step,
+.btn-redo-core-business-object-step,
 .btn-redo-basic-info,
 .btn-redo-bmc,
 .btn-redo-value-stream,
@@ -1065,6 +1066,7 @@ body {
 .btn-redo-global-itgap:hover:not(:disabled),
 .btn-redo-role-permission:hover:not(:disabled),
 .btn-redo-role-permission-step:hover:not(:disabled),
+.btn-redo-core-business-object-step:hover:not(:disabled),
 .btn-redo-basic-info:hover:not(:disabled),
 .btn-redo-bmc:hover:not(:disabled),
 .btn-redo-value-stream:hover:not(:disabled),
@@ -1080,6 +1082,7 @@ body {
 .btn-redo-global-itgap:disabled,
 .btn-redo-role-permission:disabled,
 .btn-redo-role-permission-step:disabled,
+.btn-redo-core-business-object-step:disabled,
 .btn-redo-basic-info:disabled,
 .btn-redo-bmc:disabled,
 .btn-redo-value-stream:disabled,
@@ -1225,10 +1228,17 @@ body {
 /* 环节卡片 view/json 双 tab */
 .problem-detail-role-permission-tabs {
   display: flex;
+  align-items: center;
   gap: 0.25rem;
   margin-bottom: 0.75rem;
   border-bottom: 1px solid var(--border);
   padding-bottom: 0.35rem;
+}
+.problem-detail-role-permission-tabs-title {
+  margin-right: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #22c55e;
 }
 .problem-detail-role-permission-tab {
   padding: 0.25rem 0.6rem;
@@ -1249,6 +1259,59 @@ body {
   color: var(--accent);
   background: var(--accent-dim);
   border-color: var(--accent);
+}
+
+/* 环节内子卡片：核心业务对象推演 view/json 双 tab */
+.problem-detail-step-card-core-business-object {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.problem-detail-core-business-object-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.35rem;
+}
+.problem-detail-core-business-object-tabs-title {
+  margin-right: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #22c55e;
+}
+.problem-detail-core-business-object-tab {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.problem-detail-core-business-object-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+.problem-detail-core-business-object-tab-active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.problem-detail-core-business-object-panel {
+  margin-top: 0.25rem;
+}
+.problem-detail-core-business-object-json {
+  margin: 0;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-code);
+  border-radius: 6px;
 }
 
 /* view 面板：角色圆角卡片列表 */
@@ -1302,6 +1365,9 @@ body {
   cursor: pointer;
   user-select: none;
   transition: background 0.2s;
+}
+.problem-detail-role-card-header .problem-detail-role-card-header-title {
+  color: #ffeb3b;
 }
 .problem-detail-role-card-header:hover {
   background: rgba(88, 166, 255, 0.38);
@@ -1644,6 +1710,24 @@ body {
 
 .problem-detail-chat-local-itgap-sessions-card-body .problem-detail-chat-local-itgap-sessions-list {
   margin-bottom: 0.75rem;
+}
+
+.problem-detail-chat-local-itgap-io-block .problem-detail-chat-local-itgap-io-title {
+  font-weight: 600;
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.9rem;
+}
+
+.problem-detail-chat-local-itgap-io-block .problem-detail-chat-local-itgap-prompt-pre {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .problem-detail-local-itgap-trigger {
@@ -2833,13 +2917,13 @@ body {
   margin-left: 1rem;
 }
 
-/* 问题详情页 - 历史侧滑面板（悬浮 overlay，半透明磨砂，背景色与首页区分） */
+/* 问题详情页 - 历史侧滑面板（悬浮 overlay，半透明磨砂，背景色与首页区分；宽度 +15% 以容纳过程日志标题栏备注不换行） */
 .problem-detail-history-panel {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 570px;
+  width: 722px; /* 656 * 1.1，再扩大 10% */
   max-width: 90vw;
   display: flex;
   flex-direction: column;
@@ -2847,10 +2931,10 @@ body {
   z-index: 100;
   transform: translateX(100%);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
-  background: rgba(55, 48, 72, 0.88);
+  background: #1a0a2e; /* 更深紫底色 */
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border-left: 1px solid rgba(85, 75, 110, 0.55);
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px 0 0 8px;
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.25);
 }
@@ -2870,10 +2954,10 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.6rem 1rem;
-  border-bottom: 1px solid rgba(85, 75, 110, 0.55);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--text);
+  color: #fff;
 }
 
 .problem-detail-history-close {
@@ -2898,6 +2982,88 @@ body {
   padding: 0.5rem 0;
   overflow-y: auto;
   overflow-x: hidden;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* 沟通历史顶部汇总：总处理字数、总消耗 token、总耗时 */
+.problem-detail-history-summary {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(85, 75, 110, 0.4);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.problem-detail-history-summary-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.4rem 0.5rem;
+  min-width: 0;
+}
+
+.problem-detail-history-summary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.problem-detail-history-summary-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.problem-detail-history-summary-icon svg {
+  display: block;
+}
+
+.problem-detail-history-summary-icon-in {
+  color: #86efac;
+}
+
+.problem-detail-history-summary-icon-out {
+  color: #a5b4fc;
+}
+
+.problem-detail-history-summary-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.problem-detail-history-summary-chars {
+  color: #ffeb3b;
+}
+
+.problem-detail-history-summary-tokens,
+.problem-detail-history-summary-tokens-in,
+.problem-detail-history-summary-tokens-out {
+  color: #64b5f6;
+}
+
+.problem-detail-history-summary-tokens-in {
+  color: #86efac;
+}
+
+.problem-detail-history-summary-tokens-out {
+  color: #a5b4fc;
+}
+
+.problem-detail-history-summary-duration {
+  color: #fff;
 }
 
 /* 回退任务选择弹窗 */
@@ -3047,9 +3213,10 @@ body {
   color: #3b82f6;
 }
 
-.problem-detail-history-task-node .task-node-badge {
-  font-size: 0.7rem;
-  color: var(--text-muted);
+/* 任务标题右侧三列指标（与时间线内容块三列对齐，复用 timeline 同款 class） */
+.problem-detail-history-task-node .problem-detail-history-task-node-meta {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .problem-detail-history-task-children {
@@ -3218,6 +3385,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   width: 100%;
+  min-width: 0;
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
   font-family: inherit;
@@ -3228,6 +3396,8 @@ body {
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
+  white-space: nowrap;
+  overflow-x: auto;
 }
 
 .problem-detail-history-timeline-head:hover {
@@ -3266,30 +3436,91 @@ body {
   margin-left: 0.25rem;
   font-size: 0.7rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
+.problem-detail-history-timeline-meta-counts {
+  display: flex;
+  align-items: center;
+  gap: 0.575rem; /* 0.5rem + 15% */
+  margin-left: auto;
+  margin-right: 1.25rem; /* token 列与右边缘保持美观间隔，三列整体左移 */
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.problem-detail-history-timeline-char-count,
+.problem-detail-history-timeline-token-count,
+.problem-detail-history-timeline-duration {
+  font-size: 0.68rem;
+  text-align: left;
+  min-width: 5.5em;
+  width: 5.5em;
+  box-sizing: border-box;
+}
+
+.problem-detail-history-timeline-char-count {
+  color: #ffeb3b; /* 明黄色：生成字数 */
+}
+
+.problem-detail-history-timeline-token-count {
+  color: #64b5f6; /* 明蓝色：token 消耗 */
+}
+
+.problem-detail-history-timeline-token-in,
+.problem-detail-history-timeline-token-out {
+  font-size: 0.68rem;
+  text-align: left;
+}
+
+.problem-detail-history-timeline-token-in {
+  color: #86efac; /* 与顶部输入 token 颜色一致 */
+}
+
+.problem-detail-history-timeline-token-out {
+  color: #a5b4fc; /* 与顶部输出 token 颜色一致 */
+}
+
+.problem-detail-history-timeline-token-in {
+  color: #86efac; /* 输入 token */
+}
+
+.problem-detail-history-timeline-token-out {
+  color: #a5b4fc; /* 输出 token */
+}
+
+.problem-detail-history-timeline-duration {
+  color: #fff; /* 白色：耗时 */
+}
+
+/* 时间线标签：每种独立色相以示区隔 */
+/* 输入：绿色系，与确认明显区分 */
 .problem-detail-history-log-type-input {
-  background: rgba(99, 179, 237, 0.25);
-  color: #93c5fd;
-}
-
-.problem-detail-history-log-type-confirm {
-  background: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.4);
   color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.5);
 }
 
 .problem-detail-history-log-type-output {
-  background: rgba(59, 130, 246, 0.25);
-  color: #93c5fd;
+  background: rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+}
+
+/* 确认：蓝紫色系，与输入（绿）明显区分 */
+.problem-detail-history-log-type-confirm {
+  background: rgba(129, 140, 248, 0.35);
+  color: #c7d2fe;
+  border: 1px solid rgba(129, 140, 248, 0.5);
 }
 
 .problem-detail-history-log-type-modify {
-  background: rgba(234, 179, 8, 0.25);
+  background: rgba(245, 158, 11, 0.3);
   color: #fde047;
 }
 
 .problem-detail-history-log-type-discuss {
-  background: rgba(168, 85, 247, 0.25);
+  background: rgba(139, 92, 246, 0.3);
   color: #e9d5ff;
 }
 
@@ -3299,13 +3530,24 @@ body {
 }
 
 .problem-detail-history-log-type-complete {
-  background: rgba(22, 163, 74, 0.3);
-  color: #4ade80;
+  background: rgba(20, 184, 166, 0.3);
+  color: #5eead4;
 }
 
 .problem-detail-history-log-type-unsatisfied {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.3);
   color: #fca5a5;
+}
+
+.problem-detail-history-log-type-compress {
+  background: rgba(249, 115, 22, 0.3);
+  color: #fdba74;
+}
+
+.problem-detail-history-log-type-llm-query {
+  background: rgba(59, 130, 246, 0.28);
+  color: #bfdbfe;
+  border: 1px solid rgba(59, 130, 246, 0.45);
 }
 
 .problem-detail-chat-context-block .problem-detail-chat-context-json {
@@ -3360,6 +3602,69 @@ body {
   word-break: break-all;
   color: var(--text);
   max-height: 200px;
+  overflow-y: auto;
+}
+
+.problem-detail-history-timeline-detail-content-rich {
+  max-height: none;
+  overflow: visible;
+  white-space: normal;
+  word-break: normal;
+}
+
+.problem-detail-history-llm-query-subcards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.problem-detail-history-llm-query-subcard {
+  border: 1px solid rgba(45, 58, 77, 0.5);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}
+
+.problem-detail-history-llm-query-subcard-input {
+  background: rgba(34, 197, 94, 0.2); /* 与输入 token 同绿色系 */
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
+.problem-detail-history-llm-query-subcard-output {
+  background: rgba(99, 102, 241, 0.2); /* 与输出 token 同紫色系 */
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.problem-detail-history-llm-query-subcard-title {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #dbeafe;
+  border-bottom: 1px solid rgba(45, 58, 77, 0.5);
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.problem-detail-history-llm-query-subcard-input .problem-detail-history-llm-query-subcard-title {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.18);
+  border-bottom-color: rgba(34, 197, 94, 0.45);
+}
+
+.problem-detail-history-llm-query-subcard-output .problem-detail-history-llm-query-subcard-title {
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border-bottom-color: rgba(99, 102, 241, 0.45);
+}
+
+.problem-detail-history-llm-query-subcard-pre {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text);
+  max-height: 180px;
   overflow-y: auto;
 }
 
@@ -4176,6 +4481,279 @@ body {
 .problem-detail-card-requirement-logic .problem-detail-card-header {
   background: rgba(63, 185, 80, 0.18);
   border-bottom-color: rgba(63, 185, 80, 0.35);
+}
+
+/* 核心业务对象推演 - 局部ITGap 解决思路：标题栏明黄底深蓝字；内容区无独立背景，字体为明黄色、比标题小一号 */
+.problem-detail-card-core-business-local-gap .problem-detail-card-header {
+  background: #ffeb3b;
+  border-bottom-color: rgba(180, 160, 0, 0.4);
+}
+.problem-detail-card-core-business-local-gap .problem-detail-card-header .problem-detail-card-header-title {
+  color: #1a237e;
+  font-weight: 600;
+}
+.problem-detail-card-core-business-local-gap .problem-detail-card-header:hover {
+  background: #fff176;
+}
+.problem-detail-card-core-business-local-gap .problem-detail-card-body {
+  font-size: 1rem;
+  color: #ffeb3b;
+}
+.problem-detail-card-core-business-local-gap .problem-detail-card-body .markdown-body,
+.problem-detail-card-core-business-local-gap .problem-detail-card-body .problem-detail-core-business-object-field-content {
+  font-size: 1rem;
+  color: #ffeb3b;
+}
+/* 与「核心业务对象推演」tabs 标题栏字号一致 */
+.problem-detail-card-core-business-local-gap .problem-detail-card-header .problem-detail-card-header-title {
+  font-size: 0.9rem;
+}
+
+/* 核心业务对象推演 view：局部 ITGap 卡片下边缘与下一卡片之间的间隔 */
+.problem-detail-core-business-object-view-local-gap {
+  margin-bottom: 1rem;
+}
+
+/* 核心业务对象设计卡片：标题栏与局部 ITGap 解决思路一致（明黄底深蓝字），可折叠 */
+.problem-detail-card-core-business-design .problem-detail-card-header {
+  background: #ffeb3b;
+  border-bottom-color: rgba(180, 160, 0, 0.4);
+}
+.problem-detail-card-core-business-design .problem-detail-card-header .problem-detail-card-header-title {
+  color: #1a237e;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.problem-detail-card-core-business-design .problem-detail-card-header:hover {
+  background: #fff176;
+}
+
+/* 核心业务对象设计：一级可折叠栏目（按 object_role 分组）+ 内容区垂直列表与树形引导线 */
+.problem-detail-core-business-object-view-design {
+  margin-bottom: 0.5rem;
+}
+.problem-detail-core-business-object-design-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.problem-detail-card-core-business-design-group .problem-detail-card-header {
+  background: #ffeb3b;
+  border-bottom-color: rgba(180, 160, 0, 0.4);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+.problem-detail-card-core-business-design-group .problem-detail-card-header .problem-detail-card-header-title {
+  color: #1a237e;
+  font-weight: 600;
+}
+.problem-detail-core-business-object-count-tag {
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #1a237e;
+  opacity: 0.85;
+}
+.problem-detail-card-core-business-design-group .problem-detail-card-header:hover {
+  background: #fff176;
+}
+.problem-detail-core-business-object-design-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  position: relative;
+  padding: 0.75rem 0 0.75rem 1rem;
+  margin-left: 0.5rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+.problem-detail-core-business-object-design-item {
+  position: relative;
+  margin-left: 0;
+}
+.problem-detail-core-business-object-design-item .problem-detail-card-core-business-entity {
+  background: rgba(0, 0, 0, 0.15);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+.problem-detail-core-business-object-design-list .problem-detail-card-core-business-entity .problem-detail-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.28);
+  border-bottom: 1px solid var(--border);
+}
+.problem-detail-core-business-object-design-list .problem-detail-card-core-business-entity .problem-detail-card-header:hover {
+  background: rgba(88, 166, 255, 0.38);
+}
+.problem-detail-core-business-object-design-list .problem-detail-card-core-business-entity .problem-detail-card-header .problem-detail-card-header-title {
+  color: #ffeb3b;
+  flex: 1;
+  min-width: 0;
+}
+.problem-detail-core-business-object-design-item::before {
+  content: '';
+  position: absolute;
+  left: -1rem;
+  top: 0.875rem;
+  width: 0.75rem;
+  height: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
+
+/* 核心业务对象推演 view：对象卡片水平罗列 */
+.problem-detail-core-business-object-view-entities-horizontal {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+.problem-detail-core-business-object-view-entities-horizontal .problem-detail-card-core-business-entity {
+  flex: 0 1 auto;
+  min-width: 12rem;
+  max-width: 22rem;
+}
+
+/* 对象卡片标题栏：与角色与权限模型推演中的角色卡片标题栏一致，并带核心对象图标 */
+.problem-detail-core-business-object-view-entities-horizontal .problem-detail-card-core-business-entity .problem-detail-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.28);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.problem-detail-core-business-object-view-entities-horizontal .problem-detail-card-core-business-entity .problem-detail-card-header:hover {
+  background: rgba(88, 166, 255, 0.38);
+}
+.problem-detail-core-business-object-view-entities-horizontal .problem-detail-card-core-business-entity .problem-detail-card-header .problem-detail-card-header-title {
+  color: var(--accent);
+  flex: 1;
+  min-width: 0;
+}
+.problem-detail-core-business-entity-header-icon {
+  flex-shrink: 0;
+  width: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+  opacity: 0.95;
+}
+
+/* 对象名称右侧的类型说明标签（object_role）：圆角矩形 */
+.problem-detail-core-business-entity-category-tag {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #0d47a1;
+  background: rgba(187, 222, 251, 0.9);
+  border-radius: 6px;
+  border: 1px solid rgba(25, 118, 210, 0.35);
+  margin-left: 0.35rem;
+}
+.problem-detail-core-business-entity-global-tag {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #1b5e20;
+  background: rgba(200, 230, 201, 0.9);
+  border-radius: 6px;
+  border: 1px solid rgba(76, 175, 80, 0.35);
+  margin-left: 0.35rem;
+}
+.problem-detail-core-business-entity-role-tag {
+  flex-shrink: 0;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #1a237e;
+  background: rgba(255, 235, 59, 0.85);
+  border-radius: 6px;
+  border: 1px solid rgba(180, 160, 0, 0.35);
+  margin-left: 0.35rem;
+}
+
+/* 对象卡片内 4 个子卡片：说明、字段定义、状态机、关联对象（标题与角色与权限「过去操作」一致） */
+.problem-detail-core-business-entity-sections {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+}
+.problem-detail-core-business-entity-subcard {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.problem-detail-core-business-entity-subcard .problem-detail-role-card-section-title {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #5dc9b4;
+}
+.problem-detail-core-business-entity-subcard-body {
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-table {
+  font-size: 0.82rem;
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid rgba(160, 160, 160, 0.45);
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-table th,
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-table td {
+  border: 1px solid rgba(160, 160, 160, 0.45);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-table thead th {
+  background: rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+}
+.problem-detail-core-business-entity-subcard-body .problem-detail-core-business-object-list-item {
+  margin: 0.15rem 0;
+}
+
+.problem-detail-core-business-usage-table {
+  margin-top: 0.25rem;
+}
+.problem-detail-core-business-usage-table .problem-detail-core-business-usage-table-label {
+  font-weight: 600;
+  color: var(--text-muted);
+  width: 6rem;
+  vertical-align: top;
+  padding-top: 0.4rem;
+}
+.problem-detail-core-business-usage-table td {
+  vertical-align: top;
+}
+.problem-detail-core-business-usage-table td .problem-detail-core-business-object-field-content,
+.problem-detail-core-business-usage-table td .problem-detail-core-business-object-field-pre {
+  margin: 0;
 }
 
 .problem-detail-card-header-title {

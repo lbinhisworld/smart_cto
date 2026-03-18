@@ -155,6 +155,8 @@ let lastQueryResult = null;
 
 /** 最近一次解析结果，用于「启动跟进」 */
 let lastParsedResult = null;
+/** 首页「解析」最近一次大模型调用明细（供 task1 时间线复用） */
+let lastParsedLlmQuery = null;
 
 /** 当前问题详情页展示的跟进项 */
 let currentProblemDetailItem = null;
@@ -925,12 +927,6 @@ document.addEventListener('DOMContentLoaded', () => {
     console.warn('[DOMContentLoaded] btnValueStreamList 未找到，无法绑定点击事件');
   }
   restoreRouteState();
-
-  // 阶段三：当使用 Backend 存储时，异步拉取完成后需刷新 UI 并恢复路由
-  window.addEventListener('storageBackendReady', () => {
-    renderProblemFollowList();
-    restoreRouteState();
-  });
 });
 
 function updateSearchSuggestions() {
@@ -1392,7 +1388,7 @@ if (el.problemFollowListContent) {
       if (!Number.isNaN(index)) {
         const list = getDigitalProblems();
         const item = list[index];
-        if (item) openProblemDetail(item);
+        if (item) openProblemDetail(item, { fromStartFollow: true });
       }
     }
   });
@@ -1409,6 +1405,11 @@ if (el.btnProblemDetailReset) {
     const item = currentProblemDetailItem;
     if (!item?.createdAt) return;
     if (!confirm('是否要重置？')) return;
+    const isCurrentProblem = String(item.createdAt) === String(currentProblemDetailItem?.createdAt);
+    const chats = isCurrentProblem && Array.isArray(problemDetailChatMessages)
+      ? problemDetailChatMessages
+      : (typeof getProblemDetailChats === 'function' ? (getProblemDetailChats()[item.createdAt] || []) : []);
+    const preliminaryChats = keepPreliminaryOnlyChats(Array.isArray(chats) ? chats : []);
     const resetItem = typeof resetDigitalProblemToPreliminary === 'function' ? resetDigitalProblemToPreliminary(item.createdAt) : null;
     if (!resetItem) return;
     currentProblemDetailItem = resetItem;
@@ -1416,16 +1417,7 @@ if (el.btnProblemDetailReset) {
     problemDetailViewingMajorStage = 0;
     problemDetailWaitingForFeedback = null;
     lastModificationClarification = null;
-    const task1 = (FOLLOW_TASKS || []).concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task1');
-    const task1Name = task1?.name || '企业背景洞察';
-    const startBlock = {
-      type: 'taskStartNotification',
-      taskId: 'task1',
-      taskName: task1Name,
-      timestamp: getTimeStr(),
-      confirmed: false,
-    };
-    problemDetailChatMessages = [startBlock];
+    problemDetailChatMessages = preliminaryChats;
     saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
     updateProblemDetailProgressStages(0, 0);
     renderProblemDetailContent();
@@ -1543,6 +1535,28 @@ function applyRollbackToTask(targetTaskId) {
   showTaskStartNotificationIfNeeded(targetTaskId, true);
 }
 
+/** 仅保留初步需求提炼对应的时间线内容块（task1 LLM 查询），其余聊天消息全部清除 */
+function keepPreliminaryOnlyChats(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  const isPreliminaryLlmQuery = (m) => {
+    if (!m || m.type !== 'task1LlmQueryBlock') return false;
+    const noteName = String(m.noteName || '').trim();
+    if (noteName.includes('初步需求')) return true;
+    const prompt = String(m.llmInputPrompt || '');
+    if (prompt.includes('数字化需求分析助手') || prompt.includes('客户需求或挑战') || prompt.includes('项目时间要求')) return true;
+    const out = m.llmOutputJson;
+    if (out && typeof out === 'object') {
+      const keys = Object.keys(out);
+      if (keys.includes('customerName') || keys.includes('customerNeedsOrChallenges') || keys.includes('customerItStatus') || keys.includes('projectTimeRequirement')) return true;
+    }
+    return false;
+  };
+  const prelimBlocks = list.filter(isPreliminaryLlmQuery);
+  if (prelimBlocks.length === 0) return [];
+  const last = prelimBlocks[prelimBlocks.length - 1];
+  return [{ ...last, noteName: '初步需求提炼' }];
+}
+
 if (el.btnProblemDetailRollback) {
   el.btnProblemDetailRollback.addEventListener('click', () => openRollbackTaskModal());
 }
@@ -1550,19 +1564,43 @@ if (el.btnProblemDetailRollback) {
 /** 重新开始当前任务：清空当前任务已形成的聊天、工作区、沟通历史数据，不改变当前任务设置，并推送当前任务启动通知 */
 function applyRestartCurrentTask() {
   const item = currentProblemDetailItem;
-  if (!item?.createdAt) return;
+  if (!item?.createdAt) {
+    return;
+  }
   const list = getDigitalProblems();
   const dataItem = list.find((p) => String(p.createdAt) === String(item.createdAt)) || item;
   const currentTask = getFirstUncompletedTask(dataItem);
-  if (!currentTask) return;
+  if (!currentTask) {
+    if (typeof alert === 'function') alert('当前没有可重启的任务（所有任务已完成）');
+    return;
+  }
   const taskId = currentTask.id;
-  const updated = buildItemClearCurrentTaskOnly(dataItem, taskId);
-  if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
   const isCurrentProblem = String(item.createdAt) === String(currentProblemDetailItem?.createdAt);
   const chats = isCurrentProblem && Array.isArray(problemDetailChatMessages)
     ? problemDetailChatMessages
     : (typeof getProblemDetailChats === 'function' ? (getProblemDetailChats()[item.createdAt] || []) : []);
-  const filteredChats = filterChatMessagesRemoveTask(Array.isArray(chats) ? chats : [], taskId);
+
+  let updated = buildItemClearCurrentTaskOnly(dataItem, taskId);
+  let filteredChats = filterChatMessagesRemoveTask(Array.isArray(chats) ? chats : [], taskId);
+  if (taskId === 'task2') {
+    filteredChats = (Array.isArray(filteredChats) ? filteredChats : []).filter((m) => {
+      if (!m) return false;
+      const t = m.type || '';
+      if (t === 'task2LlmQueryBlock') return false;
+      if (t === 'bmcCard' || t === 'bmcStartBlock') return false;
+      if ((t === 'taskCompleteBlock' || t === 'taskCompletionConfirmBlock') && m.taskId === 'task2') return false;
+      if (t === 'taskStartNotification' && m.taskId === 'task2') return false;
+      if (m.role === 'system' && typeof m.content === 'string' && m.content.includes('商业模式画布 BMC')) return false;
+      return true;
+    });
+  }
+  if (taskId === 'task1') {
+    const resetItem = typeof resetDigitalProblemToPreliminary === 'function' ? resetDigitalProblemToPreliminary(item.createdAt) : null;
+    if (resetItem) updated = resetItem;
+    filteredChats = keepPreliminaryOnlyChats(Array.isArray(chats) ? chats : []);
+  }
+
+  if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
   if (typeof saveProblemDetailChat === 'function') saveProblemDetailChat(item.createdAt, filteredChats);
   problemDetailChatMessages = filteredChats;
   const fromStorage = getDigitalProblems().find((p) => String(p.createdAt) === String(item.createdAt));
@@ -1584,11 +1622,18 @@ function applyRestartCurrentTask() {
   }
   updateProblemDetailChatHeaderLabel();
   renderProblemDetailHistory();
-  showTaskStartNotificationIfNeeded(taskId, true);
+  if (taskId !== 'task1') showTaskStartNotificationIfNeeded(taskId, true);
 }
 
-if (el.btnProblemDetailRestartTask) {
-  el.btnProblemDetailRestartTask.addEventListener('click', () => applyRestartCurrentTask());
+if (el.problemDetailView) {
+  el.problemDetailView.addEventListener('click', (e) => {
+    const restartBtn = e.target.closest('#btnProblemDetailRestartTask, .btn-problem-detail-restart-task');
+    if (restartBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      applyRestartCurrentTask();
+    }
+  });
 }
 
 if (el.rollbackModalOverlay) {
@@ -1652,6 +1697,19 @@ if (el.problemDetailBody) {
       triggerBtn.disabled = true;
       triggerBtn.textContent = '已生成';
       renderProblemDetailContent();
+    }
+  });
+}
+// 刷新或关闭前保存问题详情工作区滚动位置，便于恢复
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    const item = currentProblemDetailItem;
+    if (!item || item.createdAt == null) return;
+    const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+    if (wsScroll) {
+      try {
+        sessionStorage.setItem('problemDetailScroll_' + String(item.createdAt), String(wsScroll.scrollTop));
+      } catch (_) {}
     }
   });
 }
@@ -1843,7 +1901,14 @@ if (el.problemDetailChatMessages) {
         container.scrollTop = container.scrollHeight;
       }
       renderProblemDetailHistory();
-      requestAnimationFrame(() => showNextTaskStartNotification());
+      updateProblemDetailChatHeaderLabel();
+      requestAnimationFrame(() => {
+        if (taskId === 'task2') {
+          showTaskStartNotificationIfNeeded('task3', true);
+        } else {
+          showNextTaskStartNotification();
+        }
+      });
       return;
     }
     const taskCompleteNotYetBtn = e.target.closest('.btn-task-complete-not-yet');
@@ -1872,7 +1937,7 @@ if (el.problemDetailChatMessages) {
           if (isGlobalItGapMsg && currentProblemDetailItem?.createdAt) {
             problemDetailChatMessages = problemDetailChatMessages.filter((m) => {
               const t = m.type;
-              return t !== 'globalItGapStartBlock' && t !== 'globalItGapAnalysisCard' && t !== 'globalItGapAnalysisLog' && t !== 'localItGapStartBlock' && t !== 'localItGapSessionsBlock' && t !== 'localItGapAnalysisCard' && t !== 'localItGapAnalysisLog' && t !== 'rolePermissionSessionsBlock' && t !== 'rolePermissionCard' && t !== 'rolePermissionAnalysisCard';
+              return t !== 'globalItGapStartBlock' && t !== 'globalItGapAnalysisCard' && t !== 'globalItGapAnalysisLog' && t !== 'localItGapStartBlock' && t !== 'localItGapSessionsBlock' && t !== 'localItGapInputBlock' && t !== 'localItGapOutputBlock' && t !== 'localItGapAnalysisCard' && t !== 'localItGapAnalysisLog' && t !== 'localItGapAllDoneConfirmBlock' && t !== 'localItGapTaskCompleteConfirmBlock' && t !== 'rolePermissionSessionsBlock' && t !== 'rolePermissionCard' && t !== 'rolePermissionAnalysisCard';
             });
             saveProblemDetailChat(currentProblemDetailItem.createdAt, problemDetailChatMessages);
             clearDigitalProblemGlobalItGapAnalysis(currentProblemDetailItem.createdAt);
@@ -1966,7 +2031,14 @@ if (el.problemDetailChatMessages) {
         return;
       }
       const contextJson = buildTaskContextJson(taskId, item);
-      pushAndSaveProblemDetailChat({ type: 'taskContextBlock', taskId, contextJson, timestamp: getTimeStr() });
+      if (taskId !== 'task9' && taskId !== 'task11' && taskId !== 'task12') {
+        // 去重：若最近几条中已有同 taskId 的 taskContextBlock（如双击导致），则不再推送，避免时间线出现两条「上下文」
+        const recent = problemDetailChatMessages.slice(-4);
+        const hasRecentContext = recent.some((m) => m?.type === 'taskContextBlock' && m?.taskId === taskId);
+        if (!hasRecentContext) {
+          pushAndSaveProblemDetailChat({ type: 'taskContextBlock', taskId, contextJson, timestamp: getTimeStr() });
+        }
+      }
       const chatContainer = el.problemDetailChatMessages;
       if (chatContainer) {
         chatContainer.innerHTML = '';
@@ -2045,13 +2117,16 @@ if (el.problemDetailChatMessages) {
           const sessions = generateLocalItGapSessions(valueStream);
           updateDigitalProblemLocalItGapSessions(item.createdAt, sessions);
           currentProblemDetailItem = { ...item, localItGapSessions: sessions };
+          const globalItGap = item.globalItGapAnalysisJson ?? null;
+          pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '价值流图 json', contextJson: valueStream, timestamp: getTimeStr() });
+          pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '全局 ITGap 分析 json', contextJson: globalItGap, timestamp: getTimeStr() });
           pushAndSaveProblemDetailChat({ type: 'localItGapSessionsBlock', sessions, timestamp: getTimeStr() });
           const container = el.problemDetailChatMessages;
           container.innerHTML = '';
           renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
           container.scrollTop = container.scrollHeight;
           renderProblemDetailHistory();
-          requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
+          /* 第一环节在用户点击「自动顺序执行」或「手动逐项执行」后才开始执行 */
         }
         return;
       }
@@ -2073,9 +2148,62 @@ if (el.problemDetailChatMessages) {
         }
         return;
       }
-      if (['task11', 'task12', 'task13', 'task14', 'task15'].includes(taskId)) {
+      if (taskId === 'task11') {
+        const valueStream = resolveValueStreamForItGap(item);
+        const result = typeof executeCoreBusinessObjectTaskOnConfirm === 'function'
+          ? executeCoreBusinessObjectTaskOnConfirm(item, valueStream, {
+              pushAndSaveProblemDetailChat,
+              updateDigitalProblemCoreBusinessObjectSessions,
+              getTimeStr,
+              getLatestConfirmedRolePermissionContent,
+            })
+          : null;
+        if (result && !result.ok) {
+          pushAndSaveProblemDetailChat({ role: 'system', content: result.error, timestamp: getTimeStr() });
+        } else if (result && result.ok) {
+          currentProblemDetailItem = result.updatedItem;
+          const container = el.problemDetailChatMessages;
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+          if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
+          itStrategyPlanViewingSubstep = 1;
+          problemDetailViewingMajorStage = 3;
+          updateProblemDetailProgressStages(3, problemDetailViewingMajorStage);
+          renderProblemDetailContent();
+        }
+        return;
+      }
+      if (taskId === 'task12') {
         if (item?.createdAt) {
-          const substepMap = { task11: 1, task12: 2, task13: 3, task14: 4, task15: 5 };
+          const timestamp = getTimeStr();
+          const globalItGap = item.globalItGapAnalysisJson ?? null;
+          const localItGap = item.localItGapSessions ?? null;
+          const roleContent = typeof getLatestConfirmedRolePermissionContent === 'function' ? getLatestConfirmedRolePermissionContent(item) : null;
+          const rolePermissionJson = (roleContent && typeof parseRolePermissionModel === 'function') ? parseRolePermissionModel(typeof roleContent === 'string' ? roleContent : JSON.stringify(roleContent)) : (Array.isArray(roleContent) ? roleContent : null);
+          const coreBusinessObjectJson = item.coreBusinessObjectSessions ?? null;
+          pushAndSaveProblemDetailChat({ type: 'globalArchitectureContextBlock', taskId: 'task12', contextLabel: '全局 ITGap 分析 json', contextJson: globalItGap, timestamp });
+          pushAndSaveProblemDetailChat({ type: 'globalArchitectureContextBlock', taskId: 'task12', contextLabel: '局部 ITGap 分析 json', contextJson: Array.isArray(localItGap) ? localItGap : null, timestamp });
+          pushAndSaveProblemDetailChat({ type: 'globalArchitectureContextBlock', taskId: 'task12', contextLabel: '角色与权限模型推演 json', contextJson: Array.isArray(rolePermissionJson) ? rolePermissionJson : null, timestamp });
+          pushAndSaveProblemDetailChat({ type: 'globalArchitectureContextBlock', taskId: 'task12', contextLabel: '核心业务对象推演 json', contextJson: Array.isArray(coreBusinessObjectJson) ? coreBusinessObjectJson : null, timestamp });
+          itStrategyPlanViewingSubstep = 2;
+          problemDetailViewingMajorStage = 3;
+          updateProblemDetailProgressStages(3, problemDetailViewingMajorStage);
+          const chatContainer = el.problemDetailChatMessages;
+          if (chatContainer) {
+            chatContainer.innerHTML = '';
+            renderProblemDetailChatFromStorage(chatContainer, problemDetailChatMessages);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+          if (typeof renderProblemDetailHistory === 'function') renderProblemDetailHistory();
+          renderProblemDetailContent();
+          updateProblemDetailChatHeaderLabel();
+        }
+        return;
+      }
+      if (['task13', 'task14', 'task15'].includes(taskId)) {
+        if (item?.createdAt) {
+          const substepMap = { task13: 3, task14: 4, task15: 5 };
           itStrategyPlanViewingSubstep = substepMap[taskId] ?? 0;
           problemDetailViewingMajorStage = 3;
           updateProblemDetailProgressStages(3, problemDetailViewingMajorStage);
@@ -2325,6 +2453,7 @@ if (el.problemDetailChatMessages) {
       const item = currentProblemDetailItem;
       const valueStream = resolveValueStreamForItGap(item);
       if (!valueStream || valueStream.raw) return;
+      const globalItGap = item.globalItGapAnalysisJson ?? null;
       const sessions = generateLocalItGapSessions(valueStream);
       updateDigitalProblemLocalItGapSessions(item.createdAt, sessions);
       currentProblemDetailItem = { ...item, localItGapSessions: sessions };
@@ -2333,6 +2462,8 @@ if (el.problemDetailChatMessages) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
         saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
       }
+      pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '价值流图 json', contextJson: valueStream, timestamp: getTimeStr() });
+      pushAndSaveProblemDetailChat({ type: 'localItGapContextBlock', taskId: 'task9', contextLabel: '全局 ITGap 分析 json', contextJson: globalItGap, timestamp: getTimeStr() });
       pushAndSaveProblemDetailChat({ type: 'localItGapSessionsBlock', sessions, timestamp: getTimeStr() });
       const container = el.problemDetailChatMessages;
       container.innerHTML = '';
@@ -2428,6 +2559,48 @@ if (el.problemDetailChatMessages) {
       requestAnimationFrame(() => runRolePermissionModelingForNextStep && runRolePermissionModelingForNextStep());
       return;
     }
+    const btnCoreBusinessObjectSessionsAuto = e.target.closest('.btn-core-business-object-sessions-auto');
+    if (btnCoreBusinessObjectSessionsAuto && !btnCoreBusinessObjectSessionsAuto.disabled) {
+      const item = currentProblemDetailItem;
+      const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'coreBusinessObjectSessionsBlock');
+      if (sessionsIdx >= 0) {
+        problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], confirmed: true, coreBusinessObjectSessionMode: 'auto' };
+        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+      }
+      btnCoreBusinessObjectSessionsAuto.disabled = true;
+      btnCoreBusinessObjectSessionsAuto.textContent = '已选择：自动顺序执行';
+      const otherBtn = btnCoreBusinessObjectSessionsAuto.closest('.problem-detail-chat-role-permission-sessions-actions')?.querySelector('.btn-core-business-object-sessions-manual');
+      if (otherBtn) { otherBtn.disabled = true; otherBtn.textContent = '手工逐项确认'; }
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => runCoreBusinessObjectAutoSequential && runCoreBusinessObjectAutoSequential());
+      return;
+    }
+    const btnCoreBusinessObjectSessionsManual = e.target.closest('.btn-core-business-object-sessions-manual');
+    if (btnCoreBusinessObjectSessionsManual && !btnCoreBusinessObjectSessionsManual.disabled) {
+      const item = currentProblemDetailItem;
+      const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'coreBusinessObjectSessionsBlock');
+      if (sessionsIdx >= 0) {
+        problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], confirmed: true, coreBusinessObjectSessionMode: 'manual' };
+        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+      }
+      btnCoreBusinessObjectSessionsManual.disabled = true;
+      btnCoreBusinessObjectSessionsManual.textContent = '已选择：手工逐项确认';
+      const otherBtn = btnCoreBusinessObjectSessionsManual.closest('.problem-detail-chat-role-permission-sessions-actions')?.querySelector('.btn-core-business-object-sessions-auto');
+      if (otherBtn) { otherBtn.disabled = true; otherBtn.textContent = '自动顺序执行'; }
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => runCoreBusinessObjectForNextStep && runCoreBusinessObjectForNextStep());
+      return;
+    }
     const confirmRolePermissionStepBtn = e.target.closest('.btn-confirm-role-permission-step');
     if (confirmRolePermissionStepBtn && !confirmRolePermissionStepBtn.disabled) {
       const card = confirmRolePermissionStepBtn.closest('[data-msg-index]');
@@ -2493,29 +2666,145 @@ if (el.problemDetailChatMessages) {
       requestAnimationFrame(() => runRolePermissionModelingForNextStep && runRolePermissionModelingForNextStep());
       return;
     }
-    const confirmLocalItGapSessionsBtn = e.target.closest('.btn-confirm-local-itgap-sessions');
-    if (confirmLocalItGapSessionsBtn && !confirmLocalItGapSessionsBtn.disabled) {
+    const btnCoreBusinessObjectConfirmAll = e.target.closest('.btn-core-business-object-confirm-all');
+    if (btnCoreBusinessObjectConfirmAll && !btnCoreBusinessObjectConfirmAll.disabled) {
       const item = currentProblemDetailItem;
-      const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapSessionsBlock');
-      if (sessionsIdx >= 0) {
-        problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], confirmed: true };
-        saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
+      if (!item?.createdAt) return;
+      const allDoneBlock = btnCoreBusinessObjectConfirmAll.closest('[data-msg-index]');
+      const allDoneIdx = allDoneBlock ? parseInt(allDoneBlock.dataset.msgIndex, 10) : -1;
+      let hasUnconfirmed = false;
+      for (let i = 0; i < problemDetailChatMessages.length; i++) {
+        const m = problemDetailChatMessages[i];
+        if (m.type === 'coreBusinessObjectAnalysisCard' && !m.confirmed) {
+          hasUnconfirmed = true;
+          problemDetailChatMessages[i] = { ...m, confirmed: true };
+        }
       }
-      confirmLocalItGapSessionsBtn.disabled = true;
-      confirmLocalItGapSessionsBtn.textContent = '已确认';
-      pushAndSaveProblemDetailChat({ type: 'localItGapContextLog', taskId: 'task9', timestamp: getTimeStr() });
+      if (allDoneIdx >= 0 && allDoneIdx < problemDetailChatMessages.length && problemDetailChatMessages[allDoneIdx].type === 'coreBusinessObjectAllDoneBlock') {
+        problemDetailChatMessages[allDoneIdx] = { ...problemDetailChatMessages[allDoneIdx], allConfirmed: true };
+      }
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      btnCoreBusinessObjectConfirmAll.disabled = true;
+      btnCoreBusinessObjectConfirmAll.textContent = '已全部确认';
       const container = el.problemDetailChatMessages;
       container.innerHTML = '';
       renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
       container.scrollTop = container.scrollHeight;
       renderProblemDetailContent();
       renderProblemDetailHistory();
-      requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
+      if (hasUnconfirmed) {
+        requestAnimationFrame(() => {
+          const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+          if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          showTaskCompletionConfirm('task11', (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task11')?.name) || '核心业务对象推演');
+        });
+      }
+      return;
+    }
+    const confirmCoreBusinessObjectStepBtn = e.target.closest('.btn-confirm-core-business-object-step');
+    if (confirmCoreBusinessObjectStepBtn && !confirmCoreBusinessObjectStepBtn.disabled) {
+      const card = confirmCoreBusinessObjectStepBtn.closest('[data-msg-index]');
+      const stepIndex = parseInt(card?.getAttribute('data-step-index') || card?.dataset?.stepIndex || '-1', 10);
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt || isNaN(stepIndex) || stepIndex < 0) return;
+      const idx = problemDetailChatMessages.findIndex((m) => m.type === 'coreBusinessObjectAnalysisCard' && m.stepIndex === stepIndex);
+      if (idx < 0) return;
+      const msg = problemDetailChatMessages[idx];
+      problemDetailChatMessages[idx] = { ...msg, confirmed: true };
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const list = getDigitalProblems();
+      const updated = list.find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      confirmCoreBusinessObjectStepBtn.disabled = true;
+      confirmCoreBusinessObjectStepBtn.textContent = '已确认';
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      const sessions = updated?.coreBusinessObjectSessions || item.coreBusinessObjectSessions || [];
+      const hasMore = sessions.some((s, i) => i > stepIndex && !s.coreBusinessObjectJson);
+      if (hasMore) {
+        requestAnimationFrame(() => runCoreBusinessObjectForNextStep && runCoreBusinessObjectForNextStep());
+      }
+      return;
+    }
+    const redoCoreBusinessObjectStepBtn = e.target.closest('.btn-redo-core-business-object-step');
+    if (redoCoreBusinessObjectStepBtn && !redoCoreBusinessObjectStepBtn.disabled) {
+      const card = redoCoreBusinessObjectStepBtn.closest('[data-msg-index]');
+      const stepIndex = parseInt(card?.getAttribute('data-step-index') || card?.dataset?.stepIndex || '-1', 10);
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt || isNaN(stepIndex) || stepIndex < 0) return;
+      const list = getDigitalProblems();
+      const dataItem = list.find((it) => it.createdAt === item.createdAt) || item;
+      let sessions = (dataItem.coreBusinessObjectSessions || []).slice();
+      if (sessions[stepIndex]) sessions[stepIndex] = { ...sessions[stepIndex], coreBusinessObjectJson: null };
+      if (typeof updateDigitalProblemCoreBusinessObjectSessions === 'function') updateDigitalProblemCoreBusinessObjectSessions(item.createdAt, sessions);
+      problemDetailChatMessages = problemDetailChatMessages.filter((m) => !(m.type === 'coreBusinessObjectAnalysisCard' && m.stepIndex === stepIndex));
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'coreBusinessObjectSessionsBlock');
+      if (sessionsIdx >= 0) problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], sessions: updated?.coreBusinessObjectSessions || sessions };
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => runCoreBusinessObjectForNextStep && runCoreBusinessObjectForNextStep());
+      return;
+    }
+    const autoLocalItGapSessionsBtn = e.target.closest('.btn-auto-local-itgap-sessions');
+    if (autoLocalItGapSessionsBtn && !autoLocalItGapSessionsBtn.disabled) {
+      autoLocalItGapSessionsBtn.disabled = true;
+      (async function runLocalItGapAutoSequential() {
+        const deps = getLocalItGapDeps();
+        while (true) {
+          const item = deps.currentProblemDetailItem;
+          const sessions = item?.localItGapSessions || [];
+          const nextIdx = sessions.findIndex((s) => !s.analysisJson);
+          if (nextIdx < 0) break;
+          if (typeof runLocalItGapAnalysisForNextStep !== 'function') break;
+          await runLocalItGapAnalysisForNextStep(deps);
+        }
+        const container = el.problemDetailChatMessages;
+        if (container) {
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+        }
+        renderProblemDetailContent();
+        renderProblemDetailHistory();
+        if (autoLocalItGapSessionsBtn) {
+          const item = currentProblemDetailItem;
+          const sessions = item?.localItGapSessions || [];
+          const hasUnfinished = sessions.some((s) => !s.analysisJson);
+          autoLocalItGapSessionsBtn.disabled = !hasUnfinished;
+          autoLocalItGapSessionsBtn.textContent = hasUnfinished ? '自动顺序执行' : '全部已完成';
+        }
+        pushAndSaveProblemDetailChat({
+          type: 'localItGapAllDoneConfirmBlock',
+          taskId: 'task9',
+          content: '已经完成所有环节局部 ITGap 分析，是否自动确认所有输出？',
+          confirmed: false,
+          timestamp: getTimeStr(),
+        });
+        if (container) {
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+        }
+        renderProblemDetailHistory();
+      })();
       return;
     }
     const continueLocalItGapSessionsBtn = e.target.closest('.btn-continue-local-itgap-sessions');
     if (continueLocalItGapSessionsBtn && !continueLocalItGapSessionsBtn.disabled) {
-      requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
+      requestAnimationFrame(() => { if (typeof runLocalItGapAnalysisForNextStep === 'function') runLocalItGapAnalysisForNextStep(getLocalItGapDeps()); });
       return;
     }
     const redoLocalItGapBtn = e.target.closest('.btn-redo-local-itgap');
@@ -2536,7 +2825,7 @@ if (el.problemDetailChatMessages) {
       container.scrollTop = container.scrollHeight;
       renderProblemDetailContent();
       renderProblemDetailHistory();
-      requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
+      requestAnimationFrame(() => { if (typeof runLocalItGapAnalysisForNextStep === 'function') runLocalItGapAnalysisForNextStep(getLocalItGapDeps()); });
       return;
     }
     const confirmLocalItGapBtn = e.target.closest('.btn-confirm-local-itgap');
@@ -2553,7 +2842,7 @@ if (el.problemDetailChatMessages) {
         }
         confirmLocalItGapBtn.disabled = true;
         confirmLocalItGapBtn.textContent = '已确认';
-        const analysisMarkdown = buildLocalItGapMarkdown(analysisJson);
+        const analysisMarkdown = typeof buildLocalItGapMarkdown === 'function' ? buildLocalItGapMarkdown(analysisJson) : '';
         updateDigitalProblemLocalItGapAnalysis(item.createdAt, stepName, stepIndex, analysisJson, analysisMarkdown);
         const list = getDigitalProblems();
         const updated = list.find((it) => it.createdAt === item.createdAt);
@@ -2568,11 +2857,127 @@ if (el.problemDetailChatMessages) {
         const { stages } = parseValueStreamGraph(item.valueStream);
         const allSteps = stages.flatMap((s) => s.steps);
         if (allSteps.length > stepIndex + 1) {
-          requestAnimationFrame(() => runLocalItGapAnalysisForNextStep());
+          requestAnimationFrame(() => { if (typeof runLocalItGapAnalysisForNextStep === 'function') runLocalItGapAnalysisForNextStep(getLocalItGapDeps()); });
         } else {
-          requestAnimationFrame(() => showTaskCompletionConfirm('task9', taskNameTask9));
+          pushAndSaveProblemDetailChat({
+            type: 'localItGapAllDoneConfirmBlock',
+            taskId: 'task9',
+            content: '已经完成所有环节局部 ITGap 分析，是否自动确认所有输出？',
+            confirmed: false,
+            timestamp: getTimeStr(),
+          });
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+          renderProblemDetailHistory();
         }
       } catch (_) {}
+      return;
+    }
+    const confirmAllLocalItGapOutputsBtn = e.target.closest('.btn-confirm-all-local-itgap-outputs');
+    if (confirmAllLocalItGapOutputsBtn && !confirmAllLocalItGapOutputsBtn.disabled) {
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      const allDoneIdx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapAllDoneConfirmBlock');
+      if (allDoneIdx >= 0) {
+        problemDetailChatMessages[allDoneIdx] = { ...problemDetailChatMessages[allDoneIdx], confirmed: true };
+      }
+      const cards = problemDetailChatMessages.filter((m) => m.type === 'localItGapAnalysisCard');
+      for (const card of cards) {
+        if (card.confirmed) continue;
+        const stepName = card.stepName || '';
+        const stepIndex = card.stepIndex ?? -1;
+        const data = card.data || {};
+        const analysisMarkdown = typeof buildLocalItGapMarkdown === 'function' ? buildLocalItGapMarkdown(data) : '';
+        const cardIdx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapAnalysisCard' && m.stepIndex === stepIndex);
+        if (cardIdx >= 0) problemDetailChatMessages[cardIdx] = { ...problemDetailChatMessages[cardIdx], data, confirmed: true };
+        if (typeof updateDigitalProblemLocalItGapAnalysis === 'function') updateDigitalProblemLocalItGapAnalysis(item.createdAt, stepName, stepIndex, data, analysisMarkdown);
+      }
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      const list = getDigitalProblems();
+      const updated = list.find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      pushAndSaveProblemDetailChat({
+        type: 'localItGapCompressionIntentBlock',
+        taskId: 'task9',
+        content: '我即将开始对局部 ITGap 分析做上下文压缩，便于后续环节的处理。',
+        confirmed: false,
+        timestamp: getTimeStr(),
+      });
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailHistory();
+      return;
+    }
+    const confirmLocalItGapCompressionBtn = e.target.closest('.btn-confirm-local-itgap-compression');
+    if (confirmLocalItGapCompressionBtn && !confirmLocalItGapCompressionBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const idx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapCompressionIntentBlock');
+      if (idx >= 0 && item?.createdAt) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        confirmLocalItGapCompressionBtn.disabled = true;
+        confirmLocalItGapCompressionBtn.textContent = '已确认';
+        const container = el.problemDetailChatMessages;
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+        const onAllCompressionDone = () => {
+          requestAnimationFrame(() => {
+            pushAndSaveProblemDetailChat({
+              type: 'localItGapTaskCompleteConfirmBlock',
+              taskId: 'task9',
+              content: '是否确认局部 ITGap 分析任务已经完成？',
+              confirmed: false,
+              timestamp: getTimeStr(),
+            });
+            const c = el.problemDetailChatMessages;
+            if (c) {
+              c.innerHTML = '';
+              renderProblemDetailChatFromStorage(c, problemDetailChatMessages);
+              c.scrollTop = c.scrollHeight;
+            }
+            renderProblemDetailHistory();
+          });
+        };
+        requestAnimationFrame(() => { if (typeof runLocalItGapCompressionSequentially === 'function') runLocalItGapCompressionSequentially({ ...getLocalItGapDeps(), onAllCompressionDone }); else onAllCompressionDone(); });
+      }
+      return;
+    }
+    const confirmLocalItGapTaskCompleteBtn = e.target.closest('.btn-confirm-local-itgap-task-complete');
+    if (confirmLocalItGapTaskCompleteBtn && !confirmLocalItGapTaskCompleteBtn.disabled) {
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      const idx = problemDetailChatMessages.findIndex((m) => m.type === 'localItGapTaskCompleteConfirmBlock');
+      if (idx >= 0) {
+        problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      }
+      const alreadyCompleted = problemDetailChatMessages.some((m) => m.type === 'taskCompleteBlock' && m.taskId === 'task9');
+      if (!alreadyCompleted) {
+        pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId: 'task9', content: '用户确认任务完成', timestamp: getTimeStr() });
+        advanceProblemStateOnTaskComplete(item.createdAt, 'task9');
+      }
+      const container = el.problemDetailChatMessages;
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      problemDetailViewingMajorStage = updated?.currentMajorStage ?? 3;
+      updateProblemDetailProgressStages(updated?.currentMajorStage ?? 3, problemDetailViewingMajorStage);
+      renderProblemDetailContent();
+      requestAnimationFrame(() => { focusWorkspaceOnCurrentTask('task10'); });
       return;
     }
     const startItStrategyPlanBtn = e.target.closest('.btn-confirm-start-it-strategy-plan');
@@ -2809,6 +3214,23 @@ if (el.problemDetailChatMessages) {
       }
       return;
     }
+    const redoBmcOnErrorBtn = e.target.closest('.btn-redo-bmc-on-error');
+    if (redoBmcOnErrorBtn && !redoBmcOnErrorBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const chatContainer = el.problemDetailChatMessages;
+      const errorBlock = redoBmcOnErrorBtn.closest('.problem-detail-chat-msg');
+      if (errorBlock && errorBlock.parentNode === chatContainer) {
+        errorBlock.remove();
+        const failIdx = problemDetailChatMessages.findLastIndex((m) => m.role === 'system' && typeof m.content === 'string' && m.content.startsWith('生成失败：'));
+        if (failIdx >= 0) {
+          problemDetailChatMessages.splice(failIdx, 1);
+          if (item?.createdAt) saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        }
+        redoBmcOnErrorBtn.disabled = true;
+        requestAnimationFrame(() => runBmcGeneration());
+      }
+      return;
+    }
     const redoBmcBtn = e.target.closest('.btn-redo-bmc');
     if (redoBmcBtn && !redoBmcBtn.disabled) {
       const item = currentProblemDetailItem;
@@ -2863,6 +3285,13 @@ if (el.problemDetailChatMessages) {
         }
         if (idx >= 0) {
           problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: bmc, confirmed: true };
+          for (let j = idx - 1; j >= 0; j--) {
+            const q = problemDetailChatMessages[j];
+            if (q?.type === 'task2LlmQueryBlock') {
+              problemDetailChatMessages[j] = { ...q, confirmed: true };
+              break;
+            }
+          }
           saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
         }
         renderProblemDetailContent();
@@ -3128,12 +3557,24 @@ if (el.problemDetailChatMessages) {
             const sb = el.problemDetailChatSend;
             if (sb) sb.disabled = true;
             try {
-              const { parsed } = await parseCompanyBasicInfoInput(textToParse);
+              const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await window.parseCompanyBasicInfoInput(textToParse);
               problemDetailConfirmedBasicInfo = parsed;
               if (item?.createdAt) {
                 updateDigitalProblemBasicInfo(item.createdAt, parsed, false);
                 currentProblemDetailItem = { ...item, basicInfo: parsed };
               }
+              pushAndSaveProblemDetailChat({
+                ...window.buildTask1LlmQueryMessage({
+                  noteName: '工商信息提炼',
+                  fullPrompt,
+                  parsed,
+                  rawOutput,
+                  timestamp: getTimeStr(),
+                  usage,
+                  model,
+                  durationMs,
+                }),
+              });
               const cardBlock = document.createElement('div');
               cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
               const labels = [
@@ -3145,9 +3586,10 @@ if (el.problemDetailChatMessages) {
                 const value = (parsed[key] != null ? String(parsed[key]).trim() : '') || '—';
                 return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(value)}</span></div>`;
               }).join('');
-              cardBlock.innerHTML = `<div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+              const llmMetaHtml = buildLlmMetaHtml({ usage, model, durationMs });
+              cardBlock.innerHTML = `<div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
               el.problemDetailChatMessages?.appendChild(cardBlock);
-              pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
+              pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
               cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
               cardBlock.dataset.taskId = 'task1';
               setupProblemDetailChatCardToggle(cardBlock);
@@ -3182,13 +3624,25 @@ if (el.problemDetailChatMessages) {
       ];
       requestAnimationFrame(async () => {
         try {
-          const { parsed } = await parseCompanyBasicInfoInput(textToParse);
+          const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await window.parseCompanyBasicInfoInput(textToParse);
           problemDetailConfirmedBasicInfo = null;
           const messages = problemDetailChatMessages;
           if (idx >= 0 && idx < messages.length && messages[idx].type === 'basicInfoCard') {
-            messages[idx] = { ...messages[idx], data: parsed, confirmed: false };
+            messages[idx] = { ...messages[idx], data: parsed, confirmed: false, llmMeta: { usage, model, durationMs } };
             saveProblemDetailChat(item.createdAt, messages);
           }
+          pushAndSaveProblemDetailChat({
+            ...window.buildTask1LlmQueryMessage({
+              noteName: '工商信息提炼',
+              fullPrompt,
+              parsed,
+              rawOutput,
+              timestamp: getTimeStr(),
+              usage,
+              model,
+              durationMs,
+            }),
+          });
           const container = el.problemDetailChatMessages;
           if (container) {
             container.innerHTML = '';
@@ -3221,6 +3675,14 @@ if (el.problemDetailChatMessages) {
         }
         if (idx >= 0) {
           problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data, confirmed: true };
+          // 同步将最近一条 task1 的 LLM 查询块标记为已确认，用于时间线显示「LLM-查询 + 确认」
+          for (let j = idx - 1; j >= 0; j--) {
+            const q = problemDetailChatMessages[j];
+            if (q?.type === 'task1LlmQueryBlock') {
+              problemDetailChatMessages[j] = { ...q, confirmed: true };
+              break;
+            }
+          }
           saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
         }
         renderProblemDetailContent();
@@ -3498,7 +3960,7 @@ if (el.toolsChatMessages) {
           (async () => {
             try {
               if (!hasAiConfig()) {
-                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请配置 AI：在 config.local.js 中配置 DEEPSEEK_API_KEY，或使用 Backend 并在数据库配置 AI API Key。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
                 return;
               }
               const { updates, _llmMeta } = await fetchToolModificationUpdates(target.id, note);
@@ -3557,7 +4019,7 @@ if (el.toolsChatMessages) {
           (async () => {
             try {
               if (!hasAiConfig()) {
-                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请配置 AI：在 config.local.js 中配置 DEEPSEEK_API_KEY，或使用 Backend 并在数据库配置 AI API Key。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
                 return;
               }
               const { reply, _llmMeta } = await fetchToolDiscussionReply(target.id, note);
@@ -3715,7 +4177,7 @@ async function handleToolsChatSend() {
 
   try {
     if (!hasAiConfig()) {
-      throw new Error('请配置 AI 才能使用工具/话题讨论意图管理功能。');
+      throw new Error('请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用工具/话题讨论意图管理功能。');
     }
     const result = await analyzeToolDiscussionIntent(text);
     parsingBlock.remove();
@@ -4149,14 +4611,20 @@ async function parseDigitalProblemInput(text) {
 }
 
 如果某字段无法从输入中推断，该字段填 "—" 或空字符串。只返回 JSON，不要有 markdown 代码块包裹。`;
-
-  const { content } = await fetchDeepSeekChat([
+  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: text },
   ]);
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch ? jsonMatch[0] : content;
-  return JSON.parse(jsonStr);
+  const parsed = JSON.parse(jsonStr);
+  const fullPrompt = `【system】\n${systemPrompt}\n\n【user】\n${text}`;
+  return {
+    parsed,
+    fullPrompt,
+    rawOutput: jsonStr,
+    llmMeta: { usage: usage || {}, model: model || DEEPSEEK_MODEL, durationMs: durationMs || 0 },
+  };
 }
 
 /** 构建意图提炼的完整上下文：当前问题的沟通历史 + 页面内容结构，供大模型搜索匹配；返回 { context, currentTask } */
@@ -4998,119 +5466,6 @@ ${tasksDesc}
   return result;
 }
 
-/** 解析用户输入的客户基本信息，提取结构化字段 */
-async function parseCompanyBasicInfoInput(text) {
-  const systemPrompt = `你是一个专业的企业信息提取助手。用户会输入一段关于企业基本信息的描述（可能是复制粘贴或自由输入），请从中提炼出以下字段，以 JSON 格式返回，不要包含其他内容：
-
-{
-  "company_name": "企业名称/公司名称",
-  "credit_code": "统一社会信用代码",
-  "legal_representative": "法定代表人",
-  "established_date": "成立日期",
-  "registered_capital": "注册资本",
-  "is_listed": "是否上市",
-  "listing_location": "上市地点",
-  "business_scope": "经营范围",
-  "core_qualifications": "核心资质",
-  "official_website": "官网"
-}
-
-如果某字段无法从输入中推断，该字段填 "" 或 "—"。只返回 JSON，不要有 markdown 代码块包裹。`;
-
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: text },
-  ]);
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  const jsonStr = jsonMatch ? jsonMatch[0] : content;
-  return { parsed: JSON.parse(jsonStr), usage, model, durationMs };
-}
-
-const BMC_GENERATION_PROMPT = `# Role
-你是一位拥有15年经验的【首席商业架构师】与【数字化转型专家】。你擅长通过有限的工商基础数据，透视企业的底层运作逻辑，并能精准识别制造业、服务业或科技企业的核心商业要素。
-
-# Task
-请基于提供的【客户基础信息】，运用商业模式画布（Business Model Canvas）框架，深度分析该企业的经营模式。
-
-# Input Data (JSON/Text)：公司基本信息 json 数据
-
-# Analysis Logic (推演要求)
-在构建画布时，请不要简单重复经营范围，而是基于行业常识进行逻辑推演：
-1. **产业链定位**：判断其处于上游原材料、中游加工制造、还是下游终端销售？
-2. **核心驱动力**：该企业是靠"技术创新"驱动、"规模成本"驱动，还是"特许经营/资质"驱动？
-3. **客户关系特征**：是B2B的长账期/强关系模式，还是B2C的快消/流量模式？
-
-# Output Format (输出要求)
-请按以下结构输出，使用 JSON 格式，只返回 JSON 不要有其他内容：
-
-{
-  "industry_insight": "行业背景洞察：简述该企业所属赛道的现状、准入门槛及当前的数字化趋势。",
-  "customer_segments": "客户细分 (CS)：识别直接买家与最终受益者。",
-  "value_propositions": "价值主张 (VP)：解决客户什么痛点？提供什么独特的性能、成本或品牌价值？",
-  "channels": "渠道通路 (CH)：销售网络、物流交付及售后反馈路径。",
-  "customer_relationships": "客户关系 (CR)：合作深度。",
-  "revenue_streams": "收入来源 (RS)：盈利模式。",
-  "key_resources": "核心资源 (KR)：关键资产。",
-  "key_activities": "关键业务 (KA)：每日核心运作。",
-  "key_partnerships": "重要合作 (KP)：上游供应商、技术研发机构等。",
-  "cost_structure": "成本结构 (CS)：主要开支。",
-  "pain_points": "业务痛点预判：基于上述画布，推测该企业在排产/库存/销售/财务环节可能面临的数字化挑战（至少3条）。"
-}`;
-
-const REQUIREMENT_LOGIC_PROMPT = `# Role
-你是一位资深的【数字化转型顾问】与【行业分析专家】，擅长通过企业的商业架构（BMC）与业务现状推导底层需求逻辑。
-
-# Input Data
-请分析以下三个维度的数据：
-1. **企业基本信息**：当前需求理解页面中企业基本信息 json；
-2. **商业模式画布 (BMC)**：当前需求理解页面中商业模式画布 BMC 的 json 数据；
-3. **客户初步需求**：当前需求理解页面中客户初步需求json 数据；
-
-# Task
-请针对以上输入，深度产出【需求背后的逻辑链条分析】。你需要回答：在这个特定的行业背景和商业模式下，客户为什么会提出这些具体的需求？其底层的商业动机是什么？
-
-# Analysis Framework (思考框架)
-请按以下逻辑进行深度解构：
-
-## 1. 行业底层逻辑与竞争共性
-- 分析该企业所属赛道的典型特征（如：重资产、短周转、强季节性、高定制化等）。
-- 该行业目前普遍面临的外部压力（如：供应链波动、利润摊薄、存量竞争等）。
-
-## 2. 需求与商业模式的"因果关联"
-- **盈利驱动分析**：需求如何响应 BMC 中的"收入来源"或"成本结构"？（例如：是为了降低核心业务的哪部分成本？）
-- **客户价值保障**：需求如何支撑 BMC 中的"价值主张"？（例如：为了提高对核心大客户的交付准时率？）
-- **资源杠杆效应**：需求如何优化 BMC 中的"核心资源"利用率？（例如：利用AI优化昂贵的生产线排产。）
-
-## 3. 需求背后的深层动机（The "Why"）
-- **显性动机**：客户在需求描述中直接提到的目标。
-- **隐性风险驱动**：客户没说出口、但在该模式下必须解决的风险（如：资金周转风险、业务员离职导致的客户流失、由于数据孤岛导致的决策滞后）。
-
-## 4. 逻辑链条总结
-请用一句话概括逻辑链条：
-因为【行业特性/现状】+【企业的商业模式局限】，导致了【当前业务场景痛点】，所以客户迫切需要通过【提出的功能需求】来实现【最终的商业目标】。
-
-# Output Format
-请以结构化的 Markdown 文档输出，确保语言专业、逻辑严密，能为后续的需求规格说明书（SRS）提供支撑。
-
-# Output Requirements (输出必须包含)
-输出必须包含以下四个部分，每个部分必须有实质性内容（不少于 2 句话），格式如下，顺序不可调换：
-
-\`\`\`
-## 1. 行业底层逻辑与竞争共性
-（此处填写该企业所属赛道的典型特征、行业面临的外部压力等，不少于 2 句话）
-
-## 2. 初步需求与商业模式的"因果关联"
-（此处填写需求与 BMC 收入/成本/价值主张/核心资源的关联分析，不少于 2 句话）
-
-## 3. 需求背后的深层动机
-（此处填写显性动机与隐性风险驱动，不少于 2 句话）
-
-## 4. 逻辑链条总结
-（此处用一句话概括：因为【行业特性】+【商业模式局限】→【业务痛点】→【功能需求】→【商业目标】）
-\`\`\`
-
-注意：每个 ## 标题下方必须紧跟具体分析内容，不可留空。`;
-
 const VALUE_STREAM_PROMPT = `# 角色设定
 你是一位资深的业务架构师与 B-End 需求分析师，擅长通过客户的工商背景、商业画布（BMC）及具体业务逻辑，梳理并绘制业务核心价值流图（Value Stream Map）。你的目标是识别业务环节中的转化效率、角色分工，并为后续的 IT Gap 分析提供可视化基础。
 
@@ -5258,80 +5613,6 @@ const GLOBAL_ITGAP_PROMPT = `# 角色设定
 - asIsToBeTable：使用 Markdown 表格展示现状与目标对比
 - top3Gaps：Top 3 必须优先解决的"核心 IT 缺口"`;
 
-const LOCAL_ITGAP_PROMPT = `# 角色设定
-你是一位资深的数字化转型顾问，擅长进行"As-Is（现状） vs To-Be（目标）"的差异分析。现在请基于当前问题的全局 ITGap 分析 json 数据，针对当前环节【替换环节名称】进行深度的局部 IT Gap 分析。
-
-# 全局背景约束
-- **架构现状**：企业存在严重的"烟囱式"系统架构，数据孤岛现象明显，销售、财务与生产系统缺乏实时联动。
-- **核心痛点**：业务高度依赖人工经验，系统仅作为"记录工具"而非"决策工具"。
-- **全局目标**：实现全链路数据透明化，由"人找事"转变为"数据驱动决策"。
-
-# 任务要求
-请按以下结构输出该环节的 IT Gap 分析，确保分析结果能直接支撑 IT Gap 的闭环：
-
-1. **现状透视 (Status Quo)**：总结该环节目前的作业模式、IT 支持程度及最致命的瓶颈。
-2. **IT Gap 三维映射表**：
-   - 数据层 Gap：缺少哪些实时字段、哪些系统间的数据流是断开的？
-   - 功能层 Gap：现有系统缺失哪些核心算法、自动化逻辑或控制节点？
-   - 体验/效率层 Gap：哪些环节还依赖 Excel/线下沟通？
-3. **IT 转型建议 (Actionable Requirements)**：将上述 Gap 翻译为具体的 IT 功能点建议（如：开发 XX 接口、建立 XX 模型、引入 XX 规则引擎）。
-4. **业务价值预测**：填补此 Gap 后，能为企业带来哪些量化的业务提升（如：缩短换线时间 20% 等）。
-
-# 输出格式
-请仅返回一个 JSON 对象，必须包含以下四个字段（字段名不可更改，均支持 Markdown）：
-\`\`\`json
-{
-  "statusQuo": "现状透视内容（该环节作业模式、IT支持程度、最致命瓶颈）",
-  "itGap3DMap": "IT Gap 三维映射表（数据层/功能层/体验效率层 Gap 分别描述）",
-  "actionableRequirements": "IT 转型建议（具体功能点，如开发XX接口、建立XX模型）",
-  "businessValuePrediction": "业务价值预测（量化提升，如缩短换线时间20%）"
-}
-\`\`\`
-重要：只返回上述 JSON，不要用 Markdown 标题分段，每个维度的内容必须放入对应字段中。`;
-
-const LOCAL_ITGAP_STRUCTURED_SECTIONS = [
-  { key: 'statusQuo', label: '现状透视 (Status Quo)', isPrimary: true },
-  { key: 'itGap3DMap', label: 'IT Gap 三维映射表', isPrimary: true },
-  { key: 'actionableRequirements', label: 'IT 转型建议 (Actionable Requirements)', isPrimary: true },
-  { key: 'businessValuePrediction', label: '业务价值预测', isPrimary: false },
-];
-
-/**
- * 根据端到端流程 valueStream 生成所有环节的局部 ITGap 分析 session（不调用大模型）
- * 每个 session 包含：环节名称、局部 ITGap 分析提示词、局部 ITGap 分析 json、局部 ITGap 分析 markdown
- */
-function generateLocalItGapSessions(valueStream) {
-  const { stages } = parseValueStreamGraph(valueStream || {});
-  const allSteps = stages.flatMap((s) => s.steps);
-  return allSteps.map((step, i) => {
-    const stepName = step?.name || `环节${i + 1}`;
-    const prompt = LOCAL_ITGAP_PROMPT.replace(/【替换环节名称】/g, stepName || '当前环节');
-    return {
-      stepName,
-      stepIndex: i,
-      prompt,
-      analysisJson: null,
-      analysisMarkdown: '',
-    };
-  });
-}
-
-/** 根据价值流生成角色与权限模型推演 session（不调用大模型），用于逐步按环节分析 */
-function generateRolePermissionSessions(valueStream) {
-  const { stages } = parseValueStreamGraph(valueStream || {});
-  let stepIndex = 0;
-  const sessions = [];
-  for (const stage of stages) {
-    const stageName = stage?.name || '';
-    for (const step of stage.steps || []) {
-      const stepName = step?.name || `环节${stepIndex + 1}`;
-      sessions.push({ stepName, stepIndex, stageName, rolePermissionJson: null });
-      stepIndex += 1;
-    }
-  }
-  return sessions;
-}
-
 const GLOBAL_ITGAP_STRUCTURED_SECTIONS = [
   { key: 'structuralGap', label: '全局架构失调诊断 (Structural Gap)' },
   { key: 'collaborationGap', label: '决策协同断裂分析 (Collaboration Gap)' },
@@ -5376,143 +5657,6 @@ function buildGlobalItGapStructuredHtml(analysis) {
     parts.push(`<div class="problem-detail-global-itgap-section"><h4 class="problem-detail-global-itgap-section-title">${escapeHtml(label)}</h4><div class="problem-detail-global-itgap-section-content markdown-body">${content === '—' ? '—' : renderMarkdown(content)}</div></div>`);
   }
   return parts.join('');
-}
-
-const BMC_LABEL_TO_KEY = {
-  '客户细分': 'customer_segments',
-  '价值主张': 'value_propositions',
-  '渠道通路': 'channels',
-  '客户关系': 'customer_relationships',
-  '收入来源': 'revenue_streams',
-  '核心资源': 'key_resources',
-  '关键业务': 'key_activities',
-  '重要合作': 'key_partnerships',
-  '成本结构': 'cost_structure',
-};
-
-function parseBmcFromMarkdown(text) {
-  const result = { industry_insight: '', pain_points: '' };
-  BMC_FIELDS.forEach((f) => { result[f.key] = ''; });
-  result.comprehensive_review = '';
-  const lines = text.split('\n');
-  let section = '';
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^##\s*1\.\s*行业背景洞察/i.test(line)) { section = 'industry_insight'; continue; }
-    if (/^##\s*2\.\s*商业模式画布/i.test(line)) { section = 'bmc_table'; continue; }
-    if (/^##\s*3\.\s*业务痛点预判/i.test(line)) { section = 'pain_points'; continue; }
-    if (section === 'industry_insight' && line && !line.startsWith('##')) {
-      result.industry_insight += (result.industry_insight ? '\n' : '') + line.trim();
-    }
-    if (section === 'bmc_table' && line.includes('|')) {
-      const m = line.match(/\*\*([^*]+)\*\*\s*\|\s*(.+)/);
-      if (m) {
-        const label = m[1].replace(/\s*\([A-Z]+\)\s*$/, '').trim();
-        const content = m[2].replace(/\|$/, '').trim();
-        const key = BMC_LABEL_TO_KEY[label] || BMC_FIELDS.find((f) => f.label === label)?.key;
-        if (key) result[key] = content;
-      }
-    }
-    if (section === 'pain_points' && line && !line.startsWith('##')) {
-      result.pain_points += (result.pain_points ? '\n' : '') + line.trim();
-    }
-  }
-  result.comprehensive_review = [result.industry_insight, result.pain_points].filter(Boolean).join('\n\n');
-  return result;
-}
-
-const REQUIREMENT_LOGIC_SECTIONS = [
-  { key: 'industry_competition', label: '行业底层逻辑与竞争共性' },
-  { key: 'causal_relation', label: '初步需求与商业模式的"因果关联"' },
-  { key: 'deep_motivation', label: '需求背后的深层动机' },
-  { key: 'logic_summary', label: '逻辑链条总结' },
-];
-
-function parseRequirementLogicFromMarkdown(text) {
-  const result = {};
-  REQUIREMENT_LOGIC_SECTIONS.forEach(({ key }) => { result[key] = ''; });
-  if (!text || typeof text !== 'string') return result;
-  text = text.replace(/^```[\w]*\n?|```\s*$/g, '').trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const obj = JSON.parse(jsonMatch[0]);
-      REQUIREMENT_LOGIC_SECTIONS.forEach(({ key, label }) => {
-        const val = obj[key] ?? obj[label] ?? obj[label.replace(/"/g, '')];
-        if (val != null) result[key] = String(val).trim();
-      });
-      if (REQUIREMENT_LOGIC_SECTIONS.some(({ key }) => result[key])) return result;
-    } catch (_) {}
-  }
-  const lines = text.split('\n');
-  let section = '';
-  const headerPatterns = [
-    [/^#{1,3}\s*1[\.、]\s*行业底层逻辑/i, 'industry_competition'],
-    [/^#{1,3}\s*2[\.、]\s*初步需求与商业模式/i, 'causal_relation'],
-    [/^#{1,3}\s*3[\.、]\s*需求背后的深层动机/i, 'deep_motivation'],
-    [/^#{1,3}\s*4[\.、]\s*逻辑链条总结/i, 'logic_summary'],
-  ];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    let matched = false;
-    for (const [pat, key] of headerPatterns) {
-      if (pat.test(line)) {
-        section = key;
-        const afterColon = line.split(/[：:]/).slice(1).join(':').trim();
-        if (afterColon) result[section] = afterColon;
-        matched = true;
-        break;
-      }
-    }
-    if (matched) continue;
-    if (section && result.hasOwnProperty(section)) {
-      const trimmed = line.trim();
-      if (trimmed && !/^#{1,3}\s*\d[\.、]/.test(trimmed)) {
-        result[section] += (result[section] ? '\n' : '') + trimmed;
-      }
-    }
-  }
-  return result;
-}
-
-async function generateBmcFromBasicInfo(basicInfoJson) {
-  const inputStr = typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJson, null, 2);
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: BMC_GENERATION_PROMPT },
-    { role: 'user', content: inputStr },
-  ]);
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  let parsed;
-  if (jsonMatch) {
-    try { parsed = JSON.parse(jsonMatch[0]); } catch (_) { parsed = parseBmcFromMarkdown(content); }
-  } else {
-    parsed = parseBmcFromMarkdown(content);
-  }
-  return { parsed, usage, model, durationMs };
-}
-
-async function generateRequirementLogicFromInputs(preliminaryReqJson, basicInfoJson, bmcJson) {
-  const userContent = `请基于以下三个维度的数据进行分析：
-
-## 1. 客户初步需求 json
-\`\`\`json
-${typeof preliminaryReqJson === 'string' ? preliminaryReqJson : JSON.stringify(preliminaryReqJson, null, 2)}
-\`\`\`
-
-## 2. 企业基本信息 json
-\`\`\`json
-${typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJson, null, 2)}
-\`\`\`
-
-## 3. 商业模式画布 (BMC) json
-\`\`\`json
-${typeof bmcJson === 'string' ? bmcJson : JSON.stringify(bmcJson, null, 2)}
-\`\`\``;
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: REQUIREMENT_LOGIC_PROMPT },
-    { role: 'user', content: userContent },
-  ]);
-  return { content, usage, model, durationMs };
 }
 
 async function generateItStatusAnnotation(valueStream, requirementLogic) {
@@ -5603,108 +5747,6 @@ ${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProce
   return { content, usage, model, durationMs };
 }
 
-async function generateLocalItGapAnalysis(stepName, globalItGapJson, fullProcessVsm) {
-  const systemPrompt = LOCAL_ITGAP_PROMPT.replace(/【替换环节名称】/g, stepName || '当前环节');
-  const userContent = `## 全局 ITGap 分析 json
-\`\`\`json
-${typeof globalItGapJson === 'string' ? globalItGapJson : JSON.stringify(globalItGapJson || {}, null, 2)}
-\`\`\`
-
-## 端到端流程 json（含各环节 IT 现状与痛点）
-\`\`\`json
-${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProcessVsm || {}, null, 2)}
-\`\`\`
-
-请针对环节「${(stepName || '').replace(/"/g, '\\"')}」进行局部 IT Gap 分析，按 JSON 格式返回。`;
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userContent },
-  ]);
-  return { content, usage, model, durationMs };
-}
-
-/** 从大模型返回内容中解析局部 ITGap 分析（支持 JSON 或 Markdown 分段） */
-function parseLocalItGapFromContent(content) {
-  const result = { statusQuo: '', itGap3DMap: '', actionableRequirements: '', businessValuePrediction: '' };
-  if (!content || typeof content !== 'string') return result;
-  const text = content.trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed && typeof parsed === 'object') {
-        const keyMap = {
-          statusQuo: ['statusQuo', 'status_quo', '现状透视'],
-          itGap3DMap: ['itGap3DMap', 'it_gap_3d_map', 'itGap3dMap', 'IT Gap 三维映射表', 'it_gap_三维映射表'],
-          actionableRequirements: ['actionableRequirements', 'actionable_requirements', 'IT 转型建议'],
-          businessValuePrediction: ['businessValuePrediction', 'business_value_prediction', '业务价值预测'],
-        };
-        for (const [targetKey, aliases] of Object.entries(keyMap)) {
-          for (const alias of aliases) {
-            const val = parsed[alias];
-            if (val != null && String(val).trim()) {
-              result[targetKey] = String(val).trim();
-              break;
-            }
-          }
-        }
-        if (Object.values(result).some((v) => v)) return result;
-      }
-    } catch (_) {}
-  }
-  const sectionHeaders = [
-    { key: 'statusQuo', regex: /(?:^|\n)(?:#+\s*)?(?:1\.\s*)?现状透视\s*(?:\(Status Quo\))?\s*[:：]?\s*\n?/i },
-    { key: 'itGap3DMap', regex: /(?:^|\n)(?:#+\s*)?(?:2\.\s*)?IT\s*Gap\s*三维映射表\s*[:：]?\s*\n?/i },
-    { key: 'actionableRequirements', regex: /(?:^|\n)(?:#+\s*)?(?:3\.\s*)?IT\s*转型建议\s*(?:\(Actionable Requirements\))?\s*[:：]?\s*\n?/i },
-    { key: 'businessValuePrediction', regex: /(?:^|\n)(?:#+\s*)?(?:4\.\s*)?业务价值预测\s*[:：]?\s*\n?/i },
-  ];
-  let lastIndex = -1;
-  let lastKey = null;
-  for (const { key, regex } of sectionHeaders) {
-    const match = text.match(regex);
-    if (match) {
-      const start = match.index + match[0].length;
-      if (lastKey && lastIndex >= 0) {
-        const block = text.slice(lastIndex, match.index).trim();
-        if (block) result[lastKey] = block;
-      }
-      lastIndex = start;
-      lastKey = key;
-    }
-  }
-  if (lastKey != null && lastIndex >= 0) {
-    const block = text.slice(lastIndex).trim();
-    if (block) result[lastKey] = block;
-  }
-  if (!Object.values(result).some((v) => v)) result.statusQuo = text;
-  return result;
-}
-
-function buildLocalItGapStructuredHtml(analysis) {
-  if (!analysis || typeof analysis !== 'object') return '<p>（暂无内容）</p>';
-  const parts = [];
-  for (const { key, label, isPrimary } of LOCAL_ITGAP_STRUCTURED_SECTIONS) {
-    const val = analysis[key];
-    let content = (val != null ? String(val).trim() : '') || '—';
-    if (content !== '—') content = stripRedundantHeadingFromContent(content, label);
-    const sectionClass = isPrimary !== false ? 'problem-detail-local-itgap-section' : 'problem-detail-local-itgap-section problem-detail-local-itgap-section-secondary';
-    parts.push(`<div class="${sectionClass}"><h4 class="problem-detail-local-itgap-section-title">${escapeHtml(label)}</h4><div class="problem-detail-local-itgap-section-content markdown-body">${content === '—' ? '—' : renderMarkdown(content)}</div></div>`);
-  }
-  return parts.join('');
-}
-
-/** 将局部 ITGap 分析 JSON 转为 Markdown 文本 */
-function buildLocalItGapMarkdown(analysis) {
-  if (!analysis || typeof analysis !== 'object') return '';
-  const parts = [];
-  for (const { key, label } of LOCAL_ITGAP_STRUCTURED_SECTIONS) {
-    const val = analysis[key];
-    const content = (val != null ? String(val).trim() : '') || '';
-    if (content) parts.push(`## ${label}\n\n${content}`);
-  }
-  return parts.join('\n\n');
-}
-
 const PARSE_PREVIEW_FIELDS = [
   { key: 'customerName', label: '客户名称' },
   { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
@@ -5738,10 +5780,18 @@ async function handleParseClick() {
   if (el.parsePreview) el.parsePreview.hidden = true;
   try {
     if (!hasAiConfig()) {
-      throw new Error('请配置 AI 才能使用解析功能。');
+      throw new Error('请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用解析功能。');
     }
-    const parsed = await parseDigitalProblemInput(text);
+    const parsedResult = await parseDigitalProblemInput(text);
+    const parsed = parsedResult?.parsed || {};
     lastParsedResult = parsed;
+    lastParsedLlmQuery = {
+      noteName: '初步需求提炼',
+      llmInputPrompt: parsedResult?.fullPrompt || '',
+      llmOutputJson: parsed,
+      llmOutputRaw: parsedResult?.rawOutput || '',
+      llmMeta: parsedResult?.llmMeta || null,
+    };
     renderParsePreview(parsed);
   } catch (err) {
     const msg = err.message || String(err);
@@ -5773,7 +5823,9 @@ function isTaskCompleted(item, taskId) {
   const wfCompleted = item.workflowAlignCompletedStages || [];
   const itGapCompleted = item.itGapCompletedStages || [];
   switch (taskId) {
-    case 'task1': return !!(item.basicInfo);
+    case 'task1':
+      // task1 仅在用户点击「已完成」后才视为完成；兼容历史数据（已进入后续大阶段也视为完成）
+      return completed.includes(0) || (item.currentMajorStage ?? 0) > 0;
     case 'task2': return completed.includes(1) || !!(item.bmc);
     case 'task3': return completed.includes(2) || !!(item.requirementLogic);
     case 'task4': return wfCompleted.includes(0) && !!(item.valueStream && !item.valueStream.raw);
@@ -5971,7 +6023,7 @@ function renderProblemFollowList() {
   }).join('');
 }
 
-function openProblemDetail(item) {
+function openProblemDetail(item, options) {
   if (lastModificationClarification && lastModificationClarification.createdAt !== item?.createdAt) {
     lastModificationClarification = null;
   }
@@ -5999,17 +6051,66 @@ function openProblemDetail(item) {
     }
   }
   problemDetailViewingMajorStage = majorStage;
+  // IT 策略规划阶段：根据「当前任务」（第一个未完成任务）恢复子步骤，避免刷新后总是回到角色与权限
+  if (majorStage === 3) {
+    const firstUncompleted = getFirstUncompletedTask(item);
+    const substepMap = { task10: 0, task11: 1, task12: 2, task13: 3, task14: 4, task15: 5 };
+    itStrategyPlanViewingSubstep = (firstUncompleted && substepMap[firstUncompleted.id] !== undefined) ? substepMap[firstUncompleted.id] : 0;
+  }
   updateProblemDetailProgressStages(majorStage, problemDetailViewingMajorStage);
   renderProblemDetailContent();
   initProblemDetailChat();
+  if (options?.fromStartFollow === true) {
+    const initLlm = item?.task1InitialLlmQuery || null;
+    const hasPreliminaryLlmQuery = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some((m) => {
+      if (!m || m.type !== 'task1LlmQueryBlock') return false;
+      const note = String(m.noteName || '').trim();
+      if (note.includes('初步需求')) return true;
+      const out = m.llmOutputJson;
+      return !!(out && typeof out === 'object' && ('customerName' in out || 'customerNeedsOrChallenges' in out || 'customerItStatus' in out || 'projectTimeRequirement' in out));
+    });
+    if (!hasPreliminaryLlmQuery && initLlm) {
+      pushAndSaveProblemDetailChat({
+        role: 'system',
+        type: 'task1LlmQueryBlock',
+        taskId: 'task1',
+        noteName: initLlm?.noteName || '初步需求提炼',
+        llmInputPrompt: initLlm?.llmInputPrompt || '',
+        llmOutputJson: initLlm?.llmOutputJson != null ? initLlm.llmOutputJson : {},
+        llmOutputRaw: initLlm?.llmOutputRaw || '',
+        llmMeta: initLlm?.llmMeta || undefined,
+        timestamp: getTimeStr(),
+      });
+    }
+  }
   toggleProblemDetailHistory(false);
   saveRouteState('problemDetail', { createdAt: item.createdAt });
   switchView('problemDetail');
   updateProblemDetailChatHeaderLabel();
   updateProblemDetailChatInputForMode();
+  // 恢复刷新前工作区滚动位置
+  const scrollKey = 'problemDetailScroll_' + String(item.createdAt);
+  const savedScroll = sessionStorage.getItem(scrollKey);
+  if (savedScroll !== null) {
+    const scrollTop = parseInt(savedScroll, 10);
+    if (!isNaN(scrollTop)) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+          if (wsScroll) {
+            wsScroll.scrollTop = scrollTop;
+          }
+          sessionStorage.removeItem(scrollKey);
+        });
+      });
+    }
+  }
   // 双重 rAF：确保视图已渲染（含刷新后恢复路由），再触发当前任务开始通知
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => showNextTaskStartNotification());
+    requestAnimationFrame(() => {
+      console.log('[任务通知] openProblemDetail 即将调用 showNextTaskStartNotification');
+      showNextTaskStartNotification();
+    });
   });
 }
 
@@ -6126,7 +6227,13 @@ function buildItemAfterRollbackToTask(item, prevTaskId) {
       };
       break;
     case 'task10':
-    case 'task11':
+      nextItem = { ...nextItem, completedTaskIds: completedTaskIds.filter((id) => id !== prevTaskId) };
+      break;
+    case 'task11': {
+      const sessions = (nextItem.coreBusinessObjectSessions || []).map((s) => ({ ...s, coreBusinessObjectJson: null }));
+      nextItem = { ...nextItem, completedTaskIds: completedTaskIds.filter((id) => id !== prevTaskId), coreBusinessObjectSessions: sessions };
+      break;
+    }
     case 'task12':
     case 'task13':
     case 'task14':
@@ -6261,14 +6368,55 @@ function scrollChatToTaskStartNotification(taskId) {
 function showTaskStartNotificationIfNeeded(taskId, forceShow) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
+  if (!container || !item?.createdAt) {
+    console.log('[任务通知] showTaskStartNotificationIfNeeded 提前返回: 无 container 或 item', { taskId, hasContainer: !!container, hasItem: !!item });
+    return;
+  }
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   const task = allTasks.find((t) => t.id === taskId);
-  if (!task) return;
+  if (!task) {
+    console.log('[任务通知] showTaskStartNotificationIfNeeded 提前返回: 未找到任务', taskId);
+    return;
+  }
+  if (taskId === 'task3') {
+    const hasBasicInfoCtx = problemDetailChatMessages.some((m) => m.type === 'taskContextBlock' && m.taskId === 'task3' && m.contextLabel === '客户基本信息 json');
+    const hasBmcCtx = problemDetailChatMessages.some((m) => m.type === 'taskContextBlock' && m.taskId === 'task3' && m.contextLabel === '商业模式画布 BMC json');
+    console.log('[任务通知] task3 上下文块检查', { hasBasicInfoCtx, hasBmcCtx, msgCount: problemDetailChatMessages.length });
+    if (!hasBasicInfoCtx) {
+      console.log('[任务通知] task3 推送上下文块: 客户基本信息 json');
+      pushAndSaveProblemDetailChat({
+        type: 'taskContextBlock',
+        taskId: 'task3',
+        contextLabel: '客户基本信息 json',
+        contextJson: item.basicInfo || {},
+        timestamp: getTimeStr(),
+      });
+    }
+    if (!hasBmcCtx) {
+      console.log('[任务通知] task3 推送上下文块: 商业模式画布 BMC json');
+      pushAndSaveProblemDetailChat({
+        type: 'taskContextBlock',
+        taskId: 'task3',
+        contextLabel: '商业模式画布 BMC json',
+        contextJson: item.bmc || {},
+        timestamp: getTimeStr(),
+      });
+    }
+  }
+  if (taskId === 'task11') {
+    const sessions = item.coreBusinessObjectSessions || [];
+    if (sessions.length > 0 && !sessions.some((s) => !s.coreBusinessObjectJson)) {
+      const hasUnconfirmed = problemDetailChatMessages.some((m) => m.type === 'coreBusinessObjectAnalysisCard' && !m.confirmed);
+      if (hasUnconfirmed) return;
+    }
+  }
   const existingIdx = problemDetailChatMessages.findIndex((m) => m.type === 'taskStartNotification' && m.taskId === taskId);
   if (existingIdx >= 0) {
     const existing = problemDetailChatMessages[existingIdx];
-    if (existing.confirmed && !forceShow) return; // 已确认且非强制展示，无需重复下发
+    if (existing.confirmed && !forceShow) {
+      console.log('[任务通知] showTaskStartNotificationIfNeeded 提前返回: 已有已确认通知且非强制展示', taskId);
+      return; // 已确认且非强制展示，无需重复下发
+    }
     // 未确认或强制展示（如回退后刷新）：移除旧通知，重新下发到底部
     problemDetailChatMessages.splice(existingIdx, 1);
     saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
@@ -6295,6 +6443,7 @@ function showTaskStartNotificationIfNeeded(taskId, forceShow) {
     <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
   container.appendChild(block);
   container.scrollTop = container.scrollHeight;
+  console.log('[任务通知] showTaskStartNotificationIfNeeded 已下发任务启动通知', taskId, task.name);
 }
 
 /** 检查聊天中是否存在「下一任务」之前的未确认输出卡片（有则不下发下一任务启动通知） */
@@ -6303,13 +6452,20 @@ function hasUnconfirmedOutputCardBeforeTask(messages, nextTaskId) {
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   const nextIdx = allTasks.findIndex((t) => t.id === nextTaskId);
   if (nextIdx <= 0) return false;
-  const taskIdsToCheck = allTasks.slice(0, nextIdx).map((t) => t.id);
+  let taskIdsToCheck = allTasks.slice(0, nextIdx).map((t) => t.id);
+  // 下一任务为 task3 时，仅用 task1 的未确认卡拦截；task2 的 bmc 可能未点确认但状态已推进到 task3，仍允许下发 task3 通知
+  if (nextTaskId === 'task3') {
+    taskIdsToCheck = ['task1'];
+  }
   const cardByTask = { task1: 'basicInfoCard', task2: 'bmcCard', task3: 'requirementLogicBlock', task4: 'valueStreamCard', task5: 'itStatusCard' };
   for (const tid of taskIdsToCheck) {
     const cardType = cardByTask[tid];
     if (!cardType) continue;
     const hasUnconfirmed = messages.some((m) => m.type === cardType && !m.confirmed);
-    if (hasUnconfirmed) return true;
+    if (hasUnconfirmed) {
+      console.log('[任务通知] hasUnconfirmedOutputCardBeforeTask 为 true', { nextTaskId, blockedByTaskId: tid, cardType });
+      return true;
+    }
   }
   return false;
 }
@@ -6317,15 +6473,26 @@ function hasUnconfirmedOutputCardBeforeTask(messages, nextTaskId) {
 /** 自动触发当前第一个未完成任务的任务启动通知（上一任务结束后或页面刷新时调用） */
 function showNextTaskStartNotification() {
   const item = currentProblemDetailItem;
-  if (!item?.createdAt) return;
+  if (!item?.createdAt) {
+    console.log('[任务通知] showNextTaskStartNotification 提前返回: 无 item 或 createdAt');
+    return;
+  }
   // 刷新后从 storage 取最新数据，确保与持久化一致（回退后刷新能正确触发当前任务通知）
   const list = getDigitalProblems();
   const latest = list.find((p) => String(p.createdAt) === String(item.createdAt));
   const dataItem = latest || item;
   const next = getFirstUncompletedTask(dataItem);
-  if (!next) return;
-  // 若聊天中存在未确认的输出卡片（如 BMC、需求逻辑），不下发下一任务启动通知，等用户先确认
-  if (hasUnconfirmedOutputCardBeforeTask(problemDetailChatMessages, next.id)) return;
+  console.log('[任务通知] showNextTaskStartNotification', { nextTask: next?.id, nextName: next?.name, completedStages: dataItem?.completedStages });
+  if (!next) {
+    console.log('[任务通知] showNextTaskStartNotification 提前返回: 无未完成任务');
+    return;
+  }
+  const hasUnconfirmed = hasUnconfirmedOutputCardBeforeTask(problemDetailChatMessages, next.id);
+  if (hasUnconfirmed) {
+    console.log('[任务通知] showNextTaskStartNotification 提前返回: 存在未确认输出卡', { nextId: next.id });
+    return;
+  }
+  console.log('[任务通知] showNextTaskStartNotification 调用 showTaskStartNotificationIfNeeded', next.id);
   showTaskStartNotificationIfNeeded(next.id, true);
 }
 
@@ -6476,6 +6643,24 @@ function showTaskCompletionConfirm(taskId, taskName) {
   }
 }
 
+/** 若当前为核心业务对象推演且所有环节已有大模型输出但存在未确认卡片，则追加「全部确认」提示块（用于刷新页面后恢复） */
+function ensureCoreBusinessObjectAllDoneBlockIfNeeded() {
+  const item = currentProblemDetailItem;
+  if (!item?.createdAt) return false;
+  const sessions = item.coreBusinessObjectSessions || [];
+  if (sessions.length === 0) return false;
+  if (sessions.some((s) => !s.coreBusinessObjectJson)) return false;
+  const hasUnconfirmed = problemDetailChatMessages.some((m) => m.type === 'coreBusinessObjectAnalysisCard' && !m.confirmed);
+  if (!hasUnconfirmed) return false;
+  if (problemDetailChatMessages.some((m) => m.type === 'coreBusinessObjectAllDoneBlock')) return false;
+  pushAndSaveProblemDetailChat({
+    type: 'coreBusinessObjectAllDoneBlock',
+    content: '所有环节的核心业务对象推演已经结束，是否全部确认？',
+    timestamp: getTimeStr(),
+  });
+  return true;
+}
+
 function initProblemDetailChat() {
   const container = el.problemDetailChatMessages;
   if (!container) return;
@@ -6486,6 +6671,10 @@ function initProblemDetailChat() {
   if (storedChat && Array.isArray(storedChat) && storedChat.length > 0) {
     problemDetailChatMessages = storedChat;
     renderProblemDetailChatFromStorage(container, storedChat);
+    if (typeof ensureCoreBusinessObjectAllDoneBlockIfNeeded === 'function' && ensureCoreBusinessObjectAllDoneBlockIfNeeded()) {
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+    }
   } else {
     problemDetailChatMessages = [{ role: 'system', content: '请输入客户基本信息', timestamp: getTimeStr() }];
     appendProblemDetailChatMessage(container, 'system', '请输入客户基本信息', { noSave: true });
@@ -6500,6 +6689,14 @@ function initProblemDetailChat() {
 async function runBmcGeneration() {
   const container = el.problemDetailChatMessages;
   if (!container || !problemDetailConfirmedBasicInfo || !hasAiConfig()) return;
+  // 严格顺序：只有「即将开始商业画布加载」通知被用户确认后，才允许弹出 BMC 提炼内容块
+  const hasTask2StartConfirmed = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some(
+    (m) => (m.type === 'taskStartNotification' && m.taskId === 'task2' && m.confirmed) || (m.type === 'bmcStartBlock' && m.confirmed)
+  );
+  if (!hasTask2StartConfirmed) {
+    showTaskStartNotificationIfNeeded('task2', true);
+    return;
+  }
   const loading1 = document.createElement('div');
   loading1.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
   loading1.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在提取客户基本信息 json 数据</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -6527,9 +6724,10 @@ async function runBmcGeneration() {
   container.appendChild(loading2);
   container.scrollTop = container.scrollHeight;
   try {
-    const { parsed: bmc, usage, model, durationMs } = await generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
+    const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await window.generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
     loading2.remove();
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+    pushAndSaveProblemDetailChat(window.buildTask2LlmQueryMessage({ fullPrompt, parsed: bmc, rawOutput, timestamp: getTimeStr(), usage, model, durationMs }));
     pushAndSaveProblemDetailChat({ type: 'bmcCard', data: bmc, confirmed: false, timestamp: getTimeStr(), llmMeta: { usage, model, durationMs } });
     const msgIdx = problemDetailChatMessages.length - 1;
     const cardBlock = document.createElement('div');
@@ -6547,7 +6745,7 @@ async function runBmcGeneration() {
       <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
       <div class="problem-detail-bmc-card" role="button" tabindex="0">
         <div class="problem-detail-bmc-card-body">
-          ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
+          ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>商业模式画布 BMC 提炼</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
           <div class="problem-detail-bmc-grid">${bmcRows}</div>
           ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-bmc-content">${escapeHtml(painPoints)}</div></div>` : ''}
         </div>
@@ -6565,9 +6763,11 @@ async function runBmcGeneration() {
     container.scrollTop = container.scrollHeight;
     renderProblemDetailHistory();
   } catch (err) {
+    const errMsg = err.message || String(err);
     loading2.classList.remove('problem-detail-chat-msg-parsing');
-    loading2.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">生成失败：${escapeHtml(err.message || String(err))}</div>`;
-    pushAndSaveProblemDetailChat({ role: 'system', content: '生成失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+    loading2.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">生成失败：${escapeHtml(errMsg)}</div><div class="problem-detail-chat-msg-actions"><button type="button" class="btn-redo-bmc-on-error">重做</button></div>`;
+    loading2.dataset.bmcErrorMsg = errMsg;
+    pushAndSaveProblemDetailChat({ role: 'system', content: '生成失败：' + errMsg, timestamp: getTimeStr() });
   }
 }
 
@@ -6605,13 +6805,22 @@ async function runRequirementLogicConstruction() {
   container.appendChild(loadingBlock);
   container.scrollTop = container.scrollHeight;
   try {
-    const { content, usage, model, durationMs } = await generateRequirementLogicFromInputs(preliminaryReq, basicInfo, bmc);
+    const { content, usage, model, durationMs, fullPrompt, rawOutput } = await generateRequirementLogicFromInputs(preliminaryReq, basicInfo, bmc);
     loadingBlock.remove();
     const logicStr = (content || '').trim() || '（无返回内容）';
+    const parsed = parseRequirementLogicFromMarkdown(logicStr);
+    pushAndSaveProblemDetailChat(buildTask3LlmQueryMessage({
+      fullPrompt: fullPrompt || '',
+      parsed,
+      rawOutput: rawOutput || logicStr,
+      timestamp: getTimeStr(),
+      usage,
+      model,
+      durationMs,
+    }));
     pushOperationToHistory(item.createdAt, 'requirementLogic', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
     updateDigitalProblemRequirementLogic(item.createdAt, logicStr, false);
     currentProblemDetailItem = { ...item, requirementLogic: logicStr };
-    const parsed = parseRequirementLogicFromMarkdown(logicStr);
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     const block = document.createElement('div');
     block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-requirement-logic-start problem-detail-chat-msg-with-delete';
@@ -6670,73 +6879,6 @@ function resolveValueStreamForItGap(item) {
   return vs || null;
 }
 
-const LOCAL_ITGAP_BANNER_ID = 'local-itgap-existing-banner';
-
-/** 在聊天区顶部显示粘性提醒条，提示用户已存在局部 ITGap block */
-function showLocalItGapExistingBlockBanner(container, blockEl) {
-  if (!container || !blockEl) return;
-  let banner = container.querySelector(`#${LOCAL_ITGAP_BANNER_ID}`);
-  if (banner) return;
-  banner = document.createElement('div');
-  banner.id = LOCAL_ITGAP_BANNER_ID;
-  banner.className = 'problem-detail-chat-local-itgap-banner';
-  banner.innerHTML = `
-    <span class="problem-detail-chat-local-itgap-banner-text">局部 ITGap 分析 session 已生成，请向下查看</span>
-    <button type="button" class="btn-scroll-to-local-itgap-banner">滚动到</button>
-  `;
-  const scrollToBlock = () => {
-    scrollChatToBlock(container, blockEl);
-    banner.remove();
-  };
-  banner.querySelector('.btn-scroll-to-local-itgap-banner')?.addEventListener('click', scrollToBlock);
-  container.insertBefore(banner, container.firstChild);
-}
-
-/** 将聊天容器滚动到指定 block 位置 */
-function scrollChatToBlock(container, blockEl) {
-  if (!container || !blockEl) return;
-  const blockTop = blockEl.offsetTop;
-  const containerHeight = container.clientHeight;
-  const blockHeight = blockEl.offsetHeight;
-  container.scrollTop = Math.max(0, blockTop - Math.floor(containerHeight / 3));
-}
-
-/** 针对单个环节调用大模型进行角色与权限推演 */
-async function generateRolePermissionForStep(stepName, stageName, valueStream, globalItGap, localItGap, projectName) {
-  const vsmJson = JSON.stringify(valueStream, null, 2);
-  const globalItGapJson = globalItGap != null ? JSON.stringify(globalItGap, null, 2) : '';
-  const localItGapJson = Array.isArray(localItGap) && localItGap.length > 0 ? JSON.stringify(localItGap, null, 2) : '';
-  const systemPrompt = `Role & Context:
-我是一名软件公司的需求分析专家。请针对价值流中的**单一环节**进行角色与权限模型（RBAC）推演。
-
-Task Goal:
-针对环节「${stepName}」所在的阶段「${stageName}」，输出该环节的角色与权限推演结果（单个 JSON 对象）。
-
-Requirement: 角色画像模拟、现状转换映射、痛点闭环设计、合规与风控（SoD）。
-
-Output Format: 直接输出一个 JSON 对象，不要数组，不要 markdown 代码块。结构必须包含：
-{
-  "stage_name": "阶段名称",
-  "step_id": "环节序号",
-  "step_name": "环节名称",
-  "it_gap_reference": "关联的 IT 现状与痛点简述",
-  "roles": [{"role_name":"","legacy_operation":"","new_it_permissions":{},"pain_point_solution":{},"trigger_logic":""}],
-  "sod_warning": "职责分离建议或 null"
-}`;
-  const userParts = [
-    `项目：${projectName}。针对环节「${stepName}」进行角色与权限推演。`,
-    '【端到端全流程】', vsmJson,
-  ];
-  if (globalItGapJson) userParts.push('【全局 ITGap 分析】', globalItGapJson);
-  if (localItGapJson) userParts.push('【局部 ITGap 分析】', localItGapJson);
-  userParts.push('\n请直接输出该环节的 JSON 对象，不要 markdown 代码块或说明文字。');
-  const userPrompt = userParts.join('\n\n');
-  return fetchDeepSeekChat([
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt },
-  ]);
-}
-
 async function runRolePermissionModeling(isRedo) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -6744,11 +6886,11 @@ async function runRolePermissionModeling(isRedo) {
   if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
     pushAndSaveProblemDetailChat({
       role: 'system',
-      content: '请配置 AI 才能使用角色与权限模型推演功能。',
+      content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用角色与权限模型推演功能。',
       timestamp: getTimeStr(),
     });
     return;
@@ -6993,426 +7135,48 @@ function getLatestConfirmedRolePermissionContent(item) {
   return null;
 }
 
-function parseRolePermissionModel(markdown) {
-  if (!markdown || typeof markdown !== 'string') return [];
-  let raw = markdown.trim().replace(/^\uFEFF/, '');
-  if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 输入长度=', raw.length, '前80字=', raw.slice(0, 80));
-  // 1) 尝试直接解析为 RBAC JSON 数组（新格式）
-  let parsed = null;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e1) {
-    if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: JSON.parse(raw) 失败:', e1 && e1.message);
-    const codeBlock = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (codeBlock) {
-      try {
-        parsed = JSON.parse(codeBlock[1].trim());
-      } catch (_2) {}
-    }
-    if (!Array.isArray(parsed)) {
-      const start = raw.indexOf('[');
-      if (start >= 0) {
-        let depth = 0;
-        let end = -1;
-        let i = start;
-        while (i < raw.length) {
-          const c = raw[i];
-          if (c === '"') {
-            i += 1;
-            while (i < raw.length) {
-              if (raw[i] === '\\') i += 2;
-              else if (raw[i] === '"') { i += 1; break; }
-              else i += 1;
-            }
-            continue;
-          }
-          if (c === '[') { depth += 1; i += 1; continue; }
-          if (c === ']') {
-            depth -= 1;
-            if (depth === 0) { end = i; break; }
-            i += 1;
-            continue;
-          }
-          i += 1;
-        }
-        if (end > start) {
-          try {
-            parsed = JSON.parse(raw.slice(start, end + 1));
-          } catch (_3) {
-            if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 括号截取后仍解析失败, 长度=', end - start + 1);
-          }
-        }
+function getLocalItGapDeps() {
+  return {
+    get el() { return el; },
+    get currentProblemDetailItem() { return currentProblemDetailItem; },
+    setCurrentProblemDetailItem(item) { currentProblemDetailItem = item; },
+    get problemDetailChatMessages() { return problemDetailChatMessages; },
+    getTimeStr,
+    pushAndSaveProblemDetailChat,
+    saveProblemDetailChat: typeof saveProblemDetailChat === 'function' ? saveProblemDetailChat : undefined,
+    renderProblemDetailChatFromStorage,
+    renderProblemDetailHistory,
+    renderProblemDetailContent,
+    updateDigitalProblemLocalItGapAnalysis,
+    getDigitalProblems,
+    resolveValueStreamForItGap,
+    DEEPSEEK_API_KEY,
+    buildLlmMetaHtml,
+    DELETE_CHAT_MSG_ICON,
+    pushLocalItGapInputBlock(stepName, stepIndex, payload) {
+      const isFullInput = payload && typeof payload === 'object' && ('systemPrompt' in payload || 'userContent' in payload);
+      const msg = { type: 'localItGapInputBlock', stepName, stepIndex, timestamp: getTimeStr() };
+      if (isFullInput) msg.fullInput = payload; else msg.prompt = typeof payload === 'string' ? payload : '';
+      pushAndSaveProblemDetailChat(msg);
+      const container = el.problemDetailChatMessages;
+      if (container) {
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
       }
-    }
-  }
-  if (Array.isArray(parsed) && parsed.length > 0) {
-    const first = parsed[0];
-    if (first && typeof first === 'object') {
-      const hasRoles = Array.isArray(first.roles);
-      const hasStep = 'step_name' in first || 'step_id' in first;
-      const hasStage = 'stage_name' in first || 'stage_id' in first;
-      if (hasRoles && (hasStep || hasStage)) {
-        if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 解析成功(新格式), 条数=', parsed.length, '首条keys=', Object.keys(first || {}));
-        return parsed;
+      renderProblemDetailHistory();
+    },
+    pushLocalItGapOutputBlock(stepName, stepIndex) {
+      pushAndSaveProblemDetailChat({ type: 'localItGapOutputBlock', stepName, stepIndex, timestamp: getTimeStr() });
+      const container = el.problemDetailChatMessages;
+      if (container) {
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
       }
-      if (hasStep || hasStage) {
-        if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 解析成功(按环节), 条数=', parsed.length);
-        return parsed;
-      }
-    }
-  }
-  if (ROLE_PERMISSION_LOG) console.log('[角色与权限] parseRolePermissionModel: 未识别为新格式数组, 尝试表格解析, parsed=', Array.isArray(parsed) ? 'length=' + parsed.length : parsed);
-  // 2) 兼容旧版 Markdown 表格
-  const lines = markdown.split(/\r?\n/).map((l) => l.trim());
-  const tableLines = lines.filter((l) => l.includes('|'));
-  if (tableLines.length < 2) return [];
-  const headerLine = tableLines[0];
-  const separatorLine = tableLines[1];
-  const headerCells = headerLine
-    .split('|')
-    .map((c) => c.trim())
-    .filter((c) => c);
-  const idxNode = headerCells.findIndex((c) => c.includes('节点'));
-  const idxRole = headerCells.findIndex((c) => c.includes('建议角色'));
-  const idxDuty = headerCells.findIndex((c) => c.includes('核心职责'));
-  const idxPerm = headerCells.findIndex((c) => c.includes('权限'));
-  const rows = [];
-  for (let i = 2; i < tableLines.length; i++) {
-    const line = tableLines[i];
-    if (!line || !line.includes('|')) continue;
-    const cells = line
-      .split('|')
-      .map((c) => c.trim())
-      .filter((c) => c);
-    if (cells.length < 2) continue;
-    const getCell = (idx) => (idx >= 0 && idx < cells.length ? cells[idx] : '');
-    const nodeName = getCell(idxNode >= 0 ? idxNode : 0);
-    if (!nodeName) continue;
-    const roleText = getCell(idxRole >= 0 ? idxRole : 1);
-    const dutyText = getCell(idxDuty >= 0 ? idxDuty : 2);
-    const permText = getCell(idxPerm >= 0 ? idxPerm : 3);
-    const roles = { executor: '', approver: '', informer: '' };
-    if (roleText) {
-      const execMatch = roleText.match(/执行者[:：]([^；;]+)/);
-      const apprMatch = roleText.match(/审批者[:：]([^；;]+)/);
-      const infoMatch = roleText.match(/知情者[:：]([^；;]+)/);
-      roles.executor = execMatch ? execMatch[1].trim() : '';
-      roles.approver = apprMatch ? apprMatch[1].trim() : '';
-      roles.informer = infoMatch ? infoMatch[1].trim() : '';
-    }
-    const perms = { wechat: '', lowcode: '', notify: '', query: '' };
-    if (permText) {
-      const wechatMatch = permText.match(/企微端[:：]([^；;]+)/);
-      const lowcodeMatch = permText.match(/低代码[:：]([^；;]+)/);
-      const notifyMatch = permText.match(/接收通知[:：]([^；;]+)/);
-      const queryMatch = permText.match(/查询数据[:：]([^；;]+)/);
-      perms.wechat = wechatMatch ? wechatMatch[1].trim() : '';
-      perms.lowcode = lowcodeMatch ? lowcodeMatch[1].trim() : '';
-      perms.notify = notifyMatch ? notifyMatch[1].trim() : '';
-      perms.query = queryMatch ? queryMatch[1].trim() : '';
-    }
-    rows.push({
-      node: nodeName,
-      roles,
-      duty: dutyText,
-      perms,
-    });
-  }
-  return rows;
-}
-if (typeof window !== 'undefined') window.parseRolePermissionModel = parseRolePermissionModel;
-
-/** 将角色字段渲染为 HTML：字符串用 markdown，对象用 JSON pre */
-function formatRolePermissionField(val) {
-  if (val == null || (typeof val === 'string' && !val.trim())) return '<span class="problem-detail-role-permission-empty">—</span>';
-  if (typeof val === 'string') return `<div class="problem-detail-role-permission-field-content markdown-body">${renderMarkdown(val.trim())}</div>`;
-  if (typeof val === 'object') return `<pre class="problem-detail-role-permission-field-pre">${escapeHtml(JSON.stringify(val, null, 2))}</pre>`;
-  return escapeHtml(String(val));
-}
-
-/** 将 new_it_permissions 渲染为 数据权限、功能实用、系统操作 三个子卡片 */
-function buildNewPermissionsSubcardsHtml(obj) {
-  if (!obj || typeof obj !== 'object') return '<span class="problem-detail-role-permission-empty">—</span>';
-  const labels = { data_access: '数据权限', function_use: '功能实用', system_operation: '系统操作' };
-  const keys = ['data_access', 'function_use', 'system_operation'];
-  const cards = keys.map((key) => {
-    const val = obj[key];
-    if (val == null && !(key in obj)) return '';
-    const label = labels[key] || key;
-    let content = '';
-    if (val == null) content = '<span class="problem-detail-role-permission-empty">—</span>';
-    else if (Array.isArray(val)) content = val.length ? `<ul class="problem-detail-role-permission-list">${val.map((v) => `<li class="problem-detail-role-permission-list-item">${escapeHtml(String(v))}</li>`).join('')}</ul>` : '<span class="problem-detail-role-permission-empty">—</span>';
-    else if (typeof val === 'string') content = `<div class="problem-detail-role-permission-field-content markdown-body">${renderMarkdown(val.trim() || '—')}</div>`;
-    else content = `<pre class="problem-detail-role-permission-field-pre">${escapeHtml(JSON.stringify(val, null, 2))}</pre>`;
-    return `<div class="problem-detail-role-permission-inner-card"><div class="problem-detail-role-permission-inner-card-title">${escapeHtml(label)}</div><div class="problem-detail-role-permission-inner-card-body">${content}</div></div>`;
-  }).filter(Boolean).join('');
-  if (!cards) return '<span class="problem-detail-role-permission-empty">—</span>';
-  return `<div class="problem-detail-role-permission-inner-cards">${cards}</div>`;
-}
-
-/** 痛点解决方案 key 映射为中文标题 */
-const PAIN_POINT_SOLUTION_LABELS = {
-  eliminate_manual_collection: '消除人工采集',
-  real_time_data_fusion: '实时数据融合',
-  'real-time_data_fusion': '实时数据融合',
-  predictive_analysis_support: '预测分析支持',
-  automated_alerting: '自动化预警',
-  centralized_knowledge_asset: '集中化知识资产',
-  immediate_market_reference: '即时市场参考',
-  proactive_risk_awareness: '主动风险感知',
-  data_driven_decision: '数据驱动决策',
-  strategic_insight: '战略洞察',
-  real_time_visibility: '实时可视',
-  workflow_automation: '流程自动化',
-  decision_support: '决策支持',
-  knowledge_management: '知识管理',
-  collaboration_improvement: '协作改善',
-  'data-driven_decision': '数据驱动决策',
-  immediate_response: '即时响应',
-  accuracy_guarantee: '准确性保障',
-  mobile_support: '移动端支持',
-  inventory_reservation: '库存预留',
-  reduce_interruption: '减少打断',
-  improve_accuracy: '提升准确性',
-  enhanced_visibility: '增强可见性',
-  standardized_pricing: '标准化定价',
-  audit_trail: '审计追踪',
-};
-
-/** 将 key 格式化为英文标题（Title Case） */
-function formatKeyToEnglishTitle(key) {
-  if (!key || typeof key !== 'string') return '';
-  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/** 将 pain_point_solution 按每个 json 子项渲染为子卡片 */
-function buildPainPointSolutionSubcardsHtml(obj) {
-  if (!obj || typeof obj !== 'object') return '<span class="problem-detail-role-permission-empty">—</span>';
-  const entries = Object.entries(obj);
-  if (!entries.length) return '<span class="problem-detail-role-permission-empty">—</span>';
-  const cards = entries.map(([key, val], i) => {
-    const labelZh = PAIN_POINT_SOLUTION_LABELS[key] || (key ? `解决方案 ${i + 1}` : '—');
-    const labelEn = formatKeyToEnglishTitle(key) || '—';
-    const content = val == null || (typeof val === 'string' && !val.trim())
-      ? '<span class="problem-detail-role-permission-empty">—</span>'
-      : (typeof val === 'string'
-        ? `<div class="problem-detail-role-permission-field-content markdown-body">${renderMarkdown(val.trim())}</div>`
-        : `<pre class="problem-detail-role-permission-field-pre">${escapeHtml(JSON.stringify(val, null, 2))}</pre>`);
-    const titleHtml = `<div class="problem-detail-role-permission-inner-card-title"><span class="problem-detail-role-permission-title-zh">${escapeHtml(labelZh)}</span><span class="problem-detail-role-permission-title-en">${escapeHtml(labelEn)}</span></div>`;
-    return `<div class="problem-detail-role-permission-inner-card">${titleHtml}<div class="problem-detail-role-permission-inner-card-body">${content}</div></div>`;
-  }).join('');
-  return `<div class="problem-detail-role-permission-inner-cards">${cards}</div>`;
-}
-
-/** 基于单个环节的 model 对象构建 View 视图 HTML（按角色渲染圆角子卡片） */
-function buildRolePermissionStepViewHtml(match) {
-  if (!match || typeof match !== 'object') return '';
-  const roles = Array.isArray(match.roles) ? match.roles : [];
-  if (roles.length === 0) return '<div class="problem-detail-role-permission-placeholder">该环节暂无角色数据</div>';
-  const roleCards = roles.map((r) => {
-    if (!r || typeof r !== 'object') return '';
-    const roleName = r.role_name ?? r.roleName ?? '未命名角色';
-    const legacyOp = formatRolePermissionField(r.legacy_operation ?? r.legacyOperation);
-    const newPerms = buildNewPermissionsSubcardsHtml(r.new_it_permissions ?? r.newItPermissions ?? r.new_it_permission);
-    const painSolution = buildPainPointSolutionSubcardsHtml(r.pain_point_solution ?? r.painPointSolution ?? r.pain_point_solutions);
-    const triggerLogic = r.trigger_logic ?? r.triggerLogic;
-    const triggerHtml = triggerLogic != null && String(triggerLogic).trim() ? `<div class="problem-detail-role-card-section"><div class="problem-detail-role-card-section-title">触发逻辑</div>${formatRolePermissionField(triggerLogic)}</div>` : '';
-    return `
-    <div class="problem-detail-role-card">
-      <div class="problem-detail-role-card-header problem-detail-role-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
-        <span class="problem-detail-role-card-header-icon" aria-hidden="true">👤</span>
-        <span class="problem-detail-role-card-header-title">${escapeHtml(roleName)}</span>
-        <span class="problem-detail-role-card-header-arrow">▾</span>
-      </div>
-      <div class="problem-detail-role-card-body" hidden>
-      <div class="problem-detail-role-card-sections">
-        <div class="problem-detail-role-card-section"><div class="problem-detail-role-card-section-title">过去操作</div>${legacyOp}</div>
-        <div class="problem-detail-role-card-section"><div class="problem-detail-role-card-section-title">新的权限</div>${newPerms}</div>
-        <div class="problem-detail-role-card-section"><div class="problem-detail-role-card-section-title">痛点解决方案</div>${painSolution}</div>
-        ${triggerHtml}
-      </div>
-      </div>
-    </div>`;
-  }).filter(Boolean).join('');
-  return `<div class="problem-detail-role-permission-view-roles">${roleCards}</div>`;
-}
-
-function buildRolePermissionNodeCardsHtml(model) {
-  if (!Array.isArray(model) || model.length === 0) return '';
-  const isNewFormat = model[0] && typeof model[0] === 'object' && Array.isArray(model[0].roles) && (model[0].step_name != null || model[0].step_id != null || model[0].stage_name != null || model[0].stage_id != null);
-  if (isNewFormat) {
-    return `<div class="problem-detail-role-permission-step-list">
-      <div class="problem-detail-role-permission-list-title">环节列表</div>${model
-      .map((item) => {
-        const stepName = item.stage_name != null && item.step_name != null
-          ? `${item.stage_name} － ${item.step_name}`
-          : (item.step_name || item.stage_name || [item.step_id, item.stage_id].filter(Boolean).join(' ') || '环节');
-        const viewHtml = buildRolePermissionStepViewHtml(item);
-        const jsonStr = JSON.stringify(item, null, 2);
-        return `
-      <div class="problem-detail-card problem-detail-card-role-permission">
-        <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
-          <span class="problem-detail-card-header-title">${escapeHtml(stepName)}</span>
-          <span class="problem-detail-card-header-arrow">▾</span>
-        </div>
-        <div class="problem-detail-card-body" hidden>
-          <div class="problem-detail-role-permission-tabs">
-            <button type="button" class="problem-detail-role-permission-tab problem-detail-role-permission-tab-active" data-tab="view">view</button>
-            <button type="button" class="problem-detail-role-permission-tab" data-tab="json">json</button>
-          </div>
-          <div class="problem-detail-role-permission-panel problem-detail-role-permission-panel-view" data-panel="view">${viewHtml}</div>
-          <div class="problem-detail-role-permission-panel problem-detail-role-permission-panel-json" data-panel="json" hidden><pre class="problem-detail-role-permission-json">${escapeHtml(jsonStr)}</pre></div>
-        </div>
-      </div>`;
-      })
-      .join('')}</div>`;
-  }
-  return model
-    .map((m) => {
-      const nodeName = m.node || '';
-      if (!nodeName) return '';
-      const roles = m.roles || { executor: '', approver: '', informer: '' };
-      const perms = m.perms || { wechat: '', lowcode: '', notify: '', query: '' };
-      const duty = m.duty || '';
-      return `
-      <div class="problem-detail-card problem-detail-card-role-permission">
-        <div class="problem-detail-card-header" tabindex="0" role="button" aria-expanded="false">
-          <span class="problem-detail-card-header-title">环节：${escapeHtml(nodeName)}</span>
-        </div>
-        <div class="problem-detail-card-body" hidden>
-          <div class="problem-detail-role-permission-grid">
-            <div class="problem-detail-role-permission-subcard">
-              <div class="problem-detail-role-permission-subtitle">环节名称</div>
-              <div class="problem-detail-role-permission-text">${escapeHtml(nodeName)}</div>
-            </div>
-            <div class="problem-detail-role-permission-subcard">
-              <div class="problem-detail-role-permission-subtitle">角色设计</div>
-              <div class="problem-detail-role-permission-text">
-                <div>执行者：${escapeHtml(roles.executor || '—')}</div>
-                <div>审批者：${escapeHtml(roles.approver || '—')}</div>
-                <div>知情者：${escapeHtml(roles.informer || '—')}</div>
-              </div>
-            </div>
-            <div class="problem-detail-role-permission-subcard">
-              <div class="problem-detail-role-permission-subtitle">企微端</div>
-              <div class="problem-detail-role-permission-text">${escapeHtml(perms.wechat || '—')}</div>
-            </div>
-            <div class="problem-detail-role-permission-subcard">
-              <div class="problem-detail-role-permission-subtitle">低代码</div>
-              <div class="problem-detail-role-permission-text">${escapeHtml(perms.lowcode || '—')}</div>
-            </div>
-            <div class="problem-detail-role-permission-subcard">
-              <div class="problem-detail-role-permission-subtitle">接收通知</div>
-              <div class="problem-detail-role-permission-text">${escapeHtml(perms.notify || '—')}</div>
-            </div>
-            <div class="problem-detail-role-permission-subcard">
-              <div class="problem-detail-role-permission-subtitle">查询数据</div>
-              <div class="problem-detail-role-permission-text">${escapeHtml(perms.query || '—')}</div>
-            </div>
-          </div>
-          ${
-            duty
-              ? `<div class="problem-detail-role-permission-duty"><span class="problem-detail-role-permission-subtitle">核心职责</span><div class="problem-detail-role-permission-text">${escapeHtml(
-                  duty
-                )}</div></div>`
-              : ''
-          }
-        </div>
-      </div>`;
-    })
-    .join('');
-}
-
-async function runLocalItGapAnalysisForNextStep() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  const valueStream = resolveValueStreamForItGap(item);
-  if (!valueStream || valueStream.raw) return;
-  if (!hasAiConfig()) {
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用局部 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用局部 ITGap 分析功能。', timestamp: getTimeStr() });
-    return;
-  }
-  const globalItGap = item.globalItGapAnalysisJson;
-  if (!globalItGap) return;
-  const { stages } = parseValueStreamGraph(valueStream);
-  const allSteps = stages.flatMap((s) => s.steps);
-  const sessions = item.localItGapSessions || [];
-  const analyses = item.localItGapAnalyses || [];
-  let nextIndex;
-  if (sessions.length > 0) {
-    const firstUnfinished = sessions.findIndex((s) => !s.analysisJson);
-    if (firstUnfinished < 0) return;
-    nextIndex = firstUnfinished;
-  } else {
-    nextIndex = analyses.length;
-  }
-  if (nextIndex >= allSteps.length) return;
-  const step = allSteps[nextIndex];
-  const stepName = step?.name || `环节${nextIndex + 1}`;
-  pushAndSaveProblemDetailChat({ role: 'system', content: '正在分析环节【' + stepName + '】', timestamp: getTimeStr() });
-  container.innerHTML = '';
-  renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
-  container.scrollTop = container.scrollHeight;
-  const parsingBlock = document.createElement('div');
-  parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
-  parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在分析环节「${escapeHtml(stepName)}」…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(parsingBlock);
-  container.scrollTop = container.scrollHeight;
-  try {
-    const { content, usage, model, durationMs } = await generateLocalItGapAnalysis(stepName, globalItGap, valueStream);
-    parsingBlock.remove();
-    let analysisJson = parseLocalItGapFromContent(content);
-    if (!Object.values(analysisJson).some((v) => v)) analysisJson = { statusQuo: content || '（解析失败）', itGap3DMap: '', actionableRequirements: '', businessValuePrediction: '' };
-    const llmMeta = { usage, model, durationMs };
-    const llmMetaHtml = buildLlmMetaHtml(llmMeta);
-    const structuredHtml = buildLocalItGapStructuredHtml(analysisJson);
-    const analysisMarkdown = buildLocalItGapMarkdown(analysisJson);
-    updateDigitalProblemLocalItGapAnalysis(item.createdAt, stepName, nextIndex, analysisJson, analysisMarkdown);
-    const list = getDigitalProblems();
-    const updated = list.find((it) => it.createdAt === item.createdAt);
-    if (updated) currentProblemDetailItem = updated;
-    const dataAttr = String(JSON.stringify(analysisJson)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const cardBlock = document.createElement('div');
-    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-card problem-detail-chat-msg-with-delete';
-    cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
-    cardBlock.dataset.stepName = stepName;
-    cardBlock.dataset.stepIndex = String(nextIndex);
-    cardBlock.innerHTML = `
-      <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-      <div class="problem-detail-chat-local-itgap-card-wrap">
-        <div class="problem-detail-chat-local-itgap-card-header">局部 ITGap 分析：${escapeHtml(stepName)}</div>
-        <div class="problem-detail-chat-local-itgap-card-body">${structuredHtml}</div>
-        <div class="problem-detail-chat-local-itgap-card-actions">
-          <button type="button" class="btn-confirm-local-itgap btn-confirm-primary" data-json="${dataAttr}" data-step-name="${escapeHtml(stepName)}" data-step-index="${nextIndex}">确认</button>
-          <button type="button" class="btn-redo-local-itgap" data-step-name="${escapeHtml(stepName)}" data-step-index="${nextIndex}">重做</button>
-          <button type="button" class="btn-refine-modify" data-task-id="task9">修正</button>
-          <button type="button" class="btn-refine-discuss" data-task-id="task9">讨论</button>
-        </div>
-      </div>
-      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>
-      <div class="problem-detail-chat-local-itgap-card-meta">${llmMetaHtml}</div>`;
-    container.appendChild(cardBlock);
-    pushAndSaveProblemDetailChat({ type: 'localItGapAnalysisCard', data: analysisJson, stepName, stepIndex: nextIndex, timestamp: getTimeStr(), confirmed: false, llmMeta });
-    container.scrollTop = container.scrollHeight;
-    renderProblemDetailContent();
-    container.innerHTML = '';
-    renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
-    container.scrollTop = container.scrollHeight;
-    renderProblemDetailHistory();
-  } catch (err) {
-    parsingBlock.remove();
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">局部 ITGap 分析失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '局部 ITGap 分析失败：' + (err.message || String(err)), timestamp: getTimeStr() });
-    container.scrollTop = container.scrollHeight;
-  }
+      renderProblemDetailHistory();
+    },
+  };
 }
 
 async function runRolePermissionModelingForNextStep() {
@@ -7422,9 +7186,9 @@ async function runRolePermissionModelingForNextStep() {
   if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI：在 config.local.js 中配置 DEEPSEEK_API_KEY，或使用 Backend 并在数据库配置 AI API Key。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）。', timestamp: getTimeStr() });
     return;
   }
   const valueStream = item.valueStream;
@@ -7506,9 +7270,9 @@ async function runRolePermissionModelingAutoSequential() {
   if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI：在 config.local.js 中配置 DEEPSEEK_API_KEY，或使用 Backend 并在数据库配置 AI API Key。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）。', timestamp: getTimeStr() });
     return;
   }
   for (;;) {
@@ -7605,6 +7369,211 @@ async function runRolePermissionModelingAutoSequential() {
   }
 }
 
+/** 核心业务对象推演：执行下一待推演环节（手工逐项确认时调用） */
+async function runCoreBusinessObjectForNextStep() {
+  const container = el.problemDetailChatMessages;
+  const item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!hasAiConfig()) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用核心业务对象推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）。', timestamp: getTimeStr() });
+    return;
+  }
+  const valueStream = resolveValueStreamForItGap(item);
+  if (!valueStream || valueStream.raw) {
+    pushAndSaveProblemDetailChat({ role: 'system', content: '核心业务对象推演需要完整的价值流图，请先完成价值流图绘制。', timestamp: getTimeStr() });
+    return;
+  }
+  const ctx = typeof buildCoreBusinessObjectContextJson === 'function' ? buildCoreBusinessObjectContextJson(item, valueStream, getLatestConfirmedRolePermissionContent) : null;
+  if (!ctx) {
+    pushAndSaveProblemDetailChat({ role: 'system', content: '无法构建核心业务对象推演上下文。', timestamp: getTimeStr() });
+    return;
+  }
+  const valueStreamJson = ctx.valueStream != null ? JSON.stringify(ctx.valueStream, null, 2) : '{}';
+  const globalItGapJson = ctx.globalItGap != null ? JSON.stringify(ctx.globalItGap, null, 2) : '{}';
+  const localItGapJson = Array.isArray(ctx.localItGapByStep) ? JSON.stringify(ctx.localItGapByStep, null, 2) : '[]';
+  const rolePermissionJson = Array.isArray(ctx.rolePermissionByStep) ? JSON.stringify(ctx.rolePermissionByStep, null, 2) : '[]';
+  let sessions = (item.coreBusinessObjectSessions || []).slice();
+  const nextIdx = sessions.findIndex((s) => !s.coreBusinessObjectJson);
+  if (nextIdx < 0) return;
+  const session = sessions[nextIdx];
+  const stepName = session.stepName || `环节${nextIdx + 1}`;
+  const stageName = session.stageName || '';
+  pushAndSaveProblemDetailChat({ role: 'system', content: '正在进行【' + stepName + '】的核心业务对象推演', timestamp: getTimeStr() });
+  container.innerHTML = '';
+  renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+  container.scrollTop = container.scrollHeight;
+  const parsingBlock = document.createElement('div');
+  parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+  parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在进行【${escapeHtml(stepName)}】的核心业务对象推演…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+  container.appendChild(parsingBlock);
+  container.scrollTop = container.scrollHeight;
+  try {
+    const resp = await (typeof generateCoreBusinessObjectForStepWithStrictPrompt === 'function'
+      ? generateCoreBusinessObjectForStepWithStrictPrompt(stepName, stageName, nextIdx, valueStreamJson, globalItGapJson, localItGapJson, rolePermissionJson)
+      : Promise.resolve({ content: null }));
+    const { content, usage, model, durationMs } = resp || {};
+    parsingBlock.remove();
+    let stepJson = null;
+    if (content != null) {
+      const raw = (typeof content === 'string' ? content : JSON.stringify(content || {})).trim();
+      try {
+        const parsed = JSON.parse(raw.replace(/^```[\w]*\n?|```$/g, '').trim());
+        stepJson = Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : (parsed && typeof parsed === 'object' ? parsed : null);
+      } catch (_) {
+        stepJson = content;
+      }
+    }
+    if (sessions[nextIdx]) sessions[nextIdx] = { ...sessions[nextIdx], coreBusinessObjectJson: stepJson };
+    if (typeof updateDigitalProblemCoreBusinessObjectSessions === 'function') updateDigitalProblemCoreBusinessObjectSessions(item.createdAt, sessions);
+    const llmMeta = (usage != null || model != null || durationMs != null) ? { usage, model, durationMs } : undefined;
+    pushAndSaveProblemDetailChat({
+      type: 'coreBusinessObjectAnalysisCard',
+      content: stepJson,
+      stepName,
+      stepIndex: nextIdx,
+      timestamp: getTimeStr(),
+      confirmed: false,
+      llmMeta,
+    });
+    const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+    if (updated) currentProblemDetailItem = updated;
+    const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'coreBusinessObjectSessionsBlock');
+    if (sessionsIdx >= 0) problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], sessions: updated?.coreBusinessObjectSessions || sessions };
+    container.innerHTML = '';
+    renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+    container.scrollTop = container.scrollHeight;
+    renderProblemDetailContent();
+    renderProblemDetailHistory();
+  } catch (err) {
+    parsingBlock.remove();
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">核心业务对象推演失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '核心业务对象推演失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+/** 核心业务对象推演：自动顺序执行全部环节 */
+async function runCoreBusinessObjectAutoSequential() {
+  const container = el.problemDetailChatMessages;
+  let item = currentProblemDetailItem;
+  if (!container || !item?.createdAt) return;
+  if (!hasAiConfig()) {
+    const errBlock = document.createElement('div');
+    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用核心业务对象推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(errBlock);
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）。', timestamp: getTimeStr() });
+    return;
+  }
+  const valueStream = resolveValueStreamForItGap(item);
+  if (!valueStream || valueStream.raw) {
+    pushAndSaveProblemDetailChat({ role: 'system', content: '核心业务对象推演需要完整的价值流图，请先完成价值流图绘制。', timestamp: getTimeStr() });
+    return;
+  }
+  const ctx = typeof buildCoreBusinessObjectContextJson === 'function' ? buildCoreBusinessObjectContextJson(item, valueStream, getLatestConfirmedRolePermissionContent) : null;
+  if (!ctx) {
+    pushAndSaveProblemDetailChat({ role: 'system', content: '无法构建核心业务对象推演上下文。', timestamp: getTimeStr() });
+    return;
+  }
+  const valueStreamJson = ctx.valueStream != null ? JSON.stringify(ctx.valueStream, null, 2) : '{}';
+  const globalItGapJson = ctx.globalItGap != null ? JSON.stringify(ctx.globalItGap, null, 2) : '{}';
+  const localItGapJson = Array.isArray(ctx.localItGapByStep) ? JSON.stringify(ctx.localItGapByStep, null, 2) : '[]';
+  const rolePermissionJson = Array.isArray(ctx.rolePermissionByStep) ? JSON.stringify(ctx.rolePermissionByStep, null, 2) : '[]';
+  for (;;) {
+    const list = getDigitalProblems();
+    item = list.find((p) => String(p.createdAt) === String(currentProblemDetailItem?.createdAt)) || currentProblemDetailItem;
+    if (!item?.createdAt) return;
+    let sessions = (item.coreBusinessObjectSessions || []).slice();
+    const nextIdx = sessions.findIndex((s) => !s.coreBusinessObjectJson);
+    if (nextIdx < 0) {
+      const hasAllDoneBlock = problemDetailChatMessages.some((m) => m.type === 'coreBusinessObjectAllDoneBlock');
+      if (!hasAllDoneBlock) {
+        pushAndSaveProblemDetailChat({
+          type: 'coreBusinessObjectAllDoneBlock',
+          content: '所有环节的核心业务对象推演已经结束，是否全部确认？',
+          timestamp: getTimeStr(),
+        });
+      }
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => {
+        const wsScroll = document.querySelector('.problem-detail-workspace-scroll');
+        if (wsScroll) wsScroll.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+      return;
+    }
+    const session = sessions[nextIdx];
+    const stepName = session.stepName || `环节${nextIdx + 1}`;
+    const stageName = session.stageName || '';
+    pushAndSaveProblemDetailChat({ role: 'system', content: '正在进行【' + stepName + '】的核心业务对象推演', timestamp: getTimeStr() });
+    container.innerHTML = '';
+    renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+    container.scrollTop = container.scrollHeight;
+    const parsingBlock = document.createElement('div');
+    parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+    parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在进行【${escapeHtml(stepName)}】的核心业务对象推演…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    container.appendChild(parsingBlock);
+    container.scrollTop = container.scrollHeight;
+    try {
+      const resp = await (typeof generateCoreBusinessObjectForStepWithStrictPrompt === 'function'
+        ? generateCoreBusinessObjectForStepWithStrictPrompt(stepName, stageName, nextIdx, valueStreamJson, globalItGapJson, localItGapJson, rolePermissionJson)
+        : Promise.resolve({ content: null }));
+      const { content, usage, model, durationMs } = resp || {};
+      parsingBlock.remove();
+      let stepJson = null;
+      if (content != null) {
+        const raw = (typeof content === 'string' ? content : JSON.stringify(content || {})).trim();
+        try {
+          const parsed = JSON.parse(raw.replace(/^```[\w]*\n?|```$/g, '').trim());
+          stepJson = Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : (parsed && typeof parsed === 'object' ? parsed : null);
+        } catch (_) {
+          stepJson = content;
+        }
+      }
+      sessions[nextIdx] = { ...sessions[nextIdx], coreBusinessObjectJson: stepJson };
+      if (typeof updateDigitalProblemCoreBusinessObjectSessions === 'function') updateDigitalProblemCoreBusinessObjectSessions(item.createdAt, sessions);
+      const llmMeta = (usage != null || model != null || durationMs != null) ? { usage, model, durationMs } : undefined;
+      pushAndSaveProblemDetailChat({
+        type: 'coreBusinessObjectAnalysisCard',
+        content: stepJson,
+        stepName,
+        stepIndex: nextIdx,
+        timestamp: getTimeStr(),
+        confirmed: false,
+        llmMeta,
+      });
+      const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+      if (updated) currentProblemDetailItem = updated;
+      const sessionsIdx = problemDetailChatMessages.findIndex((m) => m.type === 'coreBusinessObjectSessionsBlock');
+      if (sessionsIdx >= 0) problemDetailChatMessages[sessionsIdx] = { ...problemDetailChatMessages[sessionsIdx], sessions: updated?.coreBusinessObjectSessions || sessions };
+      container.innerHTML = '';
+      renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+      container.scrollTop = container.scrollHeight;
+      renderProblemDetailContent();
+      renderProblemDetailHistory();
+    } catch (err) {
+      parsingBlock.remove();
+      const errBlock = document.createElement('div');
+      errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+      errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">核心业务对象推演失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(errBlock);
+      pushAndSaveProblemDetailChat({ role: 'system', content: '核心业务对象推演失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+  }
+}
+
 async function runGlobalItGapAnalysis(isRedo) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
@@ -7612,9 +7581,9 @@ async function runGlobalItGapAnalysis(isRedo) {
   if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用全局 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用全局 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用全局 ITGap 分析功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用全局 ITGap 分析功能。', timestamp: getTimeStr() });
     return;
   }
   const enterpriseContext = {
@@ -7719,9 +7688,9 @@ async function runItStatusAnnotation() {
   if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用 IT 现状标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用 IT 现状标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用 IT 现状标注功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用 IT 现状标注功能。', timestamp: getTimeStr() });
     return;
   }
   const valueStream = item.valueStream;
@@ -7815,9 +7784,9 @@ async function runPainPointAnnotation(isRerun) {
   if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用痛点标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用痛点标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用痛点标注功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用痛点标注功能。', timestamp: getTimeStr() });
     return;
   }
   const valueStream = item.valueStream;
@@ -7925,9 +7894,9 @@ async function runValueStreamGeneration() {
   if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用价值流图生成功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用价值流图生成功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用价值流图生成功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用价值流图生成功能。', timestamp: getTimeStr() });
     return;
   }
   const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || {};
@@ -8013,21 +7982,13 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
+    } else if (msg.type === 'globalArchitectureContextBlock') {
+      return;
+    } else if (msg.type === 'localItGapContextBlock') {
+      return;
     } else if (msg.type === 'taskContextBlock') {
-      if (msg.taskId === 'task8') {
-        return;
-      }
-      const ctxJson = msg.contextJson && typeof msg.contextJson === 'object' ? JSON.stringify(msg.contextJson, null, 2) : (msg.contextJson != null ? String(msg.contextJson) : '{}');
-      const block = document.createElement('div');
-      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-context-block';
-      block.dataset.msgIndex = String(idx);
-      block.innerHTML = `
-        <div class="problem-detail-chat-msg-content-wrap">
-          <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-context">上下文</span>
-          <pre class="problem-detail-chat-context-json">${escapeHtml(ctxJson)}</pre>
-        </div>
-        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
-      container.appendChild(block);
+      /* 上下文内容块仅时间线展示，聊天区不渲染 */
+      return;
     } else if (msg.type === 'taskCompletionConfirmBlock') {
       const taskId = msg.taskId || '';
       const taskName = msg.taskName || (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === taskId)?.name) || taskId;
@@ -8050,6 +8011,9 @@ function renderProblemDetailChatFromStorage(container, messages) {
       return;
     } else if (msg.type === 'globalItGapContextLog') {
       // 全局 ITGap 上下文仅推送到沟通历史（标签「上下文」），不在聊天区展示卡片
+      return;
+    } else if (msg.type === 'coreBusinessObjectContextBlock') {
+      // 核心业务对象推演上下文仅推送到沟通历史（标签「上下文」），不在聊天区展示
       return;
     } else if (msg.type === 'localItGapContextLog') {
       // 局部 ITGap 上下文仅推送到沟通历史（标签「上下文」+ 备注），不在聊天区展示卡片
@@ -8216,7 +8180,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-bmc-card" role="button" tabindex="0">
           <div class="problem-detail-bmc-card-body">
-            ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
+            ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>商业模式画布 BMC 提炼</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
             <div class="problem-detail-bmc-grid">${bmcRows}</div>
             ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-bmc-content">${escapeHtml(painPoints)}</div></div>` : ''}
           </div>
@@ -8392,6 +8356,34 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>
         <div class="problem-detail-chat-role-permission-step-meta">${llmMetaHtml}</div>`;
       container.appendChild(cardBlock);
+    } else if (msg.type === 'coreBusinessObjectAnalysisCard') {
+      const content = msg.content;
+      const jsonStr = content != null ? (typeof content === 'string' ? content : JSON.stringify(content, null, 2)) : '';
+      const stepName = (msg.stepName || '').trim() || `环节${(msg.stepIndex ?? 0) + 1}`;
+      const stepIndex = parseInt(msg.stepIndex, 10);
+      const confirmed = !!msg.confirmed;
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-step-card problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = 'task11';
+      cardBlock.dataset.stepName = stepName;
+      cardBlock.dataset.stepIndex = String(stepIndex);
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-role-permission-step-card-wrap">
+          <div class="problem-detail-chat-role-permission-step-card-header">核心业务对象推演：${escapeHtml(stepName)}</div>
+          <div class="problem-detail-chat-role-permission-step-card-body"><pre class="problem-detail-chat-json-pre">${escapeHtml(jsonStr)}</pre></div>
+          <div class="problem-detail-chat-role-permission-step-card-actions">
+            <button type="button" class="btn-confirm-core-business-object-step btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+            <button type="button" class="btn-redo-core-business-object-step" ${confirmed ? 'disabled' : ''}>重做</button>
+            <button type="button" class="btn-refine-modify" data-task-id="task11" ${confirmed ? 'disabled' : ''}>修正</button>
+            <button type="button" class="btn-refine-discuss" data-task-id="task11" ${confirmed ? 'disabled' : ''}>讨论</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>
+        <div class="problem-detail-chat-role-permission-step-meta">${llmMetaHtml}</div>`;
+      container.appendChild(cardBlock);
     } else if (msg.type === 'rolePermissionAllDoneBlock') {
       const allConfirmed = !!msg.allConfirmed;
       const block = document.createElement('div');
@@ -8402,6 +8394,20 @@ function renderProblemDetailChatFromStorage(container, messages) {
           <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '全部环节已推演完毕，请逐项确认各卡片。')}</div>
           <div class="problem-detail-chat-role-permission-all-done-actions">
             <button type="button" class="btn-role-permission-confirm-all btn-confirm-primary" ${allConfirmed ? 'disabled' : ''}>${allConfirmed ? '已全部确认' : '全部确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'coreBusinessObjectAllDoneBlock') {
+      const allConfirmed = !!msg.allConfirmed;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-all-done problem-detail-chat-core-business-object-all-done';
+      block.dataset.msgIndex = String(idx);
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '所有环节的核心业务对象推演已经结束，是否全部确认？')}</div>
+          <div class="problem-detail-chat-role-permission-all-done-actions">
+            <button type="button" class="btn-core-business-object-confirm-all btn-confirm-primary" ${allConfirmed ? 'disabled' : ''}>${allConfirmed ? '已全部确认' : '全部确认'}</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -8576,18 +8582,20 @@ function renderProblemDetailChatFromStorage(container, messages) {
       block.innerHTML = `
         <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-chat-local-itgap-sessions-card-wrap">
-          <div class="problem-detail-chat-local-itgap-sessions-card-header">局部 ITGap 分析 Session</div>
+          <div class="problem-detail-chat-local-itgap-sessions-card-header">局部 ITGap 分析 Session 计划</div>
           <div class="problem-detail-chat-local-itgap-sessions-card-body">
             <div class="problem-detail-chat-local-itgap-sessions-header">已为 ${sessions.length} 个环节生成局部 ITGap 分析 session</div>
             <div class="problem-detail-chat-local-itgap-sessions-list">${sessionsListHtml}</div>
           </div>
           <div class="problem-detail-chat-local-itgap-sessions-actions">
-            <button type="button" class="btn-confirm-local-itgap-sessions btn-confirm-primary" ${sessionsConfirmed || !hasUnfinished ? 'disabled' : ''}>${sessionsConfirmed ? '已确认' : !hasUnfinished ? '全部已完成' : '确认'}</button>
-            <button type="button" class="btn-continue-local-itgap-sessions" ${!hasUnfinished ? 'disabled' : ''}>继续</button>
+            <button type="button" class="btn-auto-local-itgap-sessions btn-confirm-primary" ${!hasUnfinished ? 'disabled' : ''}>${!hasUnfinished ? '全部已完成' : '自动顺序执行'}</button>
+            <button type="button" class="btn-continue-local-itgap-sessions" ${!hasUnfinished ? 'disabled' : ''}>手动逐项执行</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
+    } else if (msg.type === 'localItGapInputBlock' || msg.type === 'localItGapOutputBlock') {
+      /* 输入/输出内容块仅时间线展示，聊天区不渲染 */
     } else if (msg.type === 'rolePermissionSessionsBlock') {
       const item = currentProblemDetailItem;
       const sessions = item?.rolePermissionSessions || msg.sessions || [];
@@ -8616,17 +8624,30 @@ function renderProblemDetailChatFromStorage(container, messages) {
           </div>
           <div class="problem-detail-chat-role-permission-sessions-actions">
             <button type="button" class="btn-role-permission-sessions-auto btn-confirm-primary" ${sessionsConfirmed ? 'disabled' : ''}>${escapeHtml(actionLabelAuto)}</button>
-            <button type="button" class="btn-role-permission-sessions-manual" ${sessionsConfirmed ? 'disabled' : ''}>${escapeHtml(actionLabelManual)}</button>
+            <button type="button" class="btn-role-permission-sessions-manual btn-confirm-primary" ${sessionsConfirmed ? 'disabled' : ''}>${escapeHtml(actionLabelManual)}</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'coreBusinessObjectSessionsBlock') {
+      const item = currentProblemDetailItem;
+      const sessions = item?.coreBusinessObjectSessions || msg.sessions || [];
+      const sessionsConfirmed = !!msg.confirmed;
+      const sessionMode = msg.coreBusinessObjectSessionMode || '';
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-role-permission-sessions-card problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.dataset.taskId = 'task11';
+      block.innerHTML = typeof buildCoreBusinessObjectSessionsBlockHtml === 'function'
+        ? buildCoreBusinessObjectSessionsBlockHtml(sessions, msg.timestamp || '', DELETE_CHAT_MSG_ICON, sessionsConfirmed, sessionMode)
+        : '';
       container.appendChild(block);
     } else if (msg.type === 'localItGapAnalysisCard') {
       const data = msg.data || {};
       const stepName = msg.stepName || '';
       const stepIndex = msg.stepIndex ?? -1;
       const confirmed = !!msg.confirmed;
-      const structuredHtml = buildLocalItGapStructuredHtml(data);
+      const structuredHtml = typeof buildLocalItGapStructuredHtml === 'function' ? buildLocalItGapStructuredHtml(data) : '<p>（暂无内容）</p>';
       const dataAttr = String(JSON.stringify(data)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
       const cardBlock = document.createElement('div');
@@ -8663,6 +8684,56 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(block);
+    } else if (msg.type === 'localItGapAllDoneConfirmBlock') {
+      const confirmed = !!msg.confirmed;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-all-done-confirm problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = msg.taskId || 'task9';
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '已经完成所有环节局部 ITGap 分析，是否自动确认所有输出？')}</div>
+          <div class="problem-detail-chat-task-completion-actions">
+            <button type="button" class="btn-confirm-all-local-itgap-outputs btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认所有输出'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
+    } else if (msg.type === 'localItGapTaskCompleteConfirmBlock') {
+      const confirmed = !!msg.confirmed;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-task-complete-confirm problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = msg.taskId || 'task9';
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '是否确认局部 ITGap 分析任务已经完成？')}</div>
+          <div class="problem-detail-chat-task-completion-actions">
+            <button type="button" class="btn-confirm-local-itgap-task-complete btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
+    } else if (msg.type === 'localItGapCompressionIntentBlock') {
+      const confirmed = !!msg.confirmed;
+      const cardBlock = document.createElement('div');
+      cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-local-itgap-compression-intent problem-detail-chat-msg-with-delete';
+      cardBlock.dataset.msgIndex = String(idx);
+      cardBlock.dataset.taskId = msg.taskId || 'task9';
+      cardBlock.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '我即将开始对局部 ITGap 分析做上下文压缩，便于后续环节的处理。')}</div>
+          <div class="problem-detail-chat-task-completion-actions">
+            <button type="button" class="btn-confirm-local-itgap-compression btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(cardBlock);
+    } else if (msg.type === 'localItGapCompressionBlock') {
+      /* 压缩内容块仅时间线展示，聊天区不渲染 */
     } else if (msg.type === 'intentExtractionCard') {
       const data = msg.data || {};
       const confirmed = !!msg.confirmed;
@@ -8731,6 +8802,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
         return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(value)}</span></div>`;
       }).join('');
       const confirmed = !!msg.confirmed;
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
       cardBlock.innerHTML = `
         <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-basic-info-card" role="button" tabindex="0">
@@ -8742,7 +8814,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
             <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
           </div>
         </div>
-        <div class="problem-detail-chat-msg-time">${msg.timestamp || ''}</div>`;
+        <div class="problem-detail-chat-msg-time">${msg.timestamp || ''}</div>${llmMetaHtml}`;
       container.appendChild(cardBlock);
       setupProblemDetailChatCardToggle(cardBlock);
     } else if (msg.type === 'unsatisfiedBlock') {
@@ -8882,6 +8954,13 @@ function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
       }
       if (idx >= 0) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        for (let j = idx - 1; j >= 0; j--) {
+          const q = problemDetailChatMessages[j];
+          if (q?.type === 'task3LlmQueryBlock') {
+            problemDetailChatMessages[j] = { ...q, confirmed: true };
+            break;
+          }
+        }
         saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
       }
       const item = currentProblemDetailItem;
@@ -9079,9 +9158,9 @@ async function handleProblemDetailChatSend() {
     container.scrollTop = container.scrollHeight;
     try {
       if (!hasAiConfig()) {
-        throw new Error('请配置 AI 才能使用解析功能。');
+        throw new Error('请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用解析功能。');
       }
-      const { parsed } = await parseCompanyBasicInfoInput(text);
+      const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await window.parseCompanyBasicInfoInput(text);
       task1ParsingBlock.remove();
       const labels = [
         { key: 'company_name', label: '公司名称' }, { key: 'credit_code', label: '信用代码' }, { key: 'legal_representative', label: '法人' },
@@ -9097,9 +9176,22 @@ async function handleProblemDetailChatSend() {
       cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
       cardBlock.dataset.taskId = 'task1';
       const jsonAttr = String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      cardBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${jsonAttr}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      const llmMetaHtml = buildLlmMetaHtml({ usage, model, durationMs });
+      cardBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${jsonAttr}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
       container.appendChild(cardBlock);
-      pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
+      pushAndSaveProblemDetailChat({
+        ...window.buildTask1LlmQueryMessage({
+          noteName: '工商信息提炼',
+          fullPrompt,
+          parsed,
+          rawOutput,
+          timestamp: getTimeStr(),
+          usage,
+          model,
+          durationMs,
+        }),
+      });
+      pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
       setupProblemDetailChatCardToggle(cardBlock);
       renderProblemDetailContent();
       updateProblemDetailChatHeaderLabel();
@@ -9134,7 +9226,7 @@ async function handleProblemDetailChatSend() {
   container.scrollTop = container.scrollHeight;
   try {
     if (!hasAiConfig()) {
-      throw new Error('请配置 AI 才能使用解析功能。');
+      throw new Error('请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用解析功能。');
     }
     const { content, usage, model, durationMs, wasTruncated, contextLength } = await executeAskModeDirectQuery(item, text);
     parsingBlock.remove();
@@ -9381,7 +9473,7 @@ function renderProblemDetailContent() {
           <p class="problem-detail-workflow-align-desc problem-detail-workflow-align-note">此任务内容展示区，后续可接入大模型生成与编辑。</p>
         </div>
       </div>`;
-    if (itStrategyPlanViewingSubstep === 0) {
+    if (itStrategyPlanViewingSubstep === 0 || itStrategyPlanViewingSubstep === 1) {
       const valueStream = item.valueStream;
       const roleContent = getLatestConfirmedRolePermissionContent(item);
       const model = roleContent ? parseRolePermissionModel(roleContent) : [];
@@ -9412,6 +9504,7 @@ function renderProblemDetailContent() {
           };
           if (stages && stages.length > 0) {
             if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 工作区渲染: 价值流阶段数=', stages.length, 'modelByStage keys=', [...modelByStage.keys()]);
+            let globalStepIndex = 0;
             stageCardsHtml = stages
               .map((stage) => {
                 const stageNameNorm = norm(stage.name || '');
@@ -9421,6 +9514,7 @@ function renderProblemDetailContent() {
                   .map((step, stepIndex) => {
                     const nodeName = (step?.name || '').trim();
                     if (!nodeName) return '';
+                    const currentGlobal = globalStepIndex++;
                     const nodeNorm = norm(nodeName);
                     let match = model.find((m) => {
                       const mStage = norm(m.stage_name != null ? String(m.stage_name) : '');
@@ -9437,14 +9531,38 @@ function renderProblemDetailContent() {
                     if (ROLE_PERMISSION_LOG) console.log('[角色与权限] 环节:', nodeName, 'match=', !!match, match ? 'step_name=' + (match.step_name || '') : '');
                     const viewHtml = match ? buildRolePermissionStepViewHtml(match) : '';
                     const jsonStr = match ? JSON.stringify(match, null, 2) : '';
-                    const stepBodyContent = match
+                    const rolePermissionBlock = match
                       ? `<div class="problem-detail-role-permission-tabs">
+            <span class="problem-detail-role-permission-tabs-title">角色与权限模型推演</span>
             <button type="button" class="problem-detail-role-permission-tab problem-detail-role-permission-tab-active" data-tab="view">view</button>
             <button type="button" class="problem-detail-role-permission-tab" data-tab="json">json</button>
           </div>
           <div class="problem-detail-role-permission-panel problem-detail-role-permission-panel-view" data-panel="view">${viewHtml}</div>
           <div class="problem-detail-role-permission-panel problem-detail-role-permission-panel-json" data-panel="json" hidden><pre class="problem-detail-role-permission-json">${escapeHtml(jsonStr)}</pre></div>`
                       : '<div class="problem-detail-role-permission-placeholder">待推演</div>';
+                    const sessions = item?.coreBusinessObjectSessions || [];
+                    const session = sessions[currentGlobal];
+                    const raw = session?.coreBusinessObjectJson;
+                    let cboMatch = null;
+                    if (raw && typeof parseCoreBusinessObjectModel === 'function') {
+                      const parsed = parseCoreBusinessObjectModel(typeof raw === 'string' ? raw : JSON.stringify(raw));
+                      cboMatch = Array.isArray(parsed) && parsed[0] ? parsed[0] : null;
+                    }
+                    const cboViewHtml = cboMatch && typeof buildCoreBusinessObjectStepViewHtml === 'function' ? buildCoreBusinessObjectStepViewHtml(cboMatch) : '';
+                    const cboJsonStr = raw != null ? (typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)) : '';
+                    const hasCbo = raw != null;
+                    const cboSubCardHtml = hasCbo
+                      ? `<div class="problem-detail-step-card-core-business-object">
+          <div class="problem-detail-core-business-object-tabs">
+            <span class="problem-detail-core-business-object-tabs-title">核心业务对象推演</span>
+            <button type="button" class="problem-detail-core-business-object-tab" data-tab="view">view</button>
+            <button type="button" class="problem-detail-core-business-object-tab problem-detail-core-business-object-tab-active" data-tab="json">json</button>
+          </div>
+          <div class="problem-detail-core-business-object-panel" data-panel="view" hidden>${cboViewHtml || '<pre class="problem-detail-core-business-object-json">' + escapeHtml(cboJsonStr) + '</pre>'}</div>
+          <div class="problem-detail-core-business-object-panel" data-panel="json"><pre class="problem-detail-core-business-object-json">${escapeHtml(cboJsonStr)}</pre></div>
+        </div>`
+                      : '<div class="problem-detail-step-card-core-business-object"><div class="problem-detail-role-permission-placeholder">待推演</div></div>';
+                    const stepBodyContent = itStrategyPlanViewingSubstep === 0 ? rolePermissionBlock : (rolePermissionBlock + cboSubCardHtml);
                     return `
                   <div class="problem-detail-card problem-detail-card-role-permission">
                     <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
@@ -9471,12 +9589,14 @@ function renderProblemDetailContent() {
           }
         } else {
           const { stages } = parseValueStreamGraph(valueStream);
+          let globalStepIndexOld = 0;
           stageCardsHtml = stages
             .map((stage) => {
               const stepCardsHtml = (stage.steps || [])
                 .map((step) => {
                   const nodeName = step?.name || '';
                   if (!nodeName) return '';
+                  const currentGlobal = globalStepIndexOld++;
                   const match =
                     model.find((m) => m.node === nodeName) ||
                     model.find((m) => nodeName.includes(m.node) || m.node.includes(nodeName));
@@ -9484,7 +9604,7 @@ function renderProblemDetailContent() {
                   const perms = match?.perms || { wechat: '', lowcode: '', notify: '', query: '' };
                   const duty = match?.duty || '';
                   const hasContent = match && (roles.executor || roles.approver || roles.informer || perms.wechat || perms.lowcode || perms.notify || perms.query || duty);
-                  const stepBodyContent = hasContent
+                  const rolePermissionBlock = hasContent
                     ? `
                       <table class="problem-detail-role-permission-table">
                         <tbody>
@@ -9500,6 +9620,29 @@ function renderProblemDetailContent() {
                         </tbody>
                       </table>`
                     : '<div class="problem-detail-role-permission-placeholder">待推演</div>';
+                  const sessions = item?.coreBusinessObjectSessions || [];
+                  const session = sessions[currentGlobal];
+                  const raw = session?.coreBusinessObjectJson;
+                  let cboMatch = null;
+                  if (raw && typeof parseCoreBusinessObjectModel === 'function') {
+                    const parsed = parseCoreBusinessObjectModel(typeof raw === 'string' ? raw : JSON.stringify(raw));
+                    cboMatch = Array.isArray(parsed) && parsed[0] ? parsed[0] : null;
+                  }
+                  const cboViewHtml = cboMatch && typeof buildCoreBusinessObjectStepViewHtml === 'function' ? buildCoreBusinessObjectStepViewHtml(cboMatch) : '';
+                  const cboJsonStr = raw != null ? (typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)) : '';
+                  const hasCbo = raw != null;
+                  const cboSubCardHtml = hasCbo
+                    ? `<div class="problem-detail-step-card-core-business-object">
+          <div class="problem-detail-core-business-object-tabs">
+            <span class="problem-detail-core-business-object-tabs-title">核心业务对象推演</span>
+            <button type="button" class="problem-detail-core-business-object-tab" data-tab="view">view</button>
+            <button type="button" class="problem-detail-core-business-object-tab problem-detail-core-business-object-tab-active" data-tab="json">json</button>
+          </div>
+          <div class="problem-detail-core-business-object-panel" data-panel="view" hidden>${cboViewHtml || '<pre class="problem-detail-core-business-object-json">' + escapeHtml(cboJsonStr) + '</pre>'}</div>
+          <div class="problem-detail-core-business-object-panel" data-panel="json"><pre class="problem-detail-core-business-object-json">${escapeHtml(cboJsonStr)}</pre></div>
+        </div>`
+                    : '<div class="problem-detail-step-card-core-business-object"><div class="problem-detail-role-permission-placeholder">待推演</div></div>';
+                  const stepBodyContent = itStrategyPlanViewingSubstep === 0 ? rolePermissionBlock : (rolePermissionBlock + cboSubCardHtml);
                   return `
                   <div class="problem-detail-card problem-detail-card-role-permission">
                     <div class="problem-detail-card-header problem-detail-card-header-collapsed" tabindex="0" role="button" aria-expanded="false">
@@ -9621,7 +9764,7 @@ function renderProblemDetailContent() {
         const localSubCardsHtml = sessionsToShow.map((s) => {
           const stepName = s.stepName || `环节${s.stepIndex + 1}`;
           const hasAnalysis = !!s.analysisJson;
-          const analysisHtml = hasAnalysis ? buildLocalItGapStructuredHtml(s.analysisJson) : '<p class="problem-detail-local-itgap-pending">待分析</p>';
+          const analysisHtml = hasAnalysis ? (typeof buildLocalItGapStructuredHtml === 'function' ? buildLocalItGapStructuredHtml(s.analysisJson) : '') : '<p class="problem-detail-local-itgap-pending">待分析</p>';
           const bodyHtml = `<div class="problem-detail-local-itgap-detail">${analysisHtml}</div>`;
           return `
         <div class="problem-detail-local-itgap-subcard" data-step-index="${s.stepIndex}">
@@ -9993,6 +10136,19 @@ function setupRolePermissionStepTabs() {
       });
     });
   });
+  el.problemDetailContent?.querySelectorAll('.problem-detail-core-business-object-tabs').forEach((tabsWrap) => {
+    const tabs = tabsWrap.querySelectorAll('.problem-detail-core-business-object-tab');
+    const wrapper = tabsWrap.closest('.problem-detail-step-card-core-business-object');
+    const panels = wrapper?.querySelectorAll('.problem-detail-core-business-object-panel') || [];
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const tabName = tab.getAttribute('data-tab');
+        tabs.forEach((t) => t.classList.toggle('problem-detail-core-business-object-tab-active', t.getAttribute('data-tab') === tabName));
+        panels.forEach((p) => { p.hidden = (p.getAttribute('data-panel') || '') !== tabName; });
+      });
+    });
+  });
 }
 
 function setupProblemDetailCardToggle() {
@@ -10091,6 +10247,7 @@ function handleStartFollowClick() {
     customerNeedsOrChallenges: lastParsedResult.customerNeedsOrChallenges ?? '',
     customerItStatus: lastParsedResult.customerItStatus ?? '',
     projectTimeRequirement: lastParsedResult.projectTimeRequirement ?? '',
+    task1InitialLlmQuery: lastParsedLlmQuery ? { ...lastParsedLlmQuery } : null,
   };
   saveDigitalProblem(item);
   if (el.parsePreview) el.parsePreview.classList.add('parse-preview-exiting');
@@ -10109,6 +10266,7 @@ function handleStartFollowClick() {
       el.parsePreview.hidden = true;
     }
     lastParsedResult = null;
+    lastParsedLlmQuery = null;
     if (firstItem) {
       firstItem.classList.remove('problem-follow-card-enter', 'problem-follow-card-enter-active');
     }
@@ -10215,7 +10373,7 @@ async function sendChatMessage() {
   messages.scrollTop = messages.scrollHeight;
 
   if (!hasAiConfig()) {
-    loadingBlock.querySelector('.chat-message-content').textContent = '请配置 AI 才能使用大模型对话。';
+    loadingBlock.querySelector('.chat-message-content').textContent = '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用大模型对话。';
     loadingBlock.classList.remove('chat-message-loading');
     return;
   }

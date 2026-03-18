@@ -2,6 +2,10 @@
  * 本地存储与 session 状态读写（依赖 js/config.js 中的 STORAGE_KEY 等常量）
  */
 (function (global) {
+  /**
+   * 读取已保存的企业分析列表。
+   * @returns {Array<Object>} 分析记录数组。
+   */
   function getSavedAnalyses() {
     try {
       const raw = localStorage.getItem(global.STORAGE_KEY);
@@ -11,6 +15,11 @@
     }
   }
 
+  /**
+   * 保存或覆盖同名企业分析记录。
+   * @param {Object} record - 分析记录。
+   * @returns {void}
+   */
   function saveAnalysis(record) {
     const list = getSavedAnalyses();
     const idx = list.findIndex((r) => (r.companyName || '').trim() === (record.companyName || '').trim());
@@ -19,12 +28,22 @@
     localStorage.setItem(global.STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 保存当前路由状态到会话存储。
+   * @param {string} view - 当前视图标识。
+   * @param {Object} params - 路由参数。
+   * @returns {void}
+   */
   function saveRouteState(view, params) {
     try {
       sessionStorage.setItem(global.ROUTE_STORAGE_KEY, JSON.stringify({ view, params: params || {} }));
     } catch (_) {}
   }
 
+  /**
+   * 获取工具知识状态。
+   * @returns {Object} 工具知识状态对象。
+   */
   function getToolKnowledgeState() {
     try {
       const raw = localStorage.getItem(global.TOOL_KNOWLEDGE_STORAGE_KEY);
@@ -36,6 +55,11 @@
     }
   }
 
+  /**
+   * 保存工具知识状态。
+   * @param {Object} state - 待保存状态。
+   * @returns {void}
+   */
   function saveToolKnowledgeState(state) {
     try {
       localStorage.setItem(global.TOOL_KNOWLEDGE_STORAGE_KEY, JSON.stringify(state || {}));
@@ -44,6 +68,10 @@
     }
   }
 
+  /**
+   * 从本地存储恢复工具知识条目到内存数组。
+   * @returns {void}
+   */
   function loadToolKnowledgeItemsFromStorage() {
     try {
       const raw = localStorage.getItem(global.TOOL_KNOWLEDGE_ITEMS_STORAGE_KEY);
@@ -64,6 +92,10 @@
     }
   }
 
+  /**
+   * 将工具知识条目写入本地存储。
+   * @returns {void}
+   */
   function saveToolKnowledgeItemsToStorage() {
     try {
       localStorage.setItem(global.TOOL_KNOWLEDGE_ITEMS_STORAGE_KEY, JSON.stringify(global.TOOL_KNOWLEDGE_ITEMS));
@@ -72,6 +104,10 @@
     }
   }
 
+  /**
+   * 将工具聊天面板 HTML 持久化到本地存储。
+   * @returns {void}
+   */
   function saveToolsChatMessagesToStorage() {
     try {
       const el = global.el;
@@ -83,6 +119,10 @@
     }
   }
 
+  /**
+   * 从本地存储恢复工具聊天面板 HTML。
+   * @returns {void}
+   */
   function restoreToolsChatMessagesFromStorage() {
     try {
       const el = global.el;
@@ -96,6 +136,10 @@
     }
   }
 
+  /**
+   * 读取数字化问题列表。
+   * @returns {Array<Object>} 问题列表。
+   */
   function getDigitalProblems() {
     try {
       const raw = localStorage.getItem(global.DIGITAL_PROBLEMS_STORAGE_KEY);
@@ -105,12 +149,22 @@
     }
   }
 
+  /**
+   * 新增一条数字化问题记录。
+   * @param {Object} item - 问题对象。
+   * @returns {void}
+   */
   function saveDigitalProblem(item) {
     const list = getDigitalProblems();
     list.unshift({ ...item, createdAt: new Date().toISOString() });
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 按索引删除数字化问题。
+   * @param {number} index - 列表索引。
+   * @returns {void}
+   */
   function removeDigitalProblem(index) {
     const list = getDigitalProblems();
     if (index < 0 || index >= list.length) return;
@@ -178,6 +232,12 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 更新 ITGap 阶段完成标记数组。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {number[]} stages - 已完成阶段索引。
+   * @returns {void}
+   */
   function updateDigitalProblemItGapCompletedStages(createdAt, stages) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -187,7 +247,12 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
-  /** 标记某任务为已完成（用于 task10–task15 等，将 taskId 加入 completedTaskIds） */
+  /**
+   * 记录某任务 ID 为已完成。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {string} taskId - 任务 ID。
+   * @returns {void}
+   */
   function updateDigitalProblemCompletedTaskId(createdAt, taskId) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -199,6 +264,12 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 更新全局 ITGap 分析结果并推进对应阶段状态。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Object|string} analysisJson - 分析结果。
+   * @returns {void}
+   */
   function updateDigitalProblemGlobalItGapAnalysis(createdAt, analysisJson) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -211,6 +282,11 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 清除全局 ITGap 及相关局部分析数据。
+   * @param {string} createdAt - 问题创建时间。
+   * @returns {void}
+   */
   function clearDigitalProblemGlobalItGapAnalysis(createdAt) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -222,6 +298,12 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 更新局部 ITGap session 列表。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Array<Object>} sessions - session 列表。
+   * @returns {void}
+   */
   function updateDigitalProblemLocalItGapSessions(createdAt, sessions) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -231,6 +313,15 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 更新某个环节的局部 ITGap 分析内容。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {string} stepName - 环节名。
+   * @param {number} stepIndex - 环节索引。
+   * @param {Object|string} analysisJson - 分析 JSON。
+   * @param {string} analysisMarkdown - 分析 Markdown。
+   * @returns {void}
+   */
   function updateDigitalProblemLocalItGapAnalysis(createdAt, stepName, stepIndex, analysisJson, analysisMarkdown) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -308,6 +399,16 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /** 更新核心业务对象推演 session 列表（用于逐步按环节分析） */
+  function updateDigitalProblemCoreBusinessObjectSessions(createdAt, sessions) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    list[idx] = { ...item, coreBusinessObjectSessions: sessions };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
   /** 仅更新 valueStream 数据，不修改 workflowAlignCompletedStages（用于用户点击价值流 JSON 确认后，待用户再点「已完成」再推进阶段） */
   function updateDigitalProblemValueStreamDataOnly(createdAt, valueStream) {
     const list = getDigitalProblems();
@@ -318,6 +419,12 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 更新价值流并推进工作流对齐阶段到「价值流已完成」。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Object} valueStream - 价值流数据。
+   * @returns {void}
+   */
   function updateDigitalProblemValueStream(createdAt, valueStream) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -330,6 +437,12 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 更新价值流 IT 现状并推进对应完成阶段。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Object} valueStream - 价值流数据。
+   * @returns {void}
+   */
   function updateDigitalProblemValueStreamItStatus(createdAt, valueStream) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -343,6 +456,12 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 更新价值流痛点并推进对应完成阶段。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Object} valueStream - 价值流数据。
+   * @returns {void}
+   */
   function updateDigitalProblemValueStreamPainPoint(createdAt, valueStream) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -357,6 +476,11 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 回滚价值流痛点标注及阶段完成标记。
+   * @param {string} createdAt - 问题创建时间。
+   * @returns {void}
+   */
   function rollbackValueStreamPainPoint(createdAt) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -382,6 +506,11 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 删除需求逻辑并回滚需求理解阶段完成标记。
+   * @param {string} createdAt - 问题创建时间。
+   * @returns {void}
+   */
   function deleteDigitalProblemRequirementLogic(createdAt) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -393,6 +522,10 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 获取问题详情聊天记录映射。
+   * @returns {Record<string, Array<Object>>} 以 createdAt 为 key 的聊天记录。
+   */
   function getProblemDetailChats() {
     try {
       const raw = localStorage.getItem(global.PROBLEM_DETAIL_CHATS_STORAGE_KEY);
@@ -402,12 +535,22 @@
     }
   }
 
+  /**
+   * 保存某问题的详情聊天记录。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Array<Object>} messages - 聊天消息数组。
+   * @returns {void}
+   */
   function saveProblemDetailChat(createdAt, messages) {
     const chats = getProblemDetailChats();
     chats[createdAt] = messages;
     localStorage.setItem(global.PROBLEM_DETAIL_CHATS_STORAGE_KEY, JSON.stringify(chats));
   }
 
+  /**
+   * 获取操作历史栈映射。
+   * @returns {Record<string, Array<Object>>} 历史记录映射。
+   */
   function getOperationHistory() {
     try {
       const raw = localStorage.getItem(global.OPERATION_HISTORY_STORAGE_KEY);
@@ -417,6 +560,14 @@
     }
   }
 
+  /**
+   * 向操作历史压栈一条记录。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {string} type - 操作类型。
+   * @param {Object} snapshot - 数据快照。
+   * @param {number} chatLengthBefore - 操作前聊天长度。
+   * @returns {void}
+   */
   function pushOperationToHistory(createdAt, type, snapshot, chatLengthBefore) {
     const all = getOperationHistory();
     if (!all[createdAt]) all[createdAt] = [];
@@ -424,6 +575,11 @@
     localStorage.setItem(global.OPERATION_HISTORY_STORAGE_KEY, JSON.stringify(all));
   }
 
+  /**
+   * 从操作历史弹出最近一条记录。
+   * @param {string} createdAt - 问题创建时间。
+   * @returns {Object|null} 最近一次历史记录。
+   */
   function popOperationFromHistory(createdAt) {
     const all = getOperationHistory();
     const stack = all[createdAt];
@@ -434,6 +590,12 @@
     return entry;
   }
 
+  /**
+   * 使用快照恢复问题单数据。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Object} snapshot - 快照对象。
+   * @returns {void}
+   */
   function restoreItemFromSnapshot(createdAt, snapshot) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => String(it.createdAt) === String(createdAt));
@@ -442,6 +604,10 @@
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
   }
 
+  /**
+   * 获取任务跟踪数据映射。
+   * @returns {Record<string, Object>} 跟踪数据映射。
+   */
   function getTaskTrackingData() {
     try {
       const raw = localStorage.getItem(global.TASK_TRACKING_STORAGE_KEY);
@@ -451,6 +617,12 @@
     }
   }
 
+  /**
+   * 保存某问题的任务跟踪数据。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Object} data - 跟踪数据。
+   * @returns {void}
+   */
   function saveTaskTrackingData(createdAt, data) {
     const all = getTaskTrackingData();
     all[createdAt] = data;
@@ -562,6 +734,7 @@
   global.clearDigitalProblemLocalItGapStep = clearDigitalProblemLocalItGapStep;
   global.updateDigitalProblemRolePermissionSessions = updateDigitalProblemRolePermissionSessions;
   global.updateDigitalProblemRolePermissionStep = updateDigitalProblemRolePermissionStep;
+  global.updateDigitalProblemCoreBusinessObjectSessions = updateDigitalProblemCoreBusinessObjectSessions;
   global.clearDigitalProblemRolePermissionStep = clearDigitalProblemRolePermissionStep;
   global.updateDigitalProblemValueStreamDataOnly = updateDigitalProblemValueStreamDataOnly;
   global.updateDigitalProblemValueStream = updateDigitalProblemValueStream;
