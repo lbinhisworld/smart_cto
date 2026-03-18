@@ -1,16 +1,18 @@
 /**
  * DeepSeek 大模型 API 调用
- * 若配置了 BACKEND_API_URL，则走 Backend 代理（Key 从数据库读取）；否则直连 DeepSeek。
+ * - local：直连 DeepSeek（使用 DEEPSEEK_API_KEY）
+ * - online：走后端代理（POST {BACKEND_API_URL}/ai/chat）
  */
 (function (global) {
   const cfg = global.APP_CONFIG || {};
+  const mode = (cfg.MODE || 'local');
   const DEEPSEEK_API_URL = cfg.DEEPSEEK_API_URL || 'https://api.deepseek.com/v1/chat/completions';
   const DEEPSEEK_API_KEY = cfg.DEEPSEEK_API_KEY || '';
   const DEEPSEEK_MODEL = cfg.DEEPSEEK_MODEL || 'deepseek-chat';
   const BACKEND_API_URL = (cfg.BACKEND_API_URL || '').replace(/\/$/, '');
 
   async function fetchDeepSeekChat(messages) {
-    if (BACKEND_API_URL) {
+    if (mode === 'online') {
       const res = await fetch(BACKEND_API_URL + '/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -25,6 +27,7 @@
         durationMs: data.durationMs || 0,
       };
     }
+
     const start = Date.now();
     const res = await fetch(DEEPSEEK_API_URL, {
       method: 'POST',
@@ -44,7 +47,7 @@
 
   /** 是否有 AI 配置：Backend 代理 或 直连 Key */
   function hasAiConfig() {
-    return Boolean(BACKEND_API_URL || DEEPSEEK_API_KEY);
+    return mode === 'online' ? Boolean(BACKEND_API_URL) : Boolean(DEEPSEEK_API_KEY);
   }
 
   function buildLlmMetaHtml(meta) {

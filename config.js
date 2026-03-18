@@ -3,13 +3,18 @@
  * 本地 Key 请写在 config.local.js（已加入 .gitignore，不会提交）。
  */
 window.APP_CONFIG = window.APP_CONFIG || {
-  /** 直连 DeepSeek 时使用；若配置了 BACKEND_API_URL 则优先走 Backend 代理，Key 从数据库读取 */
+  /**
+   * 运行模式：
+   * - local：AI 直连 DeepSeek（需要 DEEPSEEK_API_KEY），数据存 localStorage
+   * - online：AI + 数据都走后端（BACKEND_API_URL）
+   */
+  MODE: 'local', // 'local' | 'online'
+
+  /** AI：直连 DeepSeek（本地填写 Key 即可） */
   DEEPSEEK_API_KEY: '',
   DEEPSEEK_API_URL: 'https://api.deepseek.com/v1/chat/completions',
   DEEPSEEK_MODEL: 'deepseek-chat',
-  /** 是否使用 Backend API 存储（替代 localStorage） */
-  USE_BACKEND_STORAGE: true,
-  /** Backend API 基础地址，如 http://localhost:3000/api；配置后 AI 对话走 POST /api/ai/chat，Key 从数据库读取 */
-  // 注意：这里需要填 API 基础地址（以 /api 结尾），不是 /health
+
+  /** 后端 API 基础地址（以 /api 结尾）。MODE=online 时需要 */
   BACKEND_API_URL: 'http://192.168.83.106/api',
 };

@@ -5,6 +5,7 @@
  */
 (function (global) {
   const cfg = (global.APP_CONFIG || {});
+  const useRemoteStorage = (cfg.MODE === 'online');
   const baseUrl = (cfg.BACKEND_API_URL || 'http://localhost:3000/api').replace(/\/$/, '');
   const problemCasesPath = baseUrl + '/problem-cases';
 
@@ -193,7 +194,7 @@
   }
 
   async function init() {
-    if (!(cfg.USE_BACKEND_STORAGE)) return;
+    if (!useRemoteStorage) return;
     await migrateLocalToBackendIfNeeded();
     await loadProblemCases();
     await loadAllChats();

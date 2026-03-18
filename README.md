@@ -54,6 +54,28 @@ npx serve .
 - **企业分析 API**（画布模式）  
   在 `js/config.js` 中配置 `API_URL`（企业基本信息与 BMC 查询）、`VALUE_STREAM_API_URL`（价值流列表查询），按项目实际接口填写。
 
+### 2.1 本地模式 / 线上模式怎么选
+
+前端配置抽象成一个模式开关：`MODE: 'local' | 'online'`。
+
+#### 本地模式（local，推荐个人使用）
+
+- **AI**：直连 DeepSeek（需要 `DEEPSEEK_API_KEY`）
+- **存储**：localStorage（数字化问题与聊天记录都在浏览器本地）
+- **配置**：在 `config.local.js` 中设置：
+  - `MODE: 'local'`
+  - `DEEPSEEK_API_KEY: '...'`
+
+#### 线上模式（online，团队共享）
+
+- **AI**：统一走后端代理（`POST {BACKEND_API_URL}/ai/chat`，Key 由后端读取/管理）
+- **存储**：统一走后端数据库（`{BACKEND_API_URL}/problem-cases/...`）
+- **配置**：在 `config.local.js`（或线上构建时的 `config.js`）中设置：
+  - `MODE: 'online'`
+  - `BACKEND_API_URL: 'http(s)://<your-host>/api'`
+
+> 注意：`BACKEND_API_URL` 必须是 **API 基础地址（以 `/api` 结尾）**，不要填 `/health`。
+
 ### 3. 后端接口约定（企业分析 API）
 
 - 方法：`POST`

@@ -582,8 +582,9 @@
     loadToolKnowledgeItemsFromStorage();
   }
 
-  /** 当 USE_BACKEND_STORAGE 为 true 时，将数字化问题与聊天记录委托给 HttpAdapter */
-  const useBackend = (global.APP_CONFIG && global.APP_CONFIG.USE_BACKEND_STORAGE) && global.STORAGE_HTTP_ADAPTER;
+  /** online 模式时，将数字化问题与聊天记录委托给 HttpAdapter */
+  const cfg = global.APP_CONFIG || {};
+  const useBackend = (cfg.MODE === 'online') && global.STORAGE_HTTP_ADAPTER;
   if (useBackend) {
     const adapter = global.STORAGE_HTTP_ADAPTER;
     global.getDigitalProblems = () => adapter.getDigitalProblems();
