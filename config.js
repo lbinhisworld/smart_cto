@@ -3,7 +3,7 @@
  * 本地 Key 请写在 config.local.js（已加入 .gitignore，不会提交）。
  */
 window.APP_CONFIG = window.APP_CONFIG || {
-  DEEPSEEK_API_KEY: 'sk-d9b75f3dcf8c4e18bd170e8b4f69facf',
+  DEEPSEEK_API_KEY: '',
   DEEPSEEK_API_URL: 'https://api.deepseek.com/v1/chat/completions',
   DEEPSEEK_MODEL: 'deepseek-chat',
   /** 是否使用 Backend API 存储（替代 localStorage） */
