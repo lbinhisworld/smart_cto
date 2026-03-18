@@ -3544,6 +3544,12 @@ body {
   color: #fdba74;
 }
 
+.problem-detail-history-log-type-llm-query {
+  background: rgba(59, 130, 246, 0.28);
+  color: #bfdbfe;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+}
+
 .problem-detail-chat-context-block .problem-detail-chat-context-json {
   margin: 0.5rem 0 0;
   padding: 0.5rem 0.75rem;
@@ -3596,6 +3602,69 @@ body {
   word-break: break-all;
   color: var(--text);
   max-height: 200px;
+  overflow-y: auto;
+}
+
+.problem-detail-history-timeline-detail-content-rich {
+  max-height: none;
+  overflow: visible;
+  white-space: normal;
+  word-break: normal;
+}
+
+.problem-detail-history-llm-query-subcards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.problem-detail-history-llm-query-subcard {
+  border: 1px solid rgba(45, 58, 77, 0.5);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}
+
+.problem-detail-history-llm-query-subcard-input {
+  background: rgba(34, 197, 94, 0.2); /* 与输入 token 同绿色系 */
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
+.problem-detail-history-llm-query-subcard-output {
+  background: rgba(99, 102, 241, 0.2); /* 与输出 token 同紫色系 */
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.problem-detail-history-llm-query-subcard-title {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #dbeafe;
+  border-bottom: 1px solid rgba(45, 58, 77, 0.5);
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.problem-detail-history-llm-query-subcard-input .problem-detail-history-llm-query-subcard-title {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.18);
+  border-bottom-color: rgba(34, 197, 94, 0.45);
+}
+
+.problem-detail-history-llm-query-subcard-output .problem-detail-history-llm-query-subcard-title {
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border-bottom-color: rgba(99, 102, 241, 0.45);
+}
+
+.problem-detail-history-llm-query-subcard-pre {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text);
+  max-height: 180px;
   overflow-y: auto;
 }
 

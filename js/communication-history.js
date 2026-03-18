@@ -18,6 +18,7 @@
     const type = msg.type;
     const role = msg.role;
     const content = msg.content || '';
+    if (type === 'task1LlmQueryBlock') return 'task1';
     if (type === 'basicInfoCard' || type === 'basicInfoJsonBlock' || (role === 'system' && (content === '解析完成' || content === '基本信息 json 提取完毕'))) return 'task1';
     if (type === 'bmcCard' || type === 'bmcStartBlock' || (role === 'system' && content.includes('BMC'))) return 'task2';
     if (type === 'requirementLogicBlock' || type === 'requirementLogicStartBlock') return 'task3';
@@ -57,7 +58,8 @@
       if (msg.data?.intent === 'discussion') return false; // 请教讨论：意图卡片本身不纳入，用户消息与系统回复已单独处理
       return !!msg.confirmed;
     }
-    if (type === 'basicInfoCard') return true;
+    if (type === 'task1LlmQueryBlock') return true;
+    if (type === 'basicInfoCard') return false; // task1 基本信息卡片不进入时间线，仅保留 LLM-查询卡片
     if (type === 'bmcCard' || type === 'requirementLogicBlock' || type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'itStatusOutputLog') return true;
     if (type === 'itStatusCard') return false;
     if (type === 'e2eFlowGeneratedLog') return true;
@@ -105,6 +107,14 @@
       if (msg.askMode === true) continue;
       const inferred = inferTaskIdFromMessage(msg);
       if (inferred) currentTask = inferred;
+      // task1（企业背景洞察）阶段：用户粘贴的基本工商信息不再推送到时间线
+      if (msg.role === 'user' && currentTask === 'task1' && !msg._taskId) {
+        const text = (msg.content || '').trim();
+        if (text && text !== '确认') {
+          lastUserComm = null;
+          continue;
+        }
+      }
       const isQueryIntentCard = msg.type === 'intentExtractionCard' && msg.data?.intent === 'query';
       const isDiscussionIntentCard = msg.type === 'intentExtractionCard' && msg.data?.intent === 'discussion';
       const isUnconfirmedIntentCard = msg.type === 'intentExtractionCard' && !msg.confirmed;
@@ -163,6 +173,15 @@
         payload.taskId = msg.taskId || 'task9';
       }
       if (msg.data) payload.data = msg.data;
+      if (msg.type === 'task1LlmQueryBlock') {
+        payload.content = 'LLM-查询';
+        if (msg.noteName != null) payload.noteName = msg.noteName;
+        if (msg.llmInputPrompt != null) payload.llmInputPrompt = msg.llmInputPrompt;
+        if (msg.llmOutputJson != null) payload.llmOutputJson = msg.llmOutputJson;
+        if (msg.llmOutputRaw != null) payload.llmOutputRaw = msg.llmOutputRaw;
+        if (msg.confirmed === true) payload.confirmed = true;
+        payload.taskId = msg.taskId || 'task1';
+      }
       if (msg.type === 'valueStreamConfirmLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog') payload.confirmed = !!msg.confirmed;
@@ -279,6 +298,7 @@
       const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
       if (parsed?._logType === 'modify') return '修正';
       if (parsed?.type === 'taskCompleteBlock') return '任务完成';
+      if (parsed?.type === 'task1LlmQueryBlock') return 'LLM-查询';
     } catch (_) {}
     if (c.speaker === '用户') return '输入';
     try {
@@ -319,7 +339,7 @@
     return '确认';
   }
 
-  const LOG_TYPE_CLASS = { '输入': 'input', '输出': 'output', '确认': 'confirm', '修正': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied', '压缩': 'compress' };
+  const LOG_TYPE_CLASS = { '输入': 'input', '输出': 'output', '确认': 'confirm', '修正': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied', '压缩': 'compress', 'LLM-查询': 'llm-query' };
   const INTENT_LABELS = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
 
   /** 在重新渲染前采集当前展开状态，刷新后恢复，避免沟通历史面板更新时折叠已展开的任务/时间线 */
@@ -428,15 +448,39 @@
             const timeStr = c.time ? formatChatTime(c.time) : '—';
             const logType = getCommunicationLogType(c);
             let contentStr = typeof c.content === 'object' ? JSON.stringify(c.content, null, 2) : c.content;
+            let contentHtml = '';
             let titleLabel = c.speaker;
             let stepNameForHead = '';
             let contextNoteForHead = '';
             let sessionPlanNoteForHead = '';
+            let confirmTagForHead = '';
             try {
               const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
               if (parsed?.role === 'user') {
                 titleLabel = parsed?._logType === 'modify' ? '用户修正意见' : '用户输入';
                 contentStr = (parsed?.content != null ? String(parsed.content).trim() : '') || '(空)';
+              } else if (parsed?.type === 'task1LlmQueryBlock') {
+                titleLabel = 'LLM-查询';
+                stepNameForHead = parsed?.noteName ? String(parsed.noteName) : '工商信息提炼';
+                if (parsed?.confirmed === true) confirmTagForHead = '<span class="problem-detail-history-log-type-tag problem-detail-history-log-type-confirm">确认</span>';
+                const inputStr = parsed?.llmInputPrompt != null
+                  ? String(parsed.llmInputPrompt)
+                  : '(无)';
+                const outputObj = parsed?.llmOutputJson;
+                const outputStr = outputObj != null
+                  ? (typeof outputObj === 'string' ? outputObj : JSON.stringify(outputObj, null, 2))
+                  : ((parsed?.llmOutputRaw != null && String(parsed.llmOutputRaw).trim()) ? String(parsed.llmOutputRaw) : '(无)');
+                contentHtml = `
+                <div class="problem-detail-history-llm-query-subcards">
+                  <div class="problem-detail-history-llm-query-subcard problem-detail-history-llm-query-subcard-input">
+                    <div class="problem-detail-history-llm-query-subcard-title">输入</div>
+                    <pre class="problem-detail-history-llm-query-subcard-pre">${escapeHtml(inputStr)}</pre>
+                  </div>
+                  <div class="problem-detail-history-llm-query-subcard problem-detail-history-llm-query-subcard-output">
+                    <div class="problem-detail-history-llm-query-subcard-title">输出</div>
+                    <pre class="problem-detail-history-llm-query-subcard-pre">${escapeHtml(outputStr)}</pre>
+                  </div>
+                </div>`;
               } else if (parsed?.type === 'basicInfoCard') {
                 titleLabel = parsed?.confirmed ? '客户基本信息（已确认）' : '客户基本信息（大模型输出）';
                 contentStr = parsed?.data != null ? JSON.stringify(parsed.data, null, 2) : (contentStr || '(空)');
@@ -600,6 +644,11 @@
                 } catch (_) {
                   inputTokenCount = 0;
                 }
+              } else if (logType === 'LLM-查询') {
+                // LLM-查询卡片：输入 token=prompt_tokens，输出 token=completion_tokens，耗时=本次调用耗时
+                durationMsForEntry = currentDuration;
+                inputTokenCount = currentPrompt;
+                outputTokenCount = currentCompletion;
               } else if (logType === '输出' || logType === '确认') {
                 // 输出/确认卡片：耗时为大模型返回耗时，输入 token 为 0，输出 token 为 completion_tokens
                 durationMsForEntry = currentDuration;
@@ -640,14 +689,16 @@
               <button type="button" class="problem-detail-history-timeline-head" role="button" aria-expanded="false">
                 <span class="problem-detail-history-timeline-expand">▸</span>
                 <span class="problem-detail-history-timeline-time">${escapeHtml(timeStr)}</span>
-                <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-${LOG_TYPE_CLASS[logType] || 'confirm'}">${escapeHtml(logType)}</span>${stepNameForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(stepNameForHead)}</span>` : ''}${contextNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(contextNoteForHead)}</span>` : ''}${sessionPlanNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(sessionPlanNoteForHead)}</span>` : ''}${metaCountsHtml}
+                <span class="problem-detail-history-log-type-tag problem-detail-history-log-type-${LOG_TYPE_CLASS[logType] || 'confirm'}">${escapeHtml(logType)}</span>${confirmTagForHead}${stepNameForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(stepNameForHead)}</span>` : ''}${contextNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(contextNoteForHead)}</span>` : ''}${sessionPlanNoteForHead ? `<span class="problem-detail-history-timeline-step-name">${escapeHtml(sessionPlanNoteForHead)}</span>` : ''}${metaCountsHtml}
               </button>
               <div class="problem-detail-history-timeline-detail" hidden>
                 <div class="problem-detail-history-timeline-detail-meta">
                   <span>${escapeHtml(titleLabel)}</span>
                   <span>${escapeHtml(timeStr)}</span>
                 </div>
-                <pre class="problem-detail-history-timeline-detail-content">${escapeHtml(contentStr)}</pre>
+                ${contentHtml
+                  ? `<div class="problem-detail-history-timeline-detail-content problem-detail-history-timeline-detail-content-rich">${contentHtml}</div>`
+                  : `<pre class="problem-detail-history-timeline-detail-content">${escapeHtml(contentStr)}</pre>`}
               </div>
             </div>
           </div>`;

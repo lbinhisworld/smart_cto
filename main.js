@@ -155,6 +155,8 @@ let lastQueryResult = null;
 
 /** 最近一次解析结果，用于「启动跟进」 */
 let lastParsedResult = null;
+/** 首页「解析」最近一次大模型调用明细（供 task1 时间线复用） */
+let lastParsedLlmQuery = null;
 
 /** 当前问题详情页展示的跟进项 */
 let currentProblemDetailItem = null;
@@ -1386,7 +1388,7 @@ if (el.problemFollowListContent) {
       if (!Number.isNaN(index)) {
         const list = getDigitalProblems();
         const item = list[index];
-        if (item) openProblemDetail(item);
+        if (item) openProblemDetail(item, { fromStartFollow: true });
       }
     }
   });
@@ -1403,6 +1405,11 @@ if (el.btnProblemDetailReset) {
     const item = currentProblemDetailItem;
     if (!item?.createdAt) return;
     if (!confirm('是否要重置？')) return;
+    const isCurrentProblem = String(item.createdAt) === String(currentProblemDetailItem?.createdAt);
+    const chats = isCurrentProblem && Array.isArray(problemDetailChatMessages)
+      ? problemDetailChatMessages
+      : (typeof getProblemDetailChats === 'function' ? (getProblemDetailChats()[item.createdAt] || []) : []);
+    const preliminaryChats = keepPreliminaryOnlyChats(Array.isArray(chats) ? chats : []);
     const resetItem = typeof resetDigitalProblemToPreliminary === 'function' ? resetDigitalProblemToPreliminary(item.createdAt) : null;
     if (!resetItem) return;
     currentProblemDetailItem = resetItem;
@@ -1410,16 +1417,7 @@ if (el.btnProblemDetailReset) {
     problemDetailViewingMajorStage = 0;
     problemDetailWaitingForFeedback = null;
     lastModificationClarification = null;
-    const task1 = (FOLLOW_TASKS || []).concat(ITGAP_HISTORY_TASKS || []).concat(IT_STRATEGY_TASKS || []).find((t) => t.id === 'task1');
-    const task1Name = task1?.name || '企业背景洞察';
-    const startBlock = {
-      type: 'taskStartNotification',
-      taskId: 'task1',
-      taskName: task1Name,
-      timestamp: getTimeStr(),
-      confirmed: false,
-    };
-    problemDetailChatMessages = [startBlock];
+    problemDetailChatMessages = preliminaryChats;
     saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
     updateProblemDetailProgressStages(0, 0);
     renderProblemDetailContent();
@@ -1537,6 +1535,28 @@ function applyRollbackToTask(targetTaskId) {
   showTaskStartNotificationIfNeeded(targetTaskId, true);
 }
 
+/** 仅保留初步需求提炼对应的时间线内容块（task1 LLM 查询），其余聊天消息全部清除 */
+function keepPreliminaryOnlyChats(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  const isPreliminaryLlmQuery = (m) => {
+    if (!m || m.type !== 'task1LlmQueryBlock') return false;
+    const noteName = String(m.noteName || '').trim();
+    if (noteName.includes('初步需求')) return true;
+    const prompt = String(m.llmInputPrompt || '');
+    if (prompt.includes('数字化需求分析助手') || prompt.includes('客户需求或挑战') || prompt.includes('项目时间要求')) return true;
+    const out = m.llmOutputJson;
+    if (out && typeof out === 'object') {
+      const keys = Object.keys(out);
+      if (keys.includes('customerName') || keys.includes('customerNeedsOrChallenges') || keys.includes('customerItStatus') || keys.includes('projectTimeRequirement')) return true;
+    }
+    return false;
+  };
+  const prelimBlocks = list.filter(isPreliminaryLlmQuery);
+  if (prelimBlocks.length === 0) return [];
+  const last = prelimBlocks[prelimBlocks.length - 1];
+  return [{ ...last, noteName: '初步需求提炼' }];
+}
+
 if (el.btnProblemDetailRollback) {
   el.btnProblemDetailRollback.addEventListener('click', () => openRollbackTaskModal());
 }
@@ -1555,13 +1575,20 @@ function applyRestartCurrentTask() {
     return;
   }
   const taskId = currentTask.id;
-  const updated = buildItemClearCurrentTaskOnly(dataItem, taskId);
-  if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
   const isCurrentProblem = String(item.createdAt) === String(currentProblemDetailItem?.createdAt);
   const chats = isCurrentProblem && Array.isArray(problemDetailChatMessages)
     ? problemDetailChatMessages
     : (typeof getProblemDetailChats === 'function' ? (getProblemDetailChats()[item.createdAt] || []) : []);
-  const filteredChats = filterChatMessagesRemoveTask(Array.isArray(chats) ? chats : [], taskId);
+
+  let updated = buildItemClearCurrentTaskOnly(dataItem, taskId);
+  let filteredChats = filterChatMessagesRemoveTask(Array.isArray(chats) ? chats : [], taskId);
+  if (taskId === 'task1') {
+    const resetItem = typeof resetDigitalProblemToPreliminary === 'function' ? resetDigitalProblemToPreliminary(item.createdAt) : null;
+    if (resetItem) updated = resetItem;
+    filteredChats = keepPreliminaryOnlyChats(Array.isArray(chats) ? chats : []);
+  }
+
+  if (typeof restoreItemFromSnapshot === 'function') restoreItemFromSnapshot(item.createdAt, updated);
   if (typeof saveProblemDetailChat === 'function') saveProblemDetailChat(item.createdAt, filteredChats);
   problemDetailChatMessages = filteredChats;
   const fromStorage = getDigitalProblems().find((p) => String(p.createdAt) === String(item.createdAt));
@@ -1583,7 +1610,7 @@ function applyRestartCurrentTask() {
   }
   updateProblemDetailChatHeaderLabel();
   renderProblemDetailHistory();
-  showTaskStartNotificationIfNeeded(taskId, true);
+  if (taskId !== 'task1') showTaskStartNotificationIfNeeded(taskId, true);
 }
 
 if (el.problemDetailView) {
@@ -3482,12 +3509,23 @@ if (el.problemDetailChatMessages) {
             const sb = el.problemDetailChatSend;
             if (sb) sb.disabled = true;
             try {
-              const { parsed } = await parseCompanyBasicInfoInput(textToParse);
+              const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await parseCompanyBasicInfoInput(textToParse);
               problemDetailConfirmedBasicInfo = parsed;
               if (item?.createdAt) {
                 updateDigitalProblemBasicInfo(item.createdAt, parsed, false);
                 currentProblemDetailItem = { ...item, basicInfo: parsed };
               }
+              pushAndSaveProblemDetailChat({
+                role: 'system',
+                type: 'task1LlmQueryBlock',
+                taskId: 'task1',
+                noteName: '工商信息提炼',
+                llmInputPrompt: fullPrompt,
+                llmOutputJson: parsed,
+                llmOutputRaw: rawOutput,
+                timestamp: getTimeStr(),
+                llmMeta: { usage, model, durationMs },
+              });
               const cardBlock = document.createElement('div');
               cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
               const labels = [
@@ -3536,13 +3574,24 @@ if (el.problemDetailChatMessages) {
       ];
       requestAnimationFrame(async () => {
         try {
-          const { parsed } = await parseCompanyBasicInfoInput(textToParse);
+          const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await parseCompanyBasicInfoInput(textToParse);
           problemDetailConfirmedBasicInfo = null;
           const messages = problemDetailChatMessages;
           if (idx >= 0 && idx < messages.length && messages[idx].type === 'basicInfoCard') {
             messages[idx] = { ...messages[idx], data: parsed, confirmed: false };
             saveProblemDetailChat(item.createdAt, messages);
           }
+          pushAndSaveProblemDetailChat({
+            role: 'system',
+            type: 'task1LlmQueryBlock',
+            taskId: 'task1',
+            noteName: '工商信息提炼',
+            llmInputPrompt: fullPrompt,
+            llmOutputJson: parsed,
+            llmOutputRaw: rawOutput,
+            timestamp: getTimeStr(),
+            llmMeta: { usage, model, durationMs },
+          });
           const container = el.problemDetailChatMessages;
           if (container) {
             container.innerHTML = '';
@@ -3575,6 +3624,14 @@ if (el.problemDetailChatMessages) {
         }
         if (idx >= 0) {
           problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data, confirmed: true };
+          // 同步将最近一条 task1 的 LLM 查询块标记为已确认，用于时间线显示「LLM-查询 + 确认」
+          for (let j = idx - 1; j >= 0; j--) {
+            const q = problemDetailChatMessages[j];
+            if (q?.type === 'task1LlmQueryBlock') {
+              problemDetailChatMessages[j] = { ...q, confirmed: true };
+              break;
+            }
+          }
           saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
         }
         renderProblemDetailContent();
@@ -4513,7 +4570,7 @@ async function parseDigitalProblemInput(text) {
 }
 
 如果某字段无法从输入中推断，该字段填 "—" 或空字符串。只返回 JSON，不要有 markdown 代码块包裹。`;
-
+  const start = Date.now();
   const res = await fetch(DEEPSEEK_API_URL, {
     method: 'POST',
     headers: {
@@ -4529,13 +4586,21 @@ async function parseDigitalProblemInput(text) {
     }),
   });
   const data = await res.json();
+  const durationMs = Date.now() - start;
   if (data.error) {
     throw new Error(data.error.message || JSON.stringify(data.error));
   }
   const content = data.choices?.[0]?.message?.content ?? '';
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch ? jsonMatch[0] : content;
-  return JSON.parse(jsonStr);
+  const parsed = JSON.parse(jsonStr);
+  const fullPrompt = `【system】\n${systemPrompt}\n\n【user】\n${text}`;
+  return {
+    parsed,
+    fullPrompt,
+    rawOutput: jsonStr,
+    llmMeta: { usage: data.usage || {}, model: data.model || DEEPSEEK_MODEL, durationMs },
+  };
 }
 
 /** 构建意图提炼的完整上下文：当前问题的沟通历史 + 页面内容结构，供大模型搜索匹配；返回 { context, currentTask } */
@@ -5402,7 +5467,9 @@ async function parseCompanyBasicInfoInput(text) {
   ]);
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch ? jsonMatch[0] : content;
-  return { parsed: JSON.parse(jsonStr), usage, model, durationMs };
+  const parsed = JSON.parse(jsonStr);
+  const fullPrompt = `【system】\n${systemPrompt}\n\n【user】\n${text}`;
+  return { parsed, usage, model, durationMs, fullPrompt, rawOutput: jsonStr };
 }
 
 const BMC_GENERATION_PROMPT = `# Role
@@ -5943,8 +6010,16 @@ async function handleParseClick() {
     if (!DEEPSEEK_API_KEY) {
       throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
     }
-    const parsed = await parseDigitalProblemInput(text);
+    const parsedResult = await parseDigitalProblemInput(text);
+    const parsed = parsedResult?.parsed || {};
     lastParsedResult = parsed;
+    lastParsedLlmQuery = {
+      noteName: '初步需求提炼',
+      llmInputPrompt: parsedResult?.fullPrompt || '',
+      llmOutputJson: parsed,
+      llmOutputRaw: parsedResult?.rawOutput || '',
+      llmMeta: parsedResult?.llmMeta || null,
+    };
     renderParsePreview(parsed);
   } catch (err) {
     const msg = err.message || String(err);
@@ -5976,7 +6051,9 @@ function isTaskCompleted(item, taskId) {
   const wfCompleted = item.workflowAlignCompletedStages || [];
   const itGapCompleted = item.itGapCompletedStages || [];
   switch (taskId) {
-    case 'task1': return !!(item.basicInfo);
+    case 'task1':
+      // task1 仅在用户点击「已完成」后才视为完成；兼容历史数据（已进入后续大阶段也视为完成）
+      return completed.includes(0) || (item.currentMajorStage ?? 0) > 0;
     case 'task2': return completed.includes(1) || !!(item.bmc);
     case 'task3': return completed.includes(2) || !!(item.requirementLogic);
     case 'task4': return wfCompleted.includes(0) && !!(item.valueStream && !item.valueStream.raw);
@@ -6174,7 +6251,7 @@ function renderProblemFollowList() {
   }).join('');
 }
 
-function openProblemDetail(item) {
+function openProblemDetail(item, options) {
   if (lastModificationClarification && lastModificationClarification.createdAt !== item?.createdAt) {
     lastModificationClarification = null;
   }
@@ -6211,6 +6288,29 @@ function openProblemDetail(item) {
   updateProblemDetailProgressStages(majorStage, problemDetailViewingMajorStage);
   renderProblemDetailContent();
   initProblemDetailChat();
+  if (options?.fromStartFollow === true) {
+    const initLlm = item?.task1InitialLlmQuery || null;
+    const hasPreliminaryLlmQuery = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some((m) => {
+      if (!m || m.type !== 'task1LlmQueryBlock') return false;
+      const note = String(m.noteName || '').trim();
+      if (note.includes('初步需求')) return true;
+      const out = m.llmOutputJson;
+      return !!(out && typeof out === 'object' && ('customerName' in out || 'customerNeedsOrChallenges' in out || 'customerItStatus' in out || 'projectTimeRequirement' in out));
+    });
+    if (!hasPreliminaryLlmQuery && initLlm) {
+      pushAndSaveProblemDetailChat({
+        role: 'system',
+        type: 'task1LlmQueryBlock',
+        taskId: 'task1',
+        noteName: initLlm?.noteName || '初步需求提炼',
+        llmInputPrompt: initLlm?.llmInputPrompt || '',
+        llmOutputJson: initLlm?.llmOutputJson != null ? initLlm.llmOutputJson : {},
+        llmOutputRaw: initLlm?.llmOutputRaw || '',
+        llmMeta: initLlm?.llmMeta || undefined,
+        timestamp: getTimeStr(),
+      });
+    }
+  }
   toggleProblemDetailHistory(false);
   saveRouteState('problemDetail', { createdAt: item.createdAt });
   switchView('problemDetail');
@@ -9204,7 +9304,7 @@ async function handleProblemDetailChatSend() {
       if (!DEEPSEEK_API_KEY) {
         throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
       }
-      const { parsed } = await parseCompanyBasicInfoInput(text);
+      const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await parseCompanyBasicInfoInput(text);
       task1ParsingBlock.remove();
       const labels = [
         { key: 'company_name', label: '公司名称' }, { key: 'credit_code', label: '信用代码' }, { key: 'legal_representative', label: '法人' },
@@ -9222,6 +9322,17 @@ async function handleProblemDetailChatSend() {
       const jsonAttr = String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       cardBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${jsonAttr}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
       container.appendChild(cardBlock);
+      pushAndSaveProblemDetailChat({
+        role: 'system',
+        type: 'task1LlmQueryBlock',
+        taskId: 'task1',
+        noteName: '工商信息提炼',
+        llmInputPrompt: fullPrompt,
+        llmOutputJson: parsed,
+        llmOutputRaw: rawOutput,
+        timestamp: getTimeStr(),
+        llmMeta: { usage, model, durationMs },
+      });
       pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
       setupProblemDetailChatCardToggle(cardBlock);
       renderProblemDetailContent();
@@ -10278,6 +10389,7 @@ function handleStartFollowClick() {
     customerNeedsOrChallenges: lastParsedResult.customerNeedsOrChallenges ?? '',
     customerItStatus: lastParsedResult.customerItStatus ?? '',
     projectTimeRequirement: lastParsedResult.projectTimeRequirement ?? '',
+    task1InitialLlmQuery: lastParsedLlmQuery ? { ...lastParsedLlmQuery } : null,
   };
   saveDigitalProblem(item);
   if (el.parsePreview) el.parsePreview.classList.add('parse-preview-exiting');
@@ -10296,6 +10408,7 @@ function handleStartFollowClick() {
       el.parsePreview.hidden = true;
     }
     lastParsedResult = null;
+    lastParsedLlmQuery = null;
     if (firstItem) {
       firstItem.classList.remove('problem-follow-card-enter', 'problem-follow-card-enter-active');
     }
