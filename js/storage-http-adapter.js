@@ -42,6 +42,7 @@
       localItGapSessions: item.localItGapSessions,
       localItGapAnalyses: item.localItGapAnalyses,
       rolePermissionSessions: item.rolePermissionSessions,
+      coreBusinessObjectSessions: item.coreBusinessObjectSessions,
     };
   }
 
@@ -78,6 +79,92 @@
     }
   }
 
+  /** 阶段四：localStorage 有数据且 Backend 无数据时，迁移到数据库 */
+  async function migrateLocalToBackendIfNeeded() {
+    const problemsKey = global.DIGITAL_PROBLEMS_STORAGE_KEY || 'digital_problem_followups';
+    const chatsKey = global.PROBLEM_DETAIL_CHATS_STORAGE_KEY || 'problem_detail_chats';
+    let localList = [];
+    try {
+      const raw = global.localStorage.getItem(problemsKey);
+      localList = raw ? JSON.parse(raw) : [];
+    } catch {
+      return;
+    }
+    if (localList.length === 0) return;
+
+    let backendItems = [];
+    try {
+      const data = await fetchJson(problemCasesPath);
+      backendItems = data.items || [];
+    } catch {
+      return;
+    }
+    if (backendItems.length > 0) return;
+
+    const localChats = (() => {
+      try {
+        const raw = global.localStorage.getItem(chatsKey);
+        return raw ? JSON.parse(raw) : {};
+      } catch {
+        return {};
+      }
+    })();
+
+    for (const item of localList) {
+      const id = item.createdAt || item.id || new Date().toISOString();
+      const customerName = String(item.customerName ?? item.customer_name ?? '').trim() || '未命名';
+      const createPayload = {
+        id,
+        customerName,
+        customerNeedsOrChallenges: String(item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? ''),
+        customerItStatus: String(item.customerItStatus ?? item.customer_it_status ?? ''),
+        projectTimeRequirement: String(item.projectTimeRequirement ?? item.project_time_requirement ?? ''),
+      };
+      try {
+        const res = await fetch(problemCasesPath, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createPayload),
+        });
+        if (!res.ok) throw new Error('POST failed: ' + res.status);
+      } catch (e) {
+        console.warn('[storage-http-adapter] migrate create failed:', e);
+        continue;
+      }
+
+      const updates = toBackendPayload(item);
+      delete updates.id;
+      const hasExtra = Object.keys(updates).some((k) => !['customerName', 'customerNeedsOrChallenges', 'customerItStatus', 'projectTimeRequirement'].includes(k) && updates[k] != null);
+      if (hasExtra) {
+        try {
+          const res = await fetch(problemCasesPath + '/' + encodeURIComponent(id), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates),
+          });
+          if (!res.ok) throw new Error('PUT failed: ' + res.status);
+        } catch (e) {
+          console.warn('[storage-http-adapter] migrate update failed:', e);
+        }
+      }
+
+      const chats = localChats[item.createdAt] || localChats[id] || [];
+      if (chats.length > 0) {
+        const items = chats.map(toMessagePayload);
+        try {
+          const res = await fetch(problemCasesPath + '/' + encodeURIComponent(id) + '/messages', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items }),
+          });
+          if (!res.ok) throw new Error('PUT messages failed: ' + res.status);
+        } catch (e) {
+          console.warn('[storage-http-adapter] migrate messages failed:', e);
+        }
+      }
+    }
+  }
+
   async function loadChatsForCase(id) {
     try {
       const data = await fetchJson(problemCasesPath + '/' + encodeURIComponent(id) + '/messages');
@@ -98,6 +185,7 @@
 
   async function init() {
     if (!(cfg.USE_BACKEND_STORAGE)) return;
+    await migrateLocalToBackendIfNeeded();
     await loadProblemCases();
     await loadAllChats();
     global.dispatchEvent(new CustomEvent('storageBackendReady'));
