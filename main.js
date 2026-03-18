@@ -5464,37 +5464,6 @@ ${tasksDesc}
   return result;
 }
 
-const BMC_GENERATION_PROMPT = `# Role
-你是一位拥有15年经验的【首席商业架构师】与【数字化转型专家】。你擅长通过有限的工商基础数据，透视企业的底层运作逻辑，并能精准识别制造业、服务业或科技企业的核心商业要素。
-
-# Task
-请基于提供的【客户基础信息】，运用商业模式画布（Business Model Canvas）框架，深度分析该企业的经营模式。
-
-# Input Data (JSON/Text)：公司基本信息 json 数据
-
-# Analysis Logic (推演要求)
-在构建画布时，请不要简单重复经营范围，而是基于行业常识进行逻辑推演：
-1. **产业链定位**：判断其处于上游原材料、中游加工制造、还是下游终端销售？
-2. **核心驱动力**：该企业是靠"技术创新"驱动、"规模成本"驱动，还是"特许经营/资质"驱动？
-3. **客户关系特征**：是B2B的长账期/强关系模式，还是B2C的快消/流量模式？
-
-# Output Format (输出要求)
-请按以下结构输出，使用 JSON 格式，只返回 JSON 不要有其他内容：
-
-{
-  "industry_insight": "行业背景洞察：简述该企业所属赛道的现状、准入门槛及当前的数字化趋势。",
-  "customer_segments": "客户细分 (CS)：识别直接买家与最终受益者。",
-  "value_propositions": "价值主张 (VP)：解决客户什么痛点？提供什么独特的性能、成本或品牌价值？",
-  "channels": "渠道通路 (CH)：销售网络、物流交付及售后反馈路径。",
-  "customer_relationships": "客户关系 (CR)：合作深度。",
-  "revenue_streams": "收入来源 (RS)：盈利模式。",
-  "key_resources": "核心资源 (KR)：关键资产。",
-  "key_activities": "关键业务 (KA)：每日核心运作。",
-  "key_partnerships": "重要合作 (KP)：上游供应商、技术研发机构等。",
-  "cost_structure": "成本结构 (CS)：主要开支。",
-  "pain_points": "业务痛点预判：基于上述画布，推测该企业在排产/库存/销售/财务环节可能面临的数字化挑战（至少3条）。"
-}`;
-
 const REQUIREMENT_LOGIC_PROMPT = `# Role
 你是一位资深的【数字化转型顾问】与【行业分析专家】，擅长通过企业的商业架构（BMC）与业务现状推导底层需求逻辑。
 
@@ -5742,49 +5711,6 @@ function buildGlobalItGapStructuredHtml(analysis) {
   return parts.join('');
 }
 
-const BMC_LABEL_TO_KEY = {
-  '客户细分': 'customer_segments',
-  '价值主张': 'value_propositions',
-  '渠道通路': 'channels',
-  '客户关系': 'customer_relationships',
-  '收入来源': 'revenue_streams',
-  '核心资源': 'key_resources',
-  '关键业务': 'key_activities',
-  '重要合作': 'key_partnerships',
-  '成本结构': 'cost_structure',
-};
-
-function parseBmcFromMarkdown(text) {
-  const result = { industry_insight: '', pain_points: '' };
-  BMC_FIELDS.forEach((f) => { result[f.key] = ''; });
-  result.comprehensive_review = '';
-  const lines = text.split('\n');
-  let section = '';
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^##\s*1\.\s*行业背景洞察/i.test(line)) { section = 'industry_insight'; continue; }
-    if (/^##\s*2\.\s*商业模式画布/i.test(line)) { section = 'bmc_table'; continue; }
-    if (/^##\s*3\.\s*业务痛点预判/i.test(line)) { section = 'pain_points'; continue; }
-    if (section === 'industry_insight' && line && !line.startsWith('##')) {
-      result.industry_insight += (result.industry_insight ? '\n' : '') + line.trim();
-    }
-    if (section === 'bmc_table' && line.includes('|')) {
-      const m = line.match(/\*\*([^*]+)\*\*\s*\|\s*(.+)/);
-      if (m) {
-        const label = m[1].replace(/\s*\([A-Z]+\)\s*$/, '').trim();
-        const content = m[2].replace(/\|$/, '').trim();
-        const key = BMC_LABEL_TO_KEY[label] || BMC_FIELDS.find((f) => f.label === label)?.key;
-        if (key) result[key] = content;
-      }
-    }
-    if (section === 'pain_points' && line && !line.startsWith('##')) {
-      result.pain_points += (result.pain_points ? '\n' : '') + line.trim();
-    }
-  }
-  result.comprehensive_review = [result.industry_insight, result.pain_points].filter(Boolean).join('\n\n');
-  return result;
-}
-
 const REQUIREMENT_LOGIC_SECTIONS = [
   { key: 'industry_competition', label: '行业底层逻辑与竞争共性' },
   { key: 'causal_relation', label: '初步需求与商业模式的"因果关联"' },
@@ -5837,24 +5763,6 @@ function parseRequirementLogicFromMarkdown(text) {
     }
   }
   return result;
-}
-
-async function generateBmcFromBasicInfo(basicInfoJson) {
-  const inputStr = typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJson, null, 2);
-  const fullPrompt = `【system】\n${BMC_GENERATION_PROMPT}\n\n【user】\n${inputStr}`;
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: BMC_GENERATION_PROMPT },
-    { role: 'user', content: inputStr },
-  ]);
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  const rawOutput = jsonMatch ? jsonMatch[0] : content;
-  let parsed;
-  if (jsonMatch) {
-    try { parsed = JSON.parse(jsonMatch[0]); } catch (_) { parsed = parseBmcFromMarkdown(content); }
-  } else {
-    parsed = parseBmcFromMarkdown(content);
-  }
-  return { parsed, usage, model, durationMs, fullPrompt, rawOutput };
 }
 
 async function generateRequirementLogicFromInputs(preliminaryReqJson, basicInfoJson, bmcJson) {
@@ -6882,20 +6790,10 @@ async function runBmcGeneration() {
   container.appendChild(loading2);
   container.scrollTop = container.scrollHeight;
   try {
-    const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
+    const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await window.generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
     loading2.remove();
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
-    pushAndSaveProblemDetailChat({
-      role: 'system',
-      type: 'task2LlmQueryBlock',
-      taskId: 'task2',
-      noteName: '商业画布提炼',
-      llmInputPrompt: fullPrompt,
-      llmOutputJson: bmc,
-      llmOutputRaw: rawOutput,
-      timestamp: getTimeStr(),
-      llmMeta: { usage, model, durationMs },
-    });
+    pushAndSaveProblemDetailChat(window.buildTask2LlmQueryMessage({ fullPrompt, parsed: bmc, rawOutput, timestamp: getTimeStr(), usage, model, durationMs }));
     pushAndSaveProblemDetailChat({ type: 'bmcCard', data: bmc, confirmed: false, timestamp: getTimeStr(), llmMeta: { usage, model, durationMs } });
     const msgIdx = problemDetailChatMessages.length - 1;
     const cardBlock = document.createElement('div');
