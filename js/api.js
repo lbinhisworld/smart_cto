@@ -18,13 +18,19 @@
    */
   async function fetchDeepSeekChat(messages) {
     if (mode === 'online') {
+      const authHeaders = (typeof global.getAuthHeaders === 'function') ? global.getAuthHeaders() : {};
       const res = await fetch(BACKEND_API_URL + '/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ messages }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || 'AI 请求失败');
+      if (!res.ok) {
+        if ((res.status === 401 || res.status === 403) && typeof global.handleAuthError === 'function') {
+          global.handleAuthError(res.status);
+        }
+        throw new Error(data.message || 'AI 请求失败');
+      }
       return {
         content: (data.content || '').trim(),
         usage: data.usage || {},

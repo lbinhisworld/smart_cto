@@ -12,6 +12,15 @@
   let problemCasesCache = [];
   let problemChatsCache = {};
 
+  function buildAuthHeaders(extraHeaders) {
+    const authHeaders = (typeof global.getAuthHeaders === 'function') ? global.getAuthHeaders() : {};
+    return {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+      ...(extraHeaders || {}),
+    };
+  }
+
   function resolveCaseId(key) {
     if (!key) return key;
     const item = problemCasesCache.find((it) => (it.createdAt || it.id) === key || it.id === key);
@@ -68,10 +77,15 @@
 
   async function fetchJson(url, options) {
     const res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildAuthHeaders(options && options.headers),
       ...options,
     });
-    if (!res.ok) throw new Error('Backend request failed: ' + res.status);
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        if (typeof global.handleAuthError === 'function') global.handleAuthError(res.status);
+      }
+      throw new Error('Backend request failed: ' + res.status);
+    }
     return res.json();
   }
 
@@ -130,10 +144,15 @@
       try {
         const res = await fetch(problemCasesPath, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: buildAuthHeaders(),
           body: JSON.stringify(createPayload),
         });
-        if (!res.ok) throw new Error('POST failed: ' + res.status);
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            if (typeof global.handleAuthError === 'function') global.handleAuthError(res.status);
+          }
+          throw new Error('POST failed: ' + res.status);
+        }
       } catch (e) {
         console.warn('[storage-http-adapter] migrate create failed:', e);
         continue;
@@ -146,10 +165,15 @@
         try {
           const res = await fetch(problemCasesPath + '/' + encodeURIComponent(id), {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: buildAuthHeaders(),
             body: JSON.stringify(updates),
           });
-          if (!res.ok) throw new Error('PUT failed: ' + res.status);
+          if (!res.ok) {
+            if (res.status === 401 || res.status === 403) {
+              if (typeof global.handleAuthError === 'function') global.handleAuthError(res.status);
+            }
+            throw new Error('PUT failed: ' + res.status);
+          }
         } catch (e) {
           console.warn('[storage-http-adapter] migrate update failed:', e);
         }
@@ -161,10 +185,15 @@
         try {
           const res = await fetch(problemCasesPath + '/' + encodeURIComponent(id) + '/messages', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: buildAuthHeaders(),
             body: JSON.stringify({ items }),
           });
-          if (!res.ok) throw new Error('PUT messages failed: ' + res.status);
+          if (!res.ok) {
+            if (res.status === 401 || res.status === 403) {
+              if (typeof global.handleAuthError === 'function') global.handleAuthError(res.status);
+            }
+            throw new Error('PUT messages failed: ' + res.status);
+          }
         } catch (e) {
           console.warn('[storage-http-adapter] migrate messages failed:', e);
         }
@@ -214,9 +243,15 @@
       problemCasesCache.unshift(toLegacyItem({ ...payload, createdAt }));
       fetch(problemCasesPath, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildAuthHeaders(),
         body: JSON.stringify(payload),
-      }).catch((e) => console.warn('[storage-http-adapter] saveDigitalProblem failed:', e));
+      })
+        .then((res) => {
+          if (!res.ok && (res.status === 401 || res.status === 403) && typeof global.handleAuthError === 'function') {
+            global.handleAuthError(res.status);
+          }
+        })
+        .catch((e) => console.warn('[storage-http-adapter] saveDigitalProblem failed:', e));
     },
 
     removeDigitalProblem(index) {
@@ -225,7 +260,15 @@
       const id = item.id || item.createdAt;
       problemCasesCache.splice(index, 1);
       if (id) {
-        fetch(problemCasesPath + '/' + encodeURIComponent(id), { method: 'DELETE' })
+        fetch(problemCasesPath + '/' + encodeURIComponent(id), {
+          method: 'DELETE',
+          headers: buildAuthHeaders(),
+        })
+          .then((res) => {
+            if (!res.ok && (res.status === 401 || res.status === 403) && typeof global.handleAuthError === 'function') {
+              global.handleAuthError(res.status);
+            }
+          })
           .catch((e) => console.warn('[storage-http-adapter] removeDigitalProblem failed:', e));
       }
     },
@@ -238,9 +281,15 @@
       const caseId = resolveCaseId(createdAt);
       fetch(problemCasesPath + '/' + encodeURIComponent(caseId), {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildAuthHeaders(),
         body: JSON.stringify(updates),
-      }).catch((e) => console.warn('[storage-http-adapter] updateDigitalProblem failed:', e));
+      })
+        .then((res) => {
+          if (!res.ok && (res.status === 401 || res.status === 403) && typeof global.handleAuthError === 'function') {
+            global.handleAuthError(res.status);
+          }
+        })
+        .catch((e) => console.warn('[storage-http-adapter] updateDigitalProblem failed:', e));
     },
 
     getProblemDetailChats() {
@@ -253,9 +302,15 @@
       const caseId = resolveCaseId(createdAt);
       fetch(problemCasesPath + '/' + encodeURIComponent(caseId) + '/messages', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildAuthHeaders(),
         body: JSON.stringify({ items }),
-      }).catch((e) => console.warn('[storage-http-adapter] saveProblemDetailChat failed:', e));
+      })
+        .then((res) => {
+          if (!res.ok && (res.status === 401 || res.status === 403) && typeof global.handleAuthError === 'function') {
+            global.handleAuthError(res.status);
+          }
+        })
+        .catch((e) => console.warn('[storage-http-adapter] saveProblemDetailChat failed:', e));
     },
   };
 
