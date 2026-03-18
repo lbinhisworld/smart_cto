@@ -90,9 +90,11 @@
   try {
     const mode = (cfg.MODE || 'local');
     const pathname = global.location && global.location.pathname ? global.location.pathname : '';
-    const isLoginPage = pathname.endsWith('login.html');
-    const isAdminPage = pathname.endsWith('admin.html');
-    const isBusinessIndex = pathname.endsWith('index.html');
+    const isLoginPage = pathname.endsWith('login.html') || pathname.endsWith('/login/');
+    const isAdminPage = pathname.endsWith('admin.html') || pathname.endsWith('/admin/');
+    // 兼容：访问目录时浏览器地址栏可能是 `/frontend/`（而不是 `/frontend/index.html`）
+    // 该逻辑用于 local 模式下的门禁，因此需要把目录入口也视为业务首页。
+    const isBusinessIndex = pathname.endsWith('index.html') || pathname.endsWith('/');
 
     if (mode === 'local' && isBusinessIndex && !isLoginPage && !isAdminPage) {
       const token = getAuthToken();
