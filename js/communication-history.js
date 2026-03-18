@@ -20,6 +20,7 @@
     const content = msg.content || '';
     if (type === 'task1LlmQueryBlock') return 'task1';
     if (type === 'task2LlmQueryBlock') return 'task2';
+    if (type === 'task3LlmQueryBlock') return 'task3';
     if (type === 'basicInfoCard' || type === 'basicInfoJsonBlock' || (role === 'system' && (content === '解析完成' || content === '基本信息 json 提取完毕'))) return 'task1';
     if (type === 'bmcCard' || type === 'bmcStartBlock' || (role === 'system' && content.includes('BMC'))) return 'task2';
     if (type === 'requirementLogicBlock' || type === 'requirementLogicStartBlock') return 'task3';
@@ -61,9 +62,11 @@
     }
     if (type === 'task1LlmQueryBlock') return true;
     if (type === 'task2LlmQueryBlock') return true;
+    if (type === 'task3LlmQueryBlock') return true;
     if (type === 'basicInfoCard') return false; // task1 基本信息卡片不进入时间线，仅保留 LLM-查询卡片
     if (type === 'bmcCard') return false; // task2 BMC 卡片不进入时间线，仅保留 LLM-查询卡片
-    if (type === 'requirementLogicBlock' || type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'itStatusOutputLog') return true;
+    if (type === 'requirementLogicBlock') return false; // task3 需求逻辑卡片不进入时间线，仅保留 LLM-查询卡片
+    if (type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'itStatusOutputLog') return true;
     if (type === 'itStatusCard') return false;
     if (type === 'e2eFlowGeneratedLog') return true;
     if (type === 'e2eFlowExtractStartBlock') return !!msg.confirmed;
@@ -159,6 +162,7 @@
         payload.content = '任务上下文';
         payload.contextJson = msg.contextJson;
         payload.taskId = msg.taskId;
+        if (msg.contextLabel) payload.contextLabel = msg.contextLabel;
       }
       if (msg.type === 'globalItGapContextLog') {
         payload.content = '上下文';
@@ -193,6 +197,16 @@
         if (msg.llmOutputRaw != null) payload.llmOutputRaw = msg.llmOutputRaw;
         if (msg.confirmed === true) payload.confirmed = true;
         payload.taskId = msg.taskId || 'task2';
+      }
+      if (msg.type === 'task3LlmQueryBlock') {
+        payload.content = 'LLM-查询';
+        if (msg.noteName != null) payload.noteName = msg.noteName;
+        if (msg.llmInputPrompt != null) payload.llmInputPrompt = msg.llmInputPrompt;
+        if (msg.llmOutputJson != null) payload.llmOutputJson = msg.llmOutputJson;
+        if (msg.llmOutputRaw != null) payload.llmOutputRaw = msg.llmOutputRaw;
+        if (msg.confirmed === true) payload.confirmed = true;
+        if (msg.llmMeta != null) payload.llmMeta = msg.llmMeta;
+        payload.taskId = msg.taskId || 'task3';
       }
       if (msg.type === 'valueStreamConfirmLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog' && msg.taskId) payload.taskId = msg.taskId;
@@ -312,6 +326,7 @@
       if (parsed?.type === 'taskCompleteBlock') return '任务完成';
       if (parsed?.type === 'task1LlmQueryBlock') return 'LLM-查询';
       if (parsed?.type === 'task2LlmQueryBlock') return 'LLM-查询';
+      if (parsed?.type === 'task3LlmQueryBlock') return 'LLM-查询';
     } catch (_) {}
     if (c.speaker === '用户') return '输入';
     try {
@@ -472,11 +487,11 @@
               if (parsed?.role === 'user') {
                 titleLabel = parsed?._logType === 'modify' ? '用户修正意见' : '用户输入';
                 contentStr = (parsed?.content != null ? String(parsed.content).trim() : '') || '(空)';
-              } else if (parsed?.type === 'task1LlmQueryBlock' || parsed?.type === 'task2LlmQueryBlock') {
+              } else if (parsed?.type === 'task1LlmQueryBlock' || parsed?.type === 'task2LlmQueryBlock' || parsed?.type === 'task3LlmQueryBlock') {
                 titleLabel = 'LLM-查询';
                 stepNameForHead = parsed?.noteName
                   ? String(parsed.noteName)
-                  : (parsed?.type === 'task2LlmQueryBlock' ? '商业画布提炼' : '工商信息提炼');
+                  : (parsed?.type === 'task3LlmQueryBlock' ? '需求逻辑提炼' : parsed?.type === 'task2LlmQueryBlock' ? '商业画布提炼' : '工商信息提炼');
                 if (parsed?.confirmed === true) confirmTagForHead = '<span class="problem-detail-history-log-type-tag problem-detail-history-log-type-confirm">确认</span>';
                 const inputStr = parsed?.llmInputPrompt != null
                   ? String(parsed.llmInputPrompt)
@@ -563,6 +578,7 @@
                 }
               } else if (parsed?.type === 'taskContextBlock') {
                 titleLabel = '任务上下文';
+                contextNoteForHead = parsed?.contextLabel || (parsed?.taskId === 'task2' ? '客户基本信息 json' : '');
                 contentStr = parsed.contextJson != null ? JSON.stringify(parsed.contextJson, null, 2) : '(无)';
               } else if (parsed?.type === 'globalItGapContextLog') {
                 titleLabel = '上下文';

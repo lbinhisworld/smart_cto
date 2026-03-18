@@ -1901,7 +1901,14 @@ if (el.problemDetailChatMessages) {
         container.scrollTop = container.scrollHeight;
       }
       renderProblemDetailHistory();
-      requestAnimationFrame(() => showNextTaskStartNotification());
+      updateProblemDetailChatHeaderLabel();
+      requestAnimationFrame(() => {
+        if (taskId === 'task2') {
+          showTaskStartNotificationIfNeeded('task3', true);
+        } else {
+          showNextTaskStartNotification();
+        }
+      });
       return;
     }
     const taskCompleteNotYetBtn = e.target.closest('.btn-task-complete-not-yet');
@@ -2025,7 +2032,12 @@ if (el.problemDetailChatMessages) {
       }
       const contextJson = buildTaskContextJson(taskId, item);
       if (taskId !== 'task9' && taskId !== 'task11' && taskId !== 'task12') {
-        pushAndSaveProblemDetailChat({ type: 'taskContextBlock', taskId, contextJson, timestamp: getTimeStr() });
+        // 去重：若最近几条中已有同 taskId 的 taskContextBlock（如双击导致），则不再推送，避免时间线出现两条「上下文」
+        const recent = problemDetailChatMessages.slice(-4);
+        const hasRecentContext = recent.some((m) => m?.type === 'taskContextBlock' && m?.taskId === taskId);
+        if (!hasRecentContext) {
+          pushAndSaveProblemDetailChat({ type: 'taskContextBlock', taskId, contextJson, timestamp: getTimeStr() });
+        }
       }
       const chatContainer = el.problemDetailChatMessages;
       if (chatContainer) {
@@ -3199,6 +3211,23 @@ if (el.problemDetailChatMessages) {
         }
         renderProblemDetailHistory();
         requestAnimationFrame(() => runItStatusAnnotation(true));
+      }
+      return;
+    }
+    const redoBmcOnErrorBtn = e.target.closest('.btn-redo-bmc-on-error');
+    if (redoBmcOnErrorBtn && !redoBmcOnErrorBtn.disabled) {
+      const item = currentProblemDetailItem;
+      const chatContainer = el.problemDetailChatMessages;
+      const errorBlock = redoBmcOnErrorBtn.closest('.problem-detail-chat-msg');
+      if (errorBlock && errorBlock.parentNode === chatContainer) {
+        errorBlock.remove();
+        const failIdx = problemDetailChatMessages.findLastIndex((m) => m.role === 'system' && typeof m.content === 'string' && m.content.startsWith('生成失败：'));
+        if (failIdx >= 0) {
+          problemDetailChatMessages.splice(failIdx, 1);
+          if (item?.createdAt) saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+        }
+        redoBmcOnErrorBtn.disabled = true;
+        requestAnimationFrame(() => runBmcGeneration());
       }
       return;
     }
@@ -5782,11 +5811,13 @@ ${typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJs
 \`\`\`json
 ${typeof bmcJson === 'string' ? bmcJson : JSON.stringify(bmcJson, null, 2)}
 \`\`\``;
+  const fullPrompt = `【system】\n${REQUIREMENT_LOGIC_PROMPT}\n\n【user】\n${userContent}`;
   const { content, usage, model, durationMs } = await fetchDeepSeekChat([
     { role: 'system', content: REQUIREMENT_LOGIC_PROMPT },
     { role: 'user', content: userContent },
   ]);
-  return { content, usage, model, durationMs };
+  const rawOutput = (content || '').trim();
+  return { content: rawOutput, usage, model, durationMs, fullPrompt, rawOutput };
 }
 
 async function generateItStatusAnnotation(valueStream, requirementLogic) {
@@ -6237,7 +6268,10 @@ function openProblemDetail(item, options) {
   }
   // 双重 rAF：确保视图已渲染（含刷新后恢复路由），再触发当前任务开始通知
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => showNextTaskStartNotification());
+    requestAnimationFrame(() => {
+      console.log('[任务通知] openProblemDetail 即将调用 showNextTaskStartNotification');
+      showNextTaskStartNotification();
+    });
   });
 }
 
@@ -6495,10 +6529,41 @@ function scrollChatToTaskStartNotification(taskId) {
 function showTaskStartNotificationIfNeeded(taskId, forceShow) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
+  if (!container || !item?.createdAt) {
+    console.log('[任务通知] showTaskStartNotificationIfNeeded 提前返回: 无 container 或 item', { taskId, hasContainer: !!container, hasItem: !!item });
+    return;
+  }
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   const task = allTasks.find((t) => t.id === taskId);
-  if (!task) return;
+  if (!task) {
+    console.log('[任务通知] showTaskStartNotificationIfNeeded 提前返回: 未找到任务', taskId);
+    return;
+  }
+  if (taskId === 'task3') {
+    const hasBasicInfoCtx = problemDetailChatMessages.some((m) => m.type === 'taskContextBlock' && m.taskId === 'task3' && m.contextLabel === '客户基本信息 json');
+    const hasBmcCtx = problemDetailChatMessages.some((m) => m.type === 'taskContextBlock' && m.taskId === 'task3' && m.contextLabel === '商业模式画布 BMC json');
+    console.log('[任务通知] task3 上下文块检查', { hasBasicInfoCtx, hasBmcCtx, msgCount: problemDetailChatMessages.length });
+    if (!hasBasicInfoCtx) {
+      console.log('[任务通知] task3 推送上下文块: 客户基本信息 json');
+      pushAndSaveProblemDetailChat({
+        type: 'taskContextBlock',
+        taskId: 'task3',
+        contextLabel: '客户基本信息 json',
+        contextJson: item.basicInfo || {},
+        timestamp: getTimeStr(),
+      });
+    }
+    if (!hasBmcCtx) {
+      console.log('[任务通知] task3 推送上下文块: 商业模式画布 BMC json');
+      pushAndSaveProblemDetailChat({
+        type: 'taskContextBlock',
+        taskId: 'task3',
+        contextLabel: '商业模式画布 BMC json',
+        contextJson: item.bmc || {},
+        timestamp: getTimeStr(),
+      });
+    }
+  }
   if (taskId === 'task11') {
     const sessions = item.coreBusinessObjectSessions || [];
     if (sessions.length > 0 && !sessions.some((s) => !s.coreBusinessObjectJson)) {
@@ -6509,7 +6574,10 @@ function showTaskStartNotificationIfNeeded(taskId, forceShow) {
   const existingIdx = problemDetailChatMessages.findIndex((m) => m.type === 'taskStartNotification' && m.taskId === taskId);
   if (existingIdx >= 0) {
     const existing = problemDetailChatMessages[existingIdx];
-    if (existing.confirmed && !forceShow) return; // 已确认且非强制展示，无需重复下发
+    if (existing.confirmed && !forceShow) {
+      console.log('[任务通知] showTaskStartNotificationIfNeeded 提前返回: 已有已确认通知且非强制展示', taskId);
+      return; // 已确认且非强制展示，无需重复下发
+    }
     // 未确认或强制展示（如回退后刷新）：移除旧通知，重新下发到底部
     problemDetailChatMessages.splice(existingIdx, 1);
     saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
@@ -6536,6 +6604,7 @@ function showTaskStartNotificationIfNeeded(taskId, forceShow) {
     <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
   container.appendChild(block);
   container.scrollTop = container.scrollHeight;
+  console.log('[任务通知] showTaskStartNotificationIfNeeded 已下发任务启动通知', taskId, task.name);
 }
 
 /** 检查聊天中是否存在「下一任务」之前的未确认输出卡片（有则不下发下一任务启动通知） */
@@ -6544,13 +6613,20 @@ function hasUnconfirmedOutputCardBeforeTask(messages, nextTaskId) {
   const allTasks = [...FOLLOW_TASKS, ...ITGAP_HISTORY_TASKS, ...IT_STRATEGY_TASKS];
   const nextIdx = allTasks.findIndex((t) => t.id === nextTaskId);
   if (nextIdx <= 0) return false;
-  const taskIdsToCheck = allTasks.slice(0, nextIdx).map((t) => t.id);
+  let taskIdsToCheck = allTasks.slice(0, nextIdx).map((t) => t.id);
+  // 下一任务为 task3 时，仅用 task1 的未确认卡拦截；task2 的 bmc 可能未点确认但状态已推进到 task3，仍允许下发 task3 通知
+  if (nextTaskId === 'task3') {
+    taskIdsToCheck = ['task1'];
+  }
   const cardByTask = { task1: 'basicInfoCard', task2: 'bmcCard', task3: 'requirementLogicBlock', task4: 'valueStreamCard', task5: 'itStatusCard' };
   for (const tid of taskIdsToCheck) {
     const cardType = cardByTask[tid];
     if (!cardType) continue;
     const hasUnconfirmed = messages.some((m) => m.type === cardType && !m.confirmed);
-    if (hasUnconfirmed) return true;
+    if (hasUnconfirmed) {
+      console.log('[任务通知] hasUnconfirmedOutputCardBeforeTask 为 true', { nextTaskId, blockedByTaskId: tid, cardType });
+      return true;
+    }
   }
   return false;
 }
@@ -6558,15 +6634,26 @@ function hasUnconfirmedOutputCardBeforeTask(messages, nextTaskId) {
 /** 自动触发当前第一个未完成任务的任务启动通知（上一任务结束后或页面刷新时调用） */
 function showNextTaskStartNotification() {
   const item = currentProblemDetailItem;
-  if (!item?.createdAt) return;
+  if (!item?.createdAt) {
+    console.log('[任务通知] showNextTaskStartNotification 提前返回: 无 item 或 createdAt');
+    return;
+  }
   // 刷新后从 storage 取最新数据，确保与持久化一致（回退后刷新能正确触发当前任务通知）
   const list = getDigitalProblems();
   const latest = list.find((p) => String(p.createdAt) === String(item.createdAt));
   const dataItem = latest || item;
   const next = getFirstUncompletedTask(dataItem);
-  if (!next) return;
-  // 若聊天中存在未确认的输出卡片（如 BMC、需求逻辑），不下发下一任务启动通知，等用户先确认
-  if (hasUnconfirmedOutputCardBeforeTask(problemDetailChatMessages, next.id)) return;
+  console.log('[任务通知] showNextTaskStartNotification', { nextTask: next?.id, nextName: next?.name, completedStages: dataItem?.completedStages });
+  if (!next) {
+    console.log('[任务通知] showNextTaskStartNotification 提前返回: 无未完成任务');
+    return;
+  }
+  const hasUnconfirmed = hasUnconfirmedOutputCardBeforeTask(problemDetailChatMessages, next.id);
+  if (hasUnconfirmed) {
+    console.log('[任务通知] showNextTaskStartNotification 提前返回: 存在未确认输出卡', { nextId: next.id });
+    return;
+  }
+  console.log('[任务通知] showNextTaskStartNotification 调用 showTaskStartNotificationIfNeeded', next.id);
   showTaskStartNotificationIfNeeded(next.id, true);
 }
 
@@ -6763,6 +6850,14 @@ function initProblemDetailChat() {
 async function runBmcGeneration() {
   const container = el.problemDetailChatMessages;
   if (!container || !problemDetailConfirmedBasicInfo || !DEEPSEEK_API_KEY) return;
+  // 严格顺序：只有「即将开始商业画布加载」通知被用户确认后，才允许弹出 BMC 提炼内容块
+  const hasTask2StartConfirmed = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some(
+    (m) => (m.type === 'taskStartNotification' && m.taskId === 'task2' && m.confirmed) || (m.type === 'bmcStartBlock' && m.confirmed)
+  );
+  if (!hasTask2StartConfirmed) {
+    showTaskStartNotificationIfNeeded('task2', true);
+    return;
+  }
   const loading1 = document.createElement('div');
   loading1.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
   loading1.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在提取客户基本信息 json 数据</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -6829,9 +6924,11 @@ async function runBmcGeneration() {
     container.scrollTop = container.scrollHeight;
     renderProblemDetailHistory();
   } catch (err) {
+    const errMsg = err.message || String(err);
     loading2.classList.remove('problem-detail-chat-msg-parsing');
-    loading2.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">生成失败：${escapeHtml(err.message || String(err))}</div>`;
-    pushAndSaveProblemDetailChat({ role: 'system', content: '生成失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+    loading2.querySelector('.problem-detail-chat-msg-content-wrap').innerHTML = `<div class="problem-detail-chat-msg-content">生成失败：${escapeHtml(errMsg)}</div><div class="problem-detail-chat-msg-actions"><button type="button" class="btn-redo-bmc-on-error">重做</button></div>`;
+    loading2.dataset.bmcErrorMsg = errMsg;
+    pushAndSaveProblemDetailChat({ role: 'system', content: '生成失败：' + errMsg, timestamp: getTimeStr() });
   }
 }
 
@@ -6869,13 +6966,24 @@ async function runRequirementLogicConstruction() {
   container.appendChild(loadingBlock);
   container.scrollTop = container.scrollHeight;
   try {
-    const { content, usage, model, durationMs } = await generateRequirementLogicFromInputs(preliminaryReq, basicInfo, bmc);
+    const { content, usage, model, durationMs, fullPrompt, rawOutput } = await generateRequirementLogicFromInputs(preliminaryReq, basicInfo, bmc);
     loadingBlock.remove();
     const logicStr = (content || '').trim() || '（无返回内容）';
+    const parsed = parseRequirementLogicFromMarkdown(logicStr);
+    pushAndSaveProblemDetailChat({
+      role: 'system',
+      type: 'task3LlmQueryBlock',
+      taskId: 'task3',
+      noteName: '需求逻辑提炼',
+      llmInputPrompt: fullPrompt || '',
+      llmOutputJson: parsed,
+      llmOutputRaw: rawOutput || logicStr,
+      timestamp: getTimeStr(),
+      llmMeta: { usage, model, durationMs },
+    });
     pushOperationToHistory(item.createdAt, 'requirementLogic', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
     updateDigitalProblemRequirementLogic(item.createdAt, logicStr, false);
     currentProblemDetailItem = { ...item, requirementLogic: logicStr };
-    const parsed = parseRequirementLogicFromMarkdown(logicStr);
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     const block = document.createElement('div');
     block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-requirement-logic-start problem-detail-chat-msg-with-delete';
@@ -9009,6 +9117,13 @@ function setupProblemDetailRequirementLogicCardToggle(cardBlock) {
       }
       if (idx >= 0) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
+        for (let j = idx - 1; j >= 0; j--) {
+          const q = problemDetailChatMessages[j];
+          if (q?.type === 'task3LlmQueryBlock') {
+            problemDetailChatMessages[j] = { ...q, confirmed: true };
+            break;
+          }
+        }
         saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
       }
       const item = currentProblemDetailItem;
