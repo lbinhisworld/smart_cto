@@ -925,6 +925,12 @@ document.addEventListener('DOMContentLoaded', () => {
     console.warn('[DOMContentLoaded] btnValueStreamList 未找到，无法绑定点击事件');
   }
   restoreRouteState();
+
+  // 阶段三：当使用 Backend 存储时，异步拉取完成后需刷新 UI 并恢复路由
+  window.addEventListener('storageBackendReady', () => {
+    renderProblemFollowList();
+    restoreRouteState();
+  });
 });
 
 function updateSearchSuggestions() {
