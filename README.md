@@ -124,15 +124,22 @@ npx serve .
 | `对话模型管理.md` | 意图类型、过程日志纳入/展示规则、ITGap 流程与代码位置 |
 | `数字化问题跟进阶段设计.md` | 大阶段与任务定义、评价体系、阶段切换与聊天区提示块设计 |
 | `docs/knowledge-base-design.md` | 知识库功能设计（话题、时间线、意图与存储） |
+| `docs/task4ValueStream.md` | 任务4 价值流绘制模块设计（解析 logic_description/vsm_data、存储、工作区逻辑卡片与绘图） |
+| `js/task1BusinessInsight.md` | 企业背景洞察模块（task1）设计说明 |
+| `js/task2BusinessCanvas.md` | 商业画布加载模块（task2）设计说明 |
+| `js/task3RequirementLogic.md` | 需求逻辑构建模块（task3）设计说明 |
 | `js/coreBusinessObject.md` | 核心业务对象推演模块（task11）设计 |
 | `js/localItGap.md` | 局部 ITGap 分析模块（task9）实现说明 |
 | `js/rolePermission.md` | 角色与权限模型推演模块（task10）实现说明 |
 
 ---
 
-## 相关文档
+## 相关文档（设计文档索引）
 
 - 大模型提示词与 API 配置：[PROMPTS.md](./PROMPTS.md)
 - 意图类型与过程日志：[对话模型管理.md](./对话模型管理.md)
 - 阶段与任务设计：[数字化问题跟进阶段设计.md](./数字化问题跟进阶段设计.md)
 - 知识库功能设计：[docs/knowledge-base-design.md](./docs/knowledge-base-design.md)
+- 任务4 价值流绘制：[docs/task4ValueStream.md](./docs/task4ValueStream.md)
+- 任务1–3 模块设计：[js/task1BusinessInsight.md](./js/task1BusinessInsight.md)、[js/task2BusinessCanvas.md](./js/task2BusinessCanvas.md)、[js/task3RequirementLogic.md](./js/task3RequirementLogic.md)
+- 任务9/10/11 模块设计：[js/localItGap.md](./js/localItGap.md)、[js/rolePermission.md](./js/rolePermission.md)、[js/coreBusinessObject.md](./js/coreBusinessObject.md)

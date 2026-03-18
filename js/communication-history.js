@@ -21,6 +21,8 @@
     if (type === 'task1LlmQueryBlock') return 'task1';
     if (type === 'task2LlmQueryBlock') return 'task2';
     if (type === 'task3LlmQueryBlock') return 'task3';
+    if (type === 'task4LlmQueryBlock') return 'task4';
+    if (type === 'task5LlmQueryBlock') return 'task5';
     if (type === 'basicInfoCard' || type === 'basicInfoJsonBlock' || (role === 'system' && (content === '解析完成' || content === '基本信息 json 提取完毕'))) return 'task1';
     if (type === 'bmcCard' || type === 'bmcStartBlock' || (role === 'system' && content.includes('BMC'))) return 'task2';
     if (type === 'requirementLogicBlock' || type === 'requirementLogicStartBlock') return 'task3';
@@ -63,11 +65,14 @@
     if (type === 'task1LlmQueryBlock') return true;
     if (type === 'task2LlmQueryBlock') return true;
     if (type === 'task3LlmQueryBlock') return true;
+    if (type === 'task4LlmQueryBlock') return true;
+    if (type === 'task5LlmQueryBlock') return true;
     if (type === 'basicInfoCard') return false; // task1 基本信息卡片不进入时间线，仅保留 LLM-查询卡片
     if (type === 'bmcCard') return false; // task2 BMC 卡片不进入时间线，仅保留 LLM-查询卡片
     if (type === 'requirementLogicBlock') return false; // task3 需求逻辑卡片不进入时间线，仅保留 LLM-查询卡片
-    if (type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'itStatusOutputLog') return true;
-    if (type === 'itStatusCard') return false;
+    if (type === 'valueStreamCard') return false; // task4 价值流图 JSON 卡片不进入时间线，仅保留 LLM-查询块
+    if (type === 'valueStreamConfirmLog' || type === 'itStatusOutputLog') return true;
+    if (type === 'itStatusCard') return false; // task5 IT 现状卡片不进入时间线，仅保留 LLM-查询块
     if (type === 'e2eFlowGeneratedLog') return true;
     if (type === 'e2eFlowExtractStartBlock') return !!msg.confirmed;
     if (type === 'e2eFlowJsonBlock') return true; // 推送即纳入过程日志，未确认时标签为「输出」，确认后为「确认」
@@ -208,6 +213,24 @@
         if (msg.llmMeta != null) payload.llmMeta = msg.llmMeta;
         payload.taskId = msg.taskId || 'task3';
       }
+      if (msg.type === 'task4LlmQueryBlock') {
+        payload.content = 'LLM-查询';
+        if (msg.noteName != null) payload.noteName = msg.noteName;
+        if (msg.llmInputPrompt != null) payload.llmInputPrompt = msg.llmInputPrompt;
+        if (msg.llmOutputRaw != null) payload.llmOutputRaw = msg.llmOutputRaw;
+        if (msg.confirmed === true) payload.confirmed = true;
+        if (msg.llmMeta != null) payload.llmMeta = msg.llmMeta;
+        payload.taskId = msg.taskId || 'task4';
+      }
+      if (msg.type === 'task5LlmQueryBlock') {
+        payload.content = 'LLM-查询';
+        if (msg.noteName != null) payload.noteName = msg.noteName;
+        if (msg.llmInputPrompt != null) payload.llmInputPrompt = msg.llmInputPrompt;
+        if (msg.llmOutputRaw != null) payload.llmOutputRaw = msg.llmOutputRaw;
+        if (msg.confirmed === true) payload.confirmed = true;
+        if (msg.llmMeta != null) payload.llmMeta = msg.llmMeta;
+        payload.taskId = msg.taskId || 'task5';
+      }
       if (msg.type === 'valueStreamConfirmLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog' && msg.taskId) payload.taskId = msg.taskId;
       if (msg.type === 'itStatusOutputLog') payload.confirmed = !!msg.confirmed;
@@ -327,6 +350,8 @@
       if (parsed?.type === 'task1LlmQueryBlock') return 'LLM-查询';
       if (parsed?.type === 'task2LlmQueryBlock') return 'LLM-查询';
       if (parsed?.type === 'task3LlmQueryBlock') return 'LLM-查询';
+      if (parsed?.type === 'task4LlmQueryBlock') return 'LLM-查询';
+      if (parsed?.type === 'task5LlmQueryBlock') return 'LLM-查询';
     } catch (_) {}
     if (c.speaker === '用户') return '输入';
     try {
@@ -487,11 +512,11 @@
               if (parsed?.role === 'user') {
                 titleLabel = parsed?._logType === 'modify' ? '用户修正意见' : '用户输入';
                 contentStr = (parsed?.content != null ? String(parsed.content).trim() : '') || '(空)';
-              } else if (parsed?.type === 'task1LlmQueryBlock' || parsed?.type === 'task2LlmQueryBlock' || parsed?.type === 'task3LlmQueryBlock') {
+              } else if (parsed?.type === 'task1LlmQueryBlock' || parsed?.type === 'task2LlmQueryBlock' || parsed?.type === 'task3LlmQueryBlock' || parsed?.type === 'task4LlmQueryBlock' || parsed?.type === 'task5LlmQueryBlock') {
                 titleLabel = 'LLM-查询';
                 stepNameForHead = parsed?.noteName
                   ? String(parsed.noteName)
-                  : (parsed?.type === 'task3LlmQueryBlock' ? '需求逻辑提炼' : parsed?.type === 'task2LlmQueryBlock' ? '商业画布提炼' : '工商信息提炼');
+                  : (parsed?.type === 'task5LlmQueryBlock' ? 'IT 现状标注' : parsed?.type === 'task4LlmQueryBlock' ? '价值流图生成' : parsed?.type === 'task3LlmQueryBlock' ? '需求逻辑提炼' : parsed?.type === 'task2LlmQueryBlock' ? '商业画布提炼' : '工商信息提炼');
                 if (parsed?.confirmed === true) confirmTagForHead = '<span class="problem-detail-history-log-type-tag problem-detail-history-log-type-confirm">确认</span>';
                 const inputStr = parsed?.llmInputPrompt != null
                   ? String(parsed.llmInputPrompt)

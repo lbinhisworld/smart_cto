@@ -1,6 +1,6 @@
 # 核心业务对象推演模块（coreBusinessObject.js）详细设计
 
-> 最近更新：2025-03-18。与 main.js、js/communication-history.js 中 task11 流程及过程日志展示一致。
+> 最近更新：2026-03-19。与 main.js、js/communication-history.js 中 task11 流程及过程日志展示一致。
 
 ## 1. 概述
 
