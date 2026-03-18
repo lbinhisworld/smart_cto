@@ -920,6 +920,15 @@ async function query() {
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[DOMContentLoaded] 页面加载完成，检查按钮:');
   debugValueStreamButton();
+  // 在线模式下，problem-cases 通过 storage-http-adapter 异步拉取；
+  // main.js 初始化时第一次渲染可能拿不到数据，因此需要在后端加载完成后重渲染。
+  window.addEventListener('storageBackendReady', () => {
+    try {
+      renderProblemFollowList();
+    } catch (err) {
+      console.warn('[storageBackendReady] renderProblemFollowList failed:', err);
+    }
+  });
   renderProblemFollowList();
   if (el.btnValueStreamList) {
     el.btnValueStreamList.addEventListener('click', loadValueStreamList);
