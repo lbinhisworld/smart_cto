@@ -3509,22 +3509,23 @@ if (el.problemDetailChatMessages) {
             const sb = el.problemDetailChatSend;
             if (sb) sb.disabled = true;
             try {
-              const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await parseCompanyBasicInfoInput(textToParse);
+              const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await window.parseCompanyBasicInfoInput(textToParse);
               problemDetailConfirmedBasicInfo = parsed;
               if (item?.createdAt) {
                 updateDigitalProblemBasicInfo(item.createdAt, parsed, false);
                 currentProblemDetailItem = { ...item, basicInfo: parsed };
               }
               pushAndSaveProblemDetailChat({
-                role: 'system',
-                type: 'task1LlmQueryBlock',
-                taskId: 'task1',
-                noteName: '工商信息提炼',
-                llmInputPrompt: fullPrompt,
-                llmOutputJson: parsed,
-                llmOutputRaw: rawOutput,
-                timestamp: getTimeStr(),
-                llmMeta: { usage, model, durationMs },
+                ...window.buildTask1LlmQueryMessage({
+                  noteName: '工商信息提炼',
+                  fullPrompt,
+                  parsed,
+                  rawOutput,
+                  timestamp: getTimeStr(),
+                  usage,
+                  model,
+                  durationMs,
+                }),
               });
               const cardBlock = document.createElement('div');
               cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-card-collapsible';
@@ -3574,7 +3575,7 @@ if (el.problemDetailChatMessages) {
       ];
       requestAnimationFrame(async () => {
         try {
-          const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await parseCompanyBasicInfoInput(textToParse);
+          const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await window.parseCompanyBasicInfoInput(textToParse);
           problemDetailConfirmedBasicInfo = null;
           const messages = problemDetailChatMessages;
           if (idx >= 0 && idx < messages.length && messages[idx].type === 'basicInfoCard') {
@@ -3582,15 +3583,16 @@ if (el.problemDetailChatMessages) {
             saveProblemDetailChat(item.createdAt, messages);
           }
           pushAndSaveProblemDetailChat({
-            role: 'system',
-            type: 'task1LlmQueryBlock',
-            taskId: 'task1',
-            noteName: '工商信息提炼',
-            llmInputPrompt: fullPrompt,
-            llmOutputJson: parsed,
-            llmOutputRaw: rawOutput,
-            timestamp: getTimeStr(),
-            llmMeta: { usage, model, durationMs },
+            ...window.buildTask1LlmQueryMessage({
+              noteName: '工商信息提炼',
+              fullPrompt,
+              parsed,
+              rawOutput,
+              timestamp: getTimeStr(),
+              usage,
+              model,
+              durationMs,
+            }),
           });
           const container = el.problemDetailChatMessages;
           if (container) {
@@ -5440,36 +5442,6 @@ ${tasksDesc}
   }
 
   return result;
-}
-
-/** 解析用户输入的客户基本信息，提取结构化字段 */
-async function parseCompanyBasicInfoInput(text) {
-  const systemPrompt = `你是一个专业的企业信息提取助手。用户会输入一段关于企业基本信息的描述（可能是复制粘贴或自由输入），请从中提炼出以下字段，以 JSON 格式返回，不要包含其他内容：
-
-{
-  "company_name": "企业名称/公司名称",
-  "credit_code": "统一社会信用代码",
-  "legal_representative": "法定代表人",
-  "established_date": "成立日期",
-  "registered_capital": "注册资本",
-  "is_listed": "是否上市",
-  "listing_location": "上市地点",
-  "business_scope": "经营范围",
-  "core_qualifications": "核心资质",
-  "official_website": "官网"
-}
-
-如果某字段无法从输入中推断，该字段填 "" 或 "—"。只返回 JSON，不要有 markdown 代码块包裹。`;
-
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: text },
-  ]);
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  const jsonStr = jsonMatch ? jsonMatch[0] : content;
-  const parsed = JSON.parse(jsonStr);
-  const fullPrompt = `【system】\n${systemPrompt}\n\n【user】\n${text}`;
-  return { parsed, usage, model, durationMs, fullPrompt, rawOutput: jsonStr };
 }
 
 const BMC_GENERATION_PROMPT = `# Role
@@ -9304,7 +9276,7 @@ async function handleProblemDetailChatSend() {
       if (!DEEPSEEK_API_KEY) {
         throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
       }
-      const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await parseCompanyBasicInfoInput(text);
+      const { parsed, usage, model, durationMs, fullPrompt, rawOutput } = await window.parseCompanyBasicInfoInput(text);
       task1ParsingBlock.remove();
       const labels = [
         { key: 'company_name', label: '公司名称' }, { key: 'credit_code', label: '信用代码' }, { key: 'legal_representative', label: '法人' },
@@ -9323,15 +9295,16 @@ async function handleProblemDetailChatSend() {
       cardBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${jsonAttr}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
       container.appendChild(cardBlock);
       pushAndSaveProblemDetailChat({
-        role: 'system',
-        type: 'task1LlmQueryBlock',
-        taskId: 'task1',
-        noteName: '工商信息提炼',
-        llmInputPrompt: fullPrompt,
-        llmOutputJson: parsed,
-        llmOutputRaw: rawOutput,
-        timestamp: getTimeStr(),
-        llmMeta: { usage, model, durationMs },
+        ...window.buildTask1LlmQueryMessage({
+          noteName: '工商信息提炼',
+          fullPrompt,
+          parsed,
+          rawOutput,
+          timestamp: getTimeStr(),
+          usage,
+          model,
+          durationMs,
+        }),
       });
       pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
       setupProblemDetailChatCardToggle(cardBlock);
