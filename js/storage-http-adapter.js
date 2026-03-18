@@ -11,6 +11,12 @@
   let problemCasesCache = [];
   let problemChatsCache = {};
 
+  function resolveCaseId(key) {
+    if (!key) return key;
+    const item = problemCasesCache.find((it) => (it.createdAt || it.id) === key || it.id === key);
+    return (item && item.id) ? item.id : key;
+  }
+
   function toLegacyItem(item) {
     if (!item) return null;
     return {
@@ -167,7 +173,8 @@
 
   async function loadChatsForCase(id) {
     try {
-      const data = await fetchJson(problemCasesPath + '/' + encodeURIComponent(id) + '/messages');
+      const caseId = resolveCaseId(id);
+      const data = await fetchJson(problemCasesPath + '/' + encodeURIComponent(caseId) + '/messages');
       return (data.items || []).map(toMessagePayload);
     } catch {
       return [];
@@ -177,8 +184,10 @@
   async function loadAllChats() {
     const map = {};
     for (const item of problemCasesCache) {
-      const id = item.createdAt || item.id;
-      if (id) map[id] = await loadChatsForCase(id);
+      // 聊天消息在后端以 problemCase.id 关联；不能用 createdAt 当 caseId
+      const caseId = item.id || item.createdAt;
+      const legacyKey = item.createdAt || item.id;
+      if (caseId && legacyKey) map[legacyKey] = await loadChatsForCase(caseId);
     }
     problemChatsCache = map;
   }
@@ -212,7 +221,7 @@
     removeDigitalProblem(index) {
       if (index < 0 || index >= problemCasesCache.length) return;
       const item = problemCasesCache[index];
-      const id = item.createdAt || item.id;
+      const id = item.id || item.createdAt;
       problemCasesCache.splice(index, 1);
       if (id) {
         fetch(problemCasesPath + '/' + encodeURIComponent(id), { method: 'DELETE' })
@@ -225,7 +234,8 @@
       if (idx < 0) return;
       const item = { ...problemCasesCache[idx], ...updates };
       problemCasesCache[idx] = item;
-      fetch(problemCasesPath + '/' + encodeURIComponent(createdAt), {
+      const caseId = resolveCaseId(createdAt);
+      fetch(problemCasesPath + '/' + encodeURIComponent(caseId), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -239,7 +249,8 @@
     saveProblemDetailChat(createdAt, messages) {
       problemChatsCache[createdAt] = messages || [];
       const items = (messages || []).map(toMessagePayload);
-      fetch(problemCasesPath + '/' + encodeURIComponent(createdAt) + '/messages', {
+      const caseId = resolveCaseId(createdAt);
+      fetch(problemCasesPath + '/' + encodeURIComponent(caseId) + '/messages', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items }),

@@ -3164,7 +3164,7 @@ if (el.problemDetailChatMessages) {
     if (redoBasicInfoBtn && !redoBasicInfoBtn.disabled) {
       const card = redoBasicInfoBtn.closest('[data-msg-index]');
       const item = currentProblemDetailItem;
-      if (!card || !item?.createdAt || !DEEPSEEK_API_KEY) return;
+      if (!card || !item?.createdAt || !hasAiConfig()) return;
       const idx = parseInt(card.getAttribute('data-msg-index'), 10);
       if (isNaN(idx) || idx < 0 || idx >= problemDetailChatMessages.length) return;
       let textToParse = '';
@@ -3497,8 +3497,8 @@ if (el.toolsChatMessages) {
           saveToolsChatMessagesToStorage();
           (async () => {
             try {
-              if (!DEEPSEEK_API_KEY) {
-                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+              if (!hasAiConfig()) {
+                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请配置 AI：在 config.local.js 中配置 DEEPSEEK_API_KEY，或使用 Backend 并在数据库配置 AI API Key。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
                 return;
               }
               const { updates, _llmMeta } = await fetchToolModificationUpdates(target.id, note);
@@ -3556,8 +3556,8 @@ if (el.toolsChatMessages) {
           saveToolsChatMessagesToStorage();
           (async () => {
             try {
-              if (!DEEPSEEK_API_KEY) {
-                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
+              if (!hasAiConfig()) {
+                loadingBlock.innerHTML = `<div class="tools-chat-msg-content">请配置 AI：在 config.local.js 中配置 DEEPSEEK_API_KEY，或使用 Backend 并在数据库配置 AI API Key。</div><div class="tools-chat-msg-time">${getTimeStr()}</div>`;
                 return;
               }
               const { reply, _llmMeta } = await fetchToolDiscussionReply(target.id, note);
@@ -3590,7 +3590,7 @@ if (el.toolsChatMessages) {
           if (intent === '增加' && extracted.intent === '讨论') {
             (async () => {
               try {
-                if (!DEEPSEEK_API_KEY) return;
+                if (!hasAiConfig()) return;
                 const { summary, _llmMeta } = await summarizeToolDiscussionContent(note);
                 const finalSummary = (summary || '').trim();
                 if (!finalSummary) return;
@@ -3714,8 +3714,8 @@ async function handleToolsChatSend() {
   container.scrollTop = container.scrollHeight;
 
   try {
-    if (!DEEPSEEK_API_KEY) {
-      throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用工具/话题讨论意图管理功能。');
+    if (!hasAiConfig()) {
+      throw new Error('请配置 AI 才能使用工具/话题讨论意图管理功能。');
     }
     const result = await analyzeToolDiscussionIntent(text);
     parsingBlock.remove();
@@ -4129,22 +4129,12 @@ ${pageStructure || '(无详情数据)'}`;
     { role: 'system', content: systemContent },
     ...chatHistory.map((m) => ({ role: m.role, content: m.content })),
   ];
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: apiMessages,
-    }),
-  });
-  const data = await res.json();
-  if (data.error) {
-    return '请求失败：' + (data.error.message || JSON.stringify(data.error));
+  try {
+    const { content } = await fetchDeepSeekChat(apiMessages);
+    return content || '未收到有效回复。';
+  } catch (e) {
+    return '请求失败：' + (e.message || String(e));
   }
-  return data.choices?.[0]?.message?.content ?? '未收到有效回复。';
 }
 
 /** 调用大模型解析数字化问题输入，提取客户名称、需求、IT现状、时间要求 */
@@ -4160,25 +4150,10 @@ async function parseDigitalProblemInput(text) {
 
 如果某字段无法从输入中推断，该字段填 "—" 或空字符串。只返回 JSON，不要有 markdown 代码块包裹。`;
 
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: text },
-      ],
-    }),
-  });
-  const data = await res.json();
-  if (data.error) {
-    throw new Error(data.error.message || JSON.stringify(data.error));
-  }
-  const content = data.choices?.[0]?.message?.content ?? '';
+  const { content } = await fetchDeepSeekChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: text },
+  ]);
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   const jsonStr = jsonMatch ? jsonMatch[0] : content;
   return JSON.parse(jsonStr);
@@ -5762,8 +5737,8 @@ async function handleParseClick() {
   btn.textContent = '解析中…';
   if (el.parsePreview) el.parsePreview.hidden = true;
   try {
-    if (!DEEPSEEK_API_KEY) {
-      throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
+    if (!hasAiConfig()) {
+      throw new Error('请配置 AI 才能使用解析功能。');
     }
     const parsed = await parseDigitalProblemInput(text);
     lastParsedResult = parsed;
@@ -6524,7 +6499,7 @@ function initProblemDetailChat() {
 
 async function runBmcGeneration() {
   const container = el.problemDetailChatMessages;
-  if (!container || !problemDetailConfirmedBasicInfo || !DEEPSEEK_API_KEY) return;
+  if (!container || !problemDetailConfirmedBasicInfo || !hasAiConfig()) return;
   const loading1 = document.createElement('div');
   loading1.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
   loading1.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在提取客户基本信息 json 数据</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -6599,7 +6574,7 @@ async function runBmcGeneration() {
 async function runRequirementLogicConstruction() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt || !DEEPSEEK_API_KEY) return;
+  if (!container || !item?.createdAt || !hasAiConfig()) return;
   const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || {};
   const bmc = item.bmc || {};
   const preliminaryReq = {
@@ -6766,14 +6741,14 @@ async function runRolePermissionModeling(isRedo) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
   if (!container || !item?.createdAt) return;
-  if (!DEEPSEEK_API_KEY) {
+  if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
     pushAndSaveProblemDetailChat({
       role: 'system',
-      content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用角色与权限模型推演功能。',
+      content: '请配置 AI 才能使用角色与权限模型推演功能。',
       timestamp: getTimeStr(),
     });
     return;
@@ -7354,12 +7329,12 @@ async function runLocalItGapAnalysisForNextStep() {
   if (!container || !item?.createdAt) return;
   const valueStream = resolveValueStreamForItGap(item);
   if (!valueStream || valueStream.raw) return;
-  if (!DEEPSEEK_API_KEY) {
+  if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用局部 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用局部 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用局部 ITGap 分析功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用局部 ITGap 分析功能。', timestamp: getTimeStr() });
     return;
   }
   const globalItGap = item.globalItGapAnalysisJson;
@@ -7444,12 +7419,12 @@ async function runRolePermissionModelingForNextStep() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
   if (!container || !item?.createdAt) return;
-  if (!DEEPSEEK_API_KEY) {
+  if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI：在 config.local.js 中配置 DEEPSEEK_API_KEY，或使用 Backend 并在数据库配置 AI API Key。', timestamp: getTimeStr() });
     return;
   }
   const valueStream = item.valueStream;
@@ -7528,12 +7503,12 @@ async function runRolePermissionModelingAutoSequential() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
   if (!container || !item?.createdAt) return;
-  if (!DEEPSEEK_API_KEY) {
+  if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用角色与权限模型推演功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI：在 config.local.js 中配置 DEEPSEEK_API_KEY，或使用 Backend 并在数据库配置 AI API Key。', timestamp: getTimeStr() });
     return;
   }
   for (;;) {
@@ -7634,12 +7609,12 @@ async function runGlobalItGapAnalysis(isRedo) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
   if (!container || !item?.createdAt) return;
-  if (!DEEPSEEK_API_KEY) {
+  if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用全局 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用全局 ITGap 分析功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用全局 ITGap 分析功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用全局 ITGap 分析功能。', timestamp: getTimeStr() });
     return;
   }
   const enterpriseContext = {
@@ -7741,12 +7716,12 @@ async function runItStatusAnnotation() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
   if (!container || !item?.createdAt) return;
-  if (!DEEPSEEK_API_KEY) {
+  if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用 IT 现状标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用 IT 现状标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用 IT 现状标注功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用 IT 现状标注功能。', timestamp: getTimeStr() });
     return;
   }
   const valueStream = item.valueStream;
@@ -7837,12 +7812,12 @@ async function runPainPointAnnotation(isRerun) {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
   if (!container || !item?.createdAt) return;
-  if (!DEEPSEEK_API_KEY) {
+  if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用痛点标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用痛点标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用痛点标注功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用痛点标注功能。', timestamp: getTimeStr() });
     return;
   }
   const valueStream = item.valueStream;
@@ -7947,12 +7922,12 @@ async function runValueStreamGeneration() {
   const container = el.problemDetailChatMessages;
   const item = currentProblemDetailItem;
   if (!container || !item?.createdAt) return;
-  if (!DEEPSEEK_API_KEY) {
+  if (!hasAiConfig()) {
     const errBlock = document.createElement('div');
     errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用价值流图生成功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请配置 AI 才能使用价值流图生成功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
     container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用价值流图生成功能。', timestamp: getTimeStr() });
+    pushAndSaveProblemDetailChat({ role: 'system', content: '请配置 AI 才能使用价值流图生成功能。', timestamp: getTimeStr() });
     return;
   }
   const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || {};
@@ -9103,8 +9078,8 @@ async function handleProblemDetailChatSend() {
     container.appendChild(task1ParsingBlock);
     container.scrollTop = container.scrollHeight;
     try {
-      if (!DEEPSEEK_API_KEY) {
-        throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
+      if (!hasAiConfig()) {
+        throw new Error('请配置 AI 才能使用解析功能。');
       }
       const { parsed } = await parseCompanyBasicInfoInput(text);
       task1ParsingBlock.remove();
@@ -9158,8 +9133,8 @@ async function handleProblemDetailChatSend() {
   container.appendChild(parsingBlock);
   container.scrollTop = container.scrollHeight;
   try {
-    if (!DEEPSEEK_API_KEY) {
-      throw new Error('请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用解析功能。');
+    if (!hasAiConfig()) {
+      throw new Error('请配置 AI 才能使用解析功能。');
     }
     const { content, usage, model, durationMs, wasTruncated, contextLength } = await executeAskModeDirectQuery(item, text);
     parsingBlock.remove();
@@ -10239,8 +10214,8 @@ async function sendChatMessage() {
   messages.appendChild(loadingBlock);
   messages.scrollTop = messages.scrollHeight;
 
-  if (!DEEPSEEK_API_KEY) {
-    loadingBlock.querySelector('.chat-message-content').textContent = '请在 config.local.js 中配置 DEEPSEEK_API_KEY 才能使用大模型对话。';
+  if (!hasAiConfig()) {
+    loadingBlock.querySelector('.chat-message-content').textContent = '请配置 AI 才能使用大模型对话。';
     loadingBlock.classList.remove('chat-message-loading');
     return;
   }
