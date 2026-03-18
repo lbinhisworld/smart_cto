@@ -50,6 +50,9 @@ async function analyzeToolDiscussionIntent(text) {
 
 /** FOLLOW_TASKS、DELETE_CHAT_MSG_ICON、DEEPSEEK 配置、fetchDeepSeekChat、buildLlmMetaHtml 已移至 js/config.js 与 js/api.js */
 
+/** 任务5 IT 现状标注入口由 js/task5ItStatus.js 提供 */
+const runItStatusAnnotation = (typeof window !== 'undefined' && window.runItStatusAnnotation) || (async function () {});
+
 /** 当前详情页的公司名称，用于对话上下文 */
 let currentDetailCompanyName = '';
 
@@ -1900,7 +1903,11 @@ if (el.problemDetailChatMessages) {
       const item = currentProblemDetailItem;
       const alreadyCompleted = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some((m) => m.type === 'taskCompleteBlock' && m.taskId === taskId);
       if (!alreadyCompleted) {
-        const taskCompleteContent = taskId === 'task7' ? '用户确认端到端流程绘制' : (taskId === 'task8' ? '用户确认全局 ITGap 分析' : (taskId === 'task9' ? '用户确认局部 ITGap 分析' : (taskId === 'task10' ? '用户确认角色与权限模型推演' : '用户确认任务完成')));
+        let taskCompleteContent = '用户确认任务完成';
+        if (taskId === 'task7') taskCompleteContent = '用户确认端到端流程绘制';
+        else if (taskId === 'task8') taskCompleteContent = '用户确认全局 ITGap 分析';
+        else if (taskId === 'task9') taskCompleteContent = '用户确认局部 ITGap 分析';
+        else if (taskId === 'task10') taskCompleteContent = '用户确认角色与权限模型推演';
         pushAndSaveProblemDetailChat({ type: 'taskCompleteBlock', taskId, content: taskCompleteContent, timestamp: getTimeStr() });
         const createdAt = item?.createdAt;
         if (createdAt) advanceProblemStateOnTaskComplete(createdAt, taskId);
@@ -2128,7 +2135,7 @@ if (el.problemDetailChatMessages) {
         return;
       }
       if (taskId === 'task5') {
-        runItStatusAnnotation();
+        runItStatusAnnotation(currentProblemDetailItem);
         return;
       }
       if (taskId === 'task6') {
@@ -2348,6 +2355,7 @@ if (el.problemDetailChatMessages) {
     }
     const startItStatusBtn = e.target.closest('.btn-confirm-start-it-status');
     if (startItStatusBtn && !startItStatusBtn.disabled) {
+      console.log('[task5] 用户点击确认开始 IT 现状标注', { hasRunItStatusAnnotation: typeof runItStatusAnnotation === 'function', createdAt: currentProblemDetailItem?.createdAt });
       startItStatusBtn.disabled = true;
       startItStatusBtn.textContent = '已确认';
       let idx = problemDetailChatMessages.findIndex((m) => m.type === 'itStatusStartBlock');
@@ -2355,7 +2363,8 @@ if (el.problemDetailChatMessages) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
         saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
       }
-      runItStatusAnnotation();
+      runItStatusAnnotation(currentProblemDetailItem);
+      console.log('[task5] runItStatusAnnotation() 已调用（异步执行）');
       return;
     }
     const startPainPointBtn = e.target.closest('.btn-confirm-start-pain-point');
@@ -3308,8 +3317,14 @@ if (el.problemDetailChatMessages) {
       const cardIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusCard');
       if (cardIdx >= 0 && item?.createdAt) {
         problemDetailChatMessages[cardIdx] = { ...problemDetailChatMessages[cardIdx], confirmed: true };
-        const logIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusOutputLog');
-        if (logIdx >= 0) problemDetailChatMessages[logIdx] = { ...problemDetailChatMessages[logIdx], confirmed: true };
+        // 同步将最近一条 task5 的 LLM-查询 块标记为已确认，用于时间线显示「LLM-查询 + 确认」
+        for (let j = cardIdx - 1; j >= 0; j--) {
+          const q = problemDetailChatMessages[j];
+          if (q?.type === 'task5LlmQueryBlock') {
+            problemDetailChatMessages[j] = { ...q, confirmed: true };
+            break;
+          }
+        }
         saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
         confirmItStatusBtn.textContent = '已确认';
         confirmItStatusBtn.disabled = true;
@@ -3350,10 +3365,7 @@ if (el.problemDetailChatMessages) {
       const item = currentProblemDetailItem;
       const cardIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusCard');
       if (cardIdx >= 0 && item?.createdAt) {
-        const logIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'itStatusOutputLog');
-        const toRemove = [];
-        if (logIdx >= 0 && logIdx < cardIdx) toRemove.push(logIdx);
-        toRemove.push(cardIdx);
+        const toRemove = [cardIdx];
         const doneIdx = cardIdx + 1;
         if (doneIdx < problemDetailChatMessages.length && problemDetailChatMessages[doneIdx].role === 'system' && problemDetailChatMessages[doneIdx].content === 'IT 现状标注完成') toRemove.push(doneIdx);
         toRemove.sort((a, b) => b - a).forEach((i) => problemDetailChatMessages.splice(i, 1));
@@ -3365,7 +3377,7 @@ if (el.problemDetailChatMessages) {
           chatContainer.scrollTop = chatContainer.scrollHeight;
         }
         renderProblemDetailHistory();
-        requestAnimationFrame(() => runItStatusAnnotation(true));
+        requestAnimationFrame(() => runItStatusAnnotation(currentProblemDetailItem));
       }
       return;
     }
@@ -5681,44 +5693,7 @@ if (typeof window !== 'undefined') {
   window.VALUE_STREAM_PROMPT = VALUE_STREAM_PROMPT;
 }
 
-const IT_STATUS_ANNOTATION_PROMPT = `# 角色设定
-你是一位资深的业务架构师与 IT 现状分析专家，擅长结合需求逻辑判断各业务环节的 IT 支撑方式。
-
-# 输入数据
-1. **requirement_logic**：当前需求单→需求理解页面→需求逻辑→需求背后的逻辑链条总结部分的 json 数据。
-2. **value_stream**：已绘制的价值流图 JSON，包含 stages 及每个 stage 下的 steps（环节节点）。
-
-# 任务
-请结合需求逻辑，在价值流图的每个环节节点标注该环节的 IT 现状：
-- **手工**：若该环节依赖人工操作，需进一步区分：\`纸质\` 或 \`excel\`
-- **系统**：若该环节有系统支撑，标注具体系统名称（如：ERP、MES、OA 等）
-
-# 输出格式
-请直接返回一个 JSON 代码块，结构与输入 value_stream 一致，但在每个 step 中增加 \`itStatus\` 字段：
-\`\`\`json
-{
-  "stages": [
-    {
-      "name": "阶段名称",
-      "steps": [
-        {
-          "name": "环节名称",
-          "role": "执行角色",
-          "duration": "预估耗时",
-          "itStatus": { "type": "手工", "detail": "纸质" }
-        },
-        {
-          "name": "另一环节",
-          "itStatus": { "type": "系统", "detail": "ERP系统" }
-        }
-      ]
-    }
-  ]
-}
-\`\`\`
-- itStatus.type 只能是 \`手工\` 或 \`系统\`
-- itStatus.detail：手工时为 \`纸质\` 或 \`excel\`；系统时为具体系统名称
-- 保持原有 stages、steps 结构及 name、role、duration 等字段不变，仅新增 itStatus`;
+/** IT_STATUS_ANNOTATION_PROMPT 已移至 js/task5ItStatus.js */
 
 const PAIN_POINT_ANNOTATION_PROMPT = `# 角色设定
 你是一位资深的业务架构师与痛点分析专家，擅长结合需求逻辑识别各业务环节中的痛点。
@@ -5832,27 +5807,6 @@ function buildGlobalItGapStructuredHtml(analysis) {
     parts.push(`<div class="problem-detail-global-itgap-section"><h4 class="problem-detail-global-itgap-section-title">${escapeHtml(label)}</h4><div class="problem-detail-global-itgap-section-content markdown-body">${content === '—' ? '—' : renderMarkdown(content)}</div></div>`);
   }
   return parts.join('');
-}
-
-async function generateItStatusAnnotation(valueStream, requirementLogic) {
-  const userContent = `请结合需求逻辑，在价值流图各环节标注 IT 现状。
-
-## requirement_logic（需求逻辑 - 逻辑链条总结等）
-\`\`\`json
-${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic || {}, null, 2)}
-\`\`\`
-
-## value_stream（已绘制的价值流图）
-\`\`\`json
-${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || {}, null, 2)}
-\`\`\`
-
-请按提示词要求，为每个环节增加 itStatus 字段，直接返回完整 JSON 代码块。`;
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: IT_STATUS_ANNOTATION_PROMPT },
-    { role: 'user', content: userContent },
-  ]);
-  return { content, usage, model, durationMs };
 }
 
 /** 根据价值流生成痛点标注 session 列表（环节列表），用于「痛点标注 session 计划确认」卡片 */
@@ -6824,10 +6778,10 @@ function advanceProblemStateOnTaskComplete(createdAt, taskId) {
   }
 }
 
-/** 用户点击「确认」认可大模型输出后，发送任务完工确认块：【当前任务名称】是否视为完成？带「已完成」「还不行」按钮 */
+/** 用户点击「确认」认可大模型输出后，发送任务完工确认块：是否确认 XXX 任务已经完成？带「已完成」「还不行」按钮 */
 function showTaskCompletionConfirm(taskId, taskName) {
   if (!taskId || !taskName) return;
-  const content = `【${taskName}】是否视为完成？`;
+  const content = taskId === 'task5' ? '是否确认 IT 现状标注任务已经完成？' : `【${taskName}】是否视为完成？`;
   pushAndSaveProblemDetailChat({ type: 'taskCompletionConfirmBlock', taskId, taskName, content, timestamp: getTimeStr() });
   const container = el.problemDetailChatMessages;
   if (container) {
@@ -7875,101 +7829,7 @@ async function runGlobalItGapAnalysis(isRedo) {
   }
 }
 
-async function runItStatusAnnotation() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  if (!hasAiConfig()) {
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用 IT 现状标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用 IT 现状标注功能。', timestamp: getTimeStr() });
-    return;
-  }
-  const valueStream = item.valueStream;
-  const requirementLogic = item.requirementLogic || {};
-  const logicForPrompt = typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic, null, 2);
-  try {
-    const loadingBlock = document.createElement('div');
-    loadingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
-    loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在标注价值流图各环节 IT 现状…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(loadingBlock);
-    container.scrollTop = container.scrollHeight;
-    const { content, usage, model, durationMs } = await generateItStatusAnnotation(valueStream, logicForPrompt);
-    loadingBlock.remove();
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    let annotatedVs = null;
-    if (jsonMatch) {
-      try {
-        annotatedVs = JSON.parse(jsonMatch[1].trim());
-      } catch (_) {}
-    }
-    if (!annotatedVs) {
-      const fallbackMatch = content.match(/\{[\s\S]*\}/);
-      if (fallbackMatch) {
-        try {
-          annotatedVs = JSON.parse(fallbackMatch[0]);
-        } catch (_) {}
-      }
-    }
-    const mergedVs = annotatedVs ? mergeItStatusIntoValueStream(valueStream, annotatedVs) : valueStream;
-    pushOperationToHistory(item.createdAt, 'itStatus', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
-    updateDigitalProblemValueStreamItStatus(item.createdAt, mergedVs);
-    currentProblemDetailItem = { ...item, valueStream: mergedVs, workflowAlignCompletedStages: [...new Set([...(item.workflowAlignCompletedStages || []), 0, 1])].sort((a, b) => a - b) };
-    renderProblemDetailContent();
-    const { stages: vsStages } = parseValueStreamGraph(mergedVs);
-    const itStatusOutputData = [];
-    for (const stage of vsStages || []) {
-      const stageName = stage.name || '';
-      for (const step of stage.steps || []) {
-        const stepName = step.name || '';
-        let itStatus = step.itStatusLabel || '';
-        if (!itStatus) {
-          const it = step.itStatus || step.it_status;
-          itStatus = !it ? '' : (typeof it === 'object' ? (it.type === '手工' ? `手工-${it.detail || ''}` : it.type === '系统' ? `系统-${it.detail || ''}` : '') : String(it));
-        }
-        itStatusOutputData.push({ stageName, stepName, itStatus });
-      }
-    }
-    pushAndSaveProblemDetailChat({ type: 'itStatusOutputLog', taskId: 'task5', content: JSON.stringify(itStatusOutputData, null, 2), timestamp: getTimeStr() });
-    pushAndSaveProblemDetailChat({ type: 'itStatusCard', taskId: 'task5', data: itStatusOutputData, timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
-    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
-    const cardBlock = document.createElement('div');
-    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
-    cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-    cardBlock.dataset.taskId = 'task5';
-    const itStatusJsonStr = escapeHtml(JSON.stringify(itStatusOutputData, null, 2));
-    cardBlock.innerHTML = `
-      <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-      <div class="problem-detail-chat-value-stream-card-wrap">
-        <div class="problem-detail-chat-value-stream-card-header">IT 现状标注 JSON（阶段名-环节名-IT 现状）</div>
-        <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${itStatusJsonStr}</pre></div>
-        <div class="problem-detail-chat-value-stream-card-actions">
-          <button type="button" class="btn-confirm-it-status btn-confirm-primary">确认</button>
-          <button type="button" class="btn-redo-it-status">重做</button>
-          <button type="button" class="btn-refine-modify" data-task-id="task5">修正</button>
-          <button type="button" class="btn-refine-discuss" data-task-id="task5">讨论</button>
-        </div>
-      </div>
-      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
-    container.appendChild(cardBlock);
-    const doneBlock = document.createElement('div');
-    doneBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsed';
-    doneBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">IT 现状标注完成</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
-    container.appendChild(doneBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: 'IT 现状标注完成', timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
-    container.scrollTop = container.scrollHeight;
-    renderProblemDetailHistory();
-    requestAnimationFrame(() => showNextTaskStartNotification());
-  } catch (err) {
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">IT 现状标注失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: 'IT 现状标注失败：' + (err.message || String(err)), timestamp: getTimeStr() });
-  }
-}
+/** runItStatusAnnotation、generateItStatusAnnotation 已移至 js/task5ItStatus.js，主流程通过 global.runItStatusAnnotation 调用 */
 
 async function runPainPointAnnotation(isRerun) {
   const container = el.problemDetailChatMessages;
@@ -8161,27 +8021,7 @@ async function runPainPointAnnotationAutoSequential() {
   }
 }
 
-function mergeItStatusIntoValueStream(baseVs, annotatedVs) {
-  const baseStages = baseVs.stages ?? baseVs.phases ?? baseVs.nodes ?? [];
-  const annStages = annotatedVs.stages ?? annotatedVs.phases ?? annotatedVs.nodes ?? [];
-  if (!Array.isArray(baseStages) || !Array.isArray(annStages)) return baseVs;
-  const stages = baseStages.map((baseStage, si) => {
-    const annStage = annStages[si];
-    if (!annStage) return baseStage;
-    const baseSteps = baseStage.steps ?? baseStage.tasks ?? baseStage.phases ?? baseStage.items ?? [];
-    const annSteps = annStage.steps ?? annStage.tasks ?? annStage.phases ?? annStage.items ?? [];
-    const steps = baseSteps.map((baseStep, ji) => {
-      const annStep = annSteps[ji];
-      const itStatus = annStep?.itStatus ?? annStep?.it_status;
-      if (!itStatus || typeof itStatus !== 'object') return baseStep;
-      const step = typeof baseStep === 'object' && baseStep !== null ? { ...baseStep } : { name: String(baseStep) };
-      step.itStatus = itStatus;
-      return step;
-    });
-    return { ...baseStage, steps };
-  });
-  return { ...baseVs, stages };
-}
+/** mergeItStatusIntoValueStream 已移至 js/task5ItStatus.js */
 
 function mergePainPointIntoValueStream(baseVs, annotatedVs) {
   const baseStages = baseVs.stages ?? baseVs.phases ?? baseVs.nodes ?? [];
