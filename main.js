@@ -160,6 +160,12 @@ let lastParsedLlmQuery = null;
 
 /** 当前问题详情页展示的跟进项 */
 let currentProblemDetailItem = null;
+// 提供只读 getter 给其他模块（如 task4ValueStream.js）使用，避免直接依赖局部变量。
+if (typeof window !== 'undefined') {
+  window.getCurrentProblemDetailItem = function getCurrentProblemDetailItem() {
+    return currentProblemDetailItem;
+  };
+}
 
 /** 修改意图追问状态：当用户修改意图不明确时，记录需合并的用户消息起始索引，待用户补充后合并再提炼 */
 let lastModificationClarification = null;
@@ -2039,6 +2045,45 @@ if (el.problemDetailChatMessages) {
         updateProblemDetailChatHeaderLabel();
         return;
       }
+      // task4：绘制价值流任务，确认后向时间线推送三条上下文块（客户基本信息 / BMC / 需求逻辑）
+      if (taskId === 'task4' && item) {
+        const hasBasicInfoCtx = problemDetailChatMessages.some(
+          (m) => m.type === 'taskContextBlock' && m.taskId === 'task4' && m.contextLabel === '客户基本信息 json'
+        );
+        const hasBmcCtx = problemDetailChatMessages.some(
+          (m) => m.type === 'taskContextBlock' && m.taskId === 'task4' && m.contextLabel === '商业模式画布 BMC json'
+        );
+        const hasReqCtx = problemDetailChatMessages.some(
+          (m) => m.type === 'taskContextBlock' && m.taskId === 'task4' && m.contextLabel === '需求逻辑 json'
+        );
+        if (!hasBasicInfoCtx) {
+          pushAndSaveProblemDetailChat({
+            type: 'taskContextBlock',
+            taskId: 'task4',
+            contextLabel: '客户基本信息 json',
+            contextJson: item.basicInfo || {},
+            timestamp: getTimeStr(),
+          });
+        }
+        if (!hasBmcCtx) {
+          pushAndSaveProblemDetailChat({
+            type: 'taskContextBlock',
+            taskId: 'task4',
+            contextLabel: '商业模式画布 BMC json',
+            contextJson: item.bmc || {},
+            timestamp: getTimeStr(),
+          });
+        }
+        if (!hasReqCtx) {
+          pushAndSaveProblemDetailChat({
+            type: 'taskContextBlock',
+            taskId: 'task4',
+            contextLabel: '需求逻辑 json',
+            contextJson: item.requirementLogic != null ? item.requirementLogic : {},
+            timestamp: getTimeStr(),
+          });
+        }
+      }
       const contextJson = buildTaskContextJson(taskId, item);
       if (taskId === 'task6') {
         const valueStream = item?.valueStream;
@@ -2055,7 +2100,7 @@ if (el.problemDetailChatMessages) {
         } else {
           runPainPointAnnotation(false);
         }
-      } else if (taskId !== 'task9' && taskId !== 'task11' && taskId !== 'task12') {
+      } else if (taskId !== 'task9' && taskId !== 'task11' && taskId !== 'task12' && taskId !== 'task4') {
         // 去重：若最近几条中已有同 taskId 的 taskContextBlock（如双击导致），则不再推送，避免时间线出现两条「上下文」
         const recent = problemDetailChatMessages.slice(-4);
         const hasRecentContext = recent.some((m) => m?.type === 'taskContextBlock' && m?.taskId === taskId);
@@ -3144,6 +3189,10 @@ if (el.problemDetailChatMessages) {
     }
     const startValueStreamBtn = e.target.closest('.btn-confirm-start-value-stream');
     if (startValueStreamBtn && !startValueStreamBtn.disabled) {
+      console.log('[task4] 点击「即将开始绘制价值流」确认按钮', {
+        hasRunFn: typeof runValueStreamGeneration === 'function',
+        currentProblemDetailItemCreatedAt: currentProblemDetailItem?.createdAt,
+      });
       startValueStreamBtn.disabled = true;
       startValueStreamBtn.textContent = '已确认';
       let idx = problemDetailChatMessages.findIndex((m) => m.type === 'valueStreamStartBlock');
@@ -3151,7 +3200,11 @@ if (el.problemDetailChatMessages) {
         problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], confirmed: true };
         saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
       }
-      runValueStreamGeneration();
+      if (typeof runValueStreamGeneration === 'function') {
+        runValueStreamGeneration();
+      } else {
+        console.warn('[task4] runValueStreamGeneration 未定义，无法自动触发价值流绘制');
+      }
       return;
     }
     const startReqLogicBtn = e.target.closest('.btn-confirm-start-requirement-logic');
@@ -3201,6 +3254,15 @@ if (el.problemDetailChatMessages) {
         if (idx >= 0) {
           problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: valueStream, confirmed: true };
           saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+        }
+        // 同步将最近一条 task4 的 LLM-查询 块标记为已确认
+        for (let j = problemDetailChatMessages.length - 1; j >= 0; j--) {
+          const q = problemDetailChatMessages[j];
+          if (q?.type === 'task4LlmQueryBlock') {
+            problemDetailChatMessages[j] = { ...q, confirmed: true };
+            saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
+            break;
+          }
         }
         valueStreamBtn.textContent = '已确认';
         valueStreamBtn.disabled = true;
@@ -5560,44 +5622,64 @@ ${tasksDesc}
 }
 
 const VALUE_STREAM_PROMPT = `# 角色设定
-你是一位资深的业务架构师与 B-End 需求分析师，擅长通过客户的工商背景、商业画布（BMC）及具体业务逻辑，梳理并绘制业务核心价值流图（Value Stream Map）。你的目标是识别业务环节中的转化效率、角色分工，并为后续的 IT Gap 分析提供可视化基础。
+你是一位资深的业务架构师与需求分析专家。你擅长通过价值流图（VSM）精准还原企业的业务逻辑骨架，识别流程中的转化效率与协作断点。
 
 # 输入数据说明
-我将为你提供三个维度的 JSON 数据：
-- enterprise_info: 当前需求单→需求理解页面中的客户基本信息 json 数据。
-- bmc_data: 当前需求单→需求理解页面中的商业模式画布 BMC json 数据。
-- requirement_logic: 当前需求单→需求理解页面中的需求逻辑 json 数据。
+enterprise_info: 客户行业背景与规模（用于界定业务语境与专业术语）。
+bmc_data: 商业模式画布（用于识别核心价值创造环节）。
+requirement_logic: 具体的业务流转逻辑与痛点。
+
+# 业务逻辑深度诊断 (后台校验项)
+在生成价值流时，请务必规避以下逻辑瓶颈，确保流程的科学性：
+
+规避"数据孤岛"：确保业务对象（如供应商信息）在全流程中流向清晰，无重复录入逻辑。
+规避"神仙/贫血模块"：确保各阶段任务负载平衡，不出现某个环节逻辑过于堆砌的情况。
+规避"循环依赖"：价值流必须是单向递进的（Step 1 -> Step 2），严禁出现逻辑环路。
+规避"状态孤儿"：每一个业务状态的改变（如：订单已评审）必须有明确的下游任务接收。
+显性化"影子流程"：将那些依赖线下沟通、口头确认的隐形成本环节作为独立任务标出。
+对齐"颗粒度"：确保相邻任务的作业精度（如：预测维度与排产维度）逻辑匹配。
 
 # 绘图指令与规范
-请根据输入数据，生成价值流图结构：
-1. **阶段划分（Stages）**：将全流程划分为 5 个左右的核心阶段（如：市场洞察、方案决策、执行交付等）。
-2. **原子任务（Tasks）**：每个阶段内包含 1-3 个具体的作业项。
-3. **节点属性**：每个作业项必须标注：
-   - 3.1）任务名称（如：整理数据）
-   - 3.2）执行角色（如：数据专员）
-   - 3.3）预估耗时/提前期（如：30分钟、1天）
-4. **逻辑连接**：使用箭头连接任务，体现前后序依赖关系。
+自适应阶段划分（Stages）：根据业务复杂度划分 3-6 个 核心阶段。
+全局需求：体现从"起点"到"终点"的端到端价值流。
+局部/部门需求：体现该业务生命周期的完整闭环。
+原子任务（Tasks）：每个阶段包含 1-3 个具体作业项，属性仅限：
+任务名称：动宾结构描述（如：审核信用额度）。
+执行角色：明确的岗位名称。
+预估耗时/频率：体现业务执行的物理成本。
+逻辑连接：使用箭头连接任务，体现前后序依赖关系。
 
 # 输出格式
-请先输出逻辑说明（简要说明价值流设计思路），然后提供一个可用于绘图的 JSON 代码块。JSON 结构需满足前端绘图组件要求，建议格式示例：
-\`\`\`json
+必须仅输出一个合法的 JSON 字符串，不得包含任何 Markdown 格式标识、前言或后缀。
+
+# JSON 结构规范
+
 {
-  "stages": [
-    {
-      "name": "阶段名称",
-      "tasks": [
-        {
-          "name": "任务名称",
-          "role": "执行角色",
-          "duration": "预估耗时"
-        }
-      ]
-    }
-  ],
-  "connections": [{"from": "任务A", "to": "任务B"}]
+  "logic_description": "简述如何基于行业背景和规避瓶颈原则设计这套价值流。",
+  "vsm_data": {
+    "stages": [
+      {
+        "name": "阶段名称",
+        "tasks": [
+          {
+            "name": "任务名称",
+            "role": "角色",
+            "duration": "耗时/频率"
+          }
+        ]
+      }
+    ],
+    "connections": [
+      {
+        "from": "任务A",
+        "to": "任务B"
+      }
+    ]
+  }
+}`;
+if (typeof window !== 'undefined') {
+  window.VALUE_STREAM_PROMPT = VALUE_STREAM_PROMPT;
 }
-\`\`\`
-只返回逻辑说明和 JSON 代码块，不要有其他内容。`;
 
 const IT_STATUS_ANNOTATION_PROMPT = `# 角色设定
 你是一位资深的业务架构师与 IT 现状分析专家，擅长结合需求逻辑判断各业务环节的 IT 支撑方式。
@@ -5835,30 +5917,6 @@ ${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || 
   ]);
   const painPointText = (content || '').trim();
   return { content: painPointText, usage, model, durationMs };
-}
-
-async function generateValueStreamFromInputs(enterpriseInfo, bmcData, requirementLogic) {
-  const userContent = `请基于以下三个维度的数据生成价值流图：
-
-## 1. enterprise_info（客户基本信息）
-\`\`\`json
-${typeof enterpriseInfo === 'string' ? enterpriseInfo : JSON.stringify(enterpriseInfo || {}, null, 2)}
-\`\`\`
-
-## 2. bmc_data（商业模式画布 BMC）
-\`\`\`json
-${typeof bmcData === 'string' ? bmcData : JSON.stringify(bmcData || {}, null, 2)}
-\`\`\`
-
-## 3. requirement_logic（需求逻辑）
-\`\`\`json
-${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic || {}, null, 2)}
-\`\`\``;
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: VALUE_STREAM_PROMPT },
-    { role: 'user', content: userContent },
-  ]);
-  return { content, usage, model, durationMs };
 }
 
 async function generateGlobalItGapAnalysis(enterpriseContext, businessCanvas, fullProcessVsm) {
@@ -8149,81 +8207,6 @@ function mergePainPointIntoValueStream(baseVs, annotatedVs) {
   return { ...baseVs, stages };
 }
 
-async function runValueStreamGeneration() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  if (!hasAiConfig()) {
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用价值流图生成功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用价值流图生成功能。', timestamp: getTimeStr() });
-    return;
-  }
-  const basicInfo = item.basicInfo || problemDetailConfirmedBasicInfo || {};
-  const bmc = item.bmc || {};
-  const requirementLogic = item.requirementLogic || {};
-  try {
-    const loadingBlock = document.createElement('div');
-    loadingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
-    loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在生成需求相关核心价值流图 VSM…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(loadingBlock);
-    container.scrollTop = container.scrollHeight;
-    const { content, usage, model, durationMs } = await generateValueStreamFromInputs(basicInfo, bmc, requirementLogic);
-    loadingBlock.remove();
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    let valueStreamJson = null;
-    if (jsonMatch) {
-      try {
-        valueStreamJson = JSON.parse(jsonMatch[1].trim());
-      } catch (_) {}
-    }
-    if (!valueStreamJson) {
-      const fallbackMatch = content.match(/\{[\s\S]*\}/);
-      if (fallbackMatch) {
-        try {
-          valueStreamJson = JSON.parse(fallbackMatch[0]);
-        } catch (_) {}
-      }
-    }
-    const valueStream = valueStreamJson || { raw: content };
-    pushOperationToHistory(item.createdAt, 'valueStreamDraw', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
-    pushAndSaveProblemDetailChat({ type: 'valueStreamCard', taskId: 'task4', data: valueStream, logicText: content.replace(/```[\s\S]*?```/g, '').trim(), timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
-    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
-    const cardBlock = document.createElement('div');
-    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-value-stream-card problem-detail-chat-msg-with-delete';
-    cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
-    cardBlock.dataset.taskId = 'task4';
-    const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
-    const dataAttr = String(JSON.stringify(valueStream)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    cardBlock.innerHTML = `
-      <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-      <div class="problem-detail-chat-value-stream-card-wrap">
-        <div class="problem-detail-chat-value-stream-card-header">价值流图设计 JSON</div>
-        <div class="problem-detail-chat-value-stream-card-body"><pre class="problem-detail-chat-json-pre">${jsonStr}</pre></div>
-        <div class="problem-detail-chat-value-stream-card-actions">
-          <button type="button" class="btn-confirm-value-stream btn-confirm-primary" data-json="${dataAttr}">确认</button>
-          <button type="button" class="btn-redo-value-stream">重做</button>
-          <button type="button" class="btn-refine-modify">修正</button>
-          <button type="button" class="btn-refine-discuss">讨论</button>
-        </div>
-      </div>
-      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
-    container.appendChild(cardBlock);
-    container.scrollTop = container.scrollHeight;
-    updateDigitalProblemValueStream(item.createdAt, valueStream);
-    currentProblemDetailItem = { ...item, valueStream, workflowAlignCompletedStages: [...(item.workflowAlignCompletedStages || []).filter((x) => x !== 0), 0].sort((a, b) => a - b) };
-    renderProblemDetailContent();
-  } catch (err) {
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">价值流图生成失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '价值流图生成失败：' + (err.message || String(err)), timestamp: getTimeStr() });
-  }
-}
-
 function renderProblemDetailChatFromStorage(container, messages) {
   const item = currentProblemDetailItem;
   const inferTaskId = typeof window.inferTaskIdFromMessage === 'function' ? window.inferTaskIdFromMessage : () => null;
@@ -9759,6 +9742,45 @@ function updateProblemDetailProgressStages(currentMajorStage, viewingMajorStage)
   });
 }
 
+/**
+ * 将价值流设计逻辑正文格式化为 HTML：带明确编号的行（1. 2. / 一、二、/ （1）/ ①② 等）按要点罗列成 <ul><li>。
+ * @param {string} rawText - 原始逻辑说明文字
+ * @param {function(string): string} escapeHtmlFn - HTML 转义函数
+ * @returns {string} HTML 片段
+ */
+function formatValueStreamLogicBody(rawText, escapeHtmlFn) {
+  if (!rawText || !rawText.trim()) return '';
+  const escape = typeof escapeHtmlFn === 'function' ? escapeHtmlFn : (s) => s;
+  // 匹配行首编号：1. 2. / 一、二、/ （1） (1) / ①②③ 等
+  const numberedPattern = /^\s*(\d+[\.．、]\s*|[一二三四五六七八九十百]+[、．.]\s*|[（(]\s*\d+\s*[)）]\s*|[\u2460-\u2469]\s*)/;
+  const lines = rawText.split(/\n/);
+  const parts = [];
+  let listItems = [];
+  function flushList() {
+    if (listItems.length) {
+      parts.push('<ul class="problem-detail-value-stream-logic-list">' + listItems.map((t) => '<li>' + t + '</li>').join('') + '</ul>');
+      listItems = [];
+    }
+  }
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      parts.push('<br>');
+      continue;
+    }
+    const escaped = escape(trimmed);
+    if (numberedPattern.test(line)) {
+      listItems.push(escaped);
+    } else {
+      flushList();
+      parts.push('<p class="problem-detail-value-stream-logic-para">' + escaped + '</p>');
+    }
+  }
+  flushList();
+  return parts.join('');
+}
+
 function renderProblemDetailContent() {
   const container = el.problemDetailContent;
   if (!container) return;
@@ -10152,12 +10174,34 @@ function renderProblemDetailContent() {
       const icon = done ? ' <span class="problem-detail-substep-check">✅</span>' : '';
       return `<span class="${cls}">${escapeHtml(name)}${icon}</span>`;
     }).join('<span class="problem-detail-substep-sep">→</span>');
-    const valueStream = item.valueStream;
+    // 工作区价值流区：价值流图来自大模型 vsm_data（存为 item.valueStream），价值流设计逻辑来自 logic_description（存为 item.valueStreamLogicText）
+    const valueStream = item.valueStream; // vsm_data：{ stages, connections }
     let workspaceContent = '';
     if (valueStream && !valueStream.raw) {
-      const graphHtml = renderValueStreamViewHTML(valueStream);
+      const graphHtml = renderValueStreamViewHTML(valueStream); // 根据 vsm_data 渲染绘图
       const jsonStr = escapeHtml(JSON.stringify(valueStream, null, 2));
-      workspaceContent = `
+      // 价值流设计逻辑：从 logic_description 取数（item.valueStreamLogicText）；若无则从聊天最后一条 valueStreamCard.logicText 兜底
+      let logicRaw = item.valueStreamLogicText || '';
+      if (!logicRaw && Array.isArray(problemDetailChatMessages)) {
+        for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
+          const m = problemDetailChatMessages[i];
+          if (m?.type === 'valueStreamCard' && m.logicText) {
+            logicRaw = m.logicText;
+            break;
+          }
+        }
+      }
+      const logicDisplayText = (logicRaw || '').replace(/^逻辑说明[：:]\s*/, '').trim();
+      // 有明确编号的内容（如 1. 2. / 一、二、/ （1）（2）/ ①②）按要点罗列成列表
+      const logicBodyHtml = logicDisplayText
+        ? formatValueStreamLogicBody(logicDisplayText, escapeHtml)
+        : '暂无';
+      const logicCardHtml = `
+      <div class="problem-detail-value-stream-logic-card">
+        <div class="problem-detail-value-stream-logic-card-header">价值流设计逻辑</div>
+        <div class="problem-detail-value-stream-logic-card-body">${logicBodyHtml}</div>
+      </div>`;
+      workspaceContent = logicCardHtml + `
       <div class="problem-detail-value-stream-card" data-task-id="task4">
         <div class="problem-detail-value-stream-card-header">
           <button type="button" class="problem-detail-value-stream-tab problem-detail-value-stream-tab-active" data-tab="view">价值流图</button>

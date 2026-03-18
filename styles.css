@@ -2583,6 +2583,53 @@ body {
   word-break: break-all;
 }
 
+.problem-detail-value-stream-logic-card {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 1rem;
+}
+
+.problem-detail-value-stream-logic-card-header {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(63, 185, 80, 0.08);
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text);
+}
+
+.problem-detail-value-stream-logic-card-body {
+  padding: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.problem-detail-value-stream-logic-card-body .problem-detail-value-stream-logic-list {
+  margin: 0.5rem 0 0.75rem 0;
+  padding-left: 1.25rem;
+  list-style: none;
+}
+
+.problem-detail-value-stream-logic-card-body .problem-detail-value-stream-logic-list li {
+  margin-bottom: 0.35rem;
+  position: relative;
+}
+
+.problem-detail-value-stream-logic-card-body .problem-detail-value-stream-logic-list li::before {
+  content: '•';
+  position: absolute;
+  left: -1rem;
+  color: var(--text-muted, #666);
+}
+
+.problem-detail-value-stream-logic-card-body .problem-detail-value-stream-logic-para {
+  margin: 0.5rem 0;
+}
+
 .problem-detail-chat-value-stream-card-wrap {
   padding: 0.75rem;
   background: var(--surface-elevated);

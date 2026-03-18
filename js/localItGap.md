@@ -1,6 +1,6 @@
 # 局部 ITGap 分析模块（localItGap.js）实现说明
 
-> 最近更新：2025-03-18。与 main.js、过程日志（压缩块、任务完成确认）及 getLocalItGapDeps 一致。
+> 最近更新：2026-03-19。与 main.js、过程日志（压缩块、任务完成确认）及 getLocalItGapDeps 一致。
 
 ## 1. 概述
 

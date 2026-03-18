@@ -438,6 +438,21 @@
   }
 
   /**
+   * 更新价值流设计逻辑说明（大模型返回的逻辑说明部分文字）。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {string} logicText - 逻辑说明正文。
+   * @returns {void}
+   */
+  function updateDigitalProblemValueStreamLogicText(createdAt, logicText) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    list[idx] = { ...item, valueStreamLogicText: logicText != null ? String(logicText) : '' };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
+  /**
    * 更新价值流 IT 现状并推进对应完成阶段。
    * @param {string} createdAt - 问题创建时间。
    * @param {Object} valueStream - 价值流数据。
@@ -798,6 +813,7 @@
   global.clearDigitalProblemRolePermissionStep = clearDigitalProblemRolePermissionStep;
   global.updateDigitalProblemValueStreamDataOnly = updateDigitalProblemValueStreamDataOnly;
   global.updateDigitalProblemValueStream = updateDigitalProblemValueStream;
+  global.updateDigitalProblemValueStreamLogicText = updateDigitalProblemValueStreamLogicText;
   global.updateDigitalProblemValueStreamItStatus = updateDigitalProblemValueStreamItStatus;
   global.updateDigitalProblemValueStreamPainPoint = updateDigitalProblemValueStreamPainPoint;
   global.updateDigitalProblemPainPointSessions = updateDigitalProblemPainPointSessions;
@@ -933,6 +949,7 @@
       const wfCompleted = [...(item.workflowAlignCompletedStages || []), 0].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
       upd(createdAt, { valueStream, workflowAlignCompletedStages: wfCompleted });
     };
+    global.updateDigitalProblemValueStreamLogicText = (createdAt, logicText) => upd(createdAt, { valueStreamLogicText: logicText != null ? String(logicText) : '' });
     global.updateDigitalProblemValueStreamItStatus = function (createdAt, valueStream) {
       const item = getItem(createdAt);
       if (!item) return;
