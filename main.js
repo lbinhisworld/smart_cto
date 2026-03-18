@@ -1582,6 +1582,18 @@ function applyRestartCurrentTask() {
 
   let updated = buildItemClearCurrentTaskOnly(dataItem, taskId);
   let filteredChats = filterChatMessagesRemoveTask(Array.isArray(chats) ? chats : [], taskId);
+  if (taskId === 'task2') {
+    filteredChats = (Array.isArray(filteredChats) ? filteredChats : []).filter((m) => {
+      if (!m) return false;
+      const t = m.type || '';
+      if (t === 'task2LlmQueryBlock') return false;
+      if (t === 'bmcCard' || t === 'bmcStartBlock') return false;
+      if ((t === 'taskCompleteBlock' || t === 'taskCompletionConfirmBlock') && m.taskId === 'task2') return false;
+      if (t === 'taskStartNotification' && m.taskId === 'task2') return false;
+      if (m.role === 'system' && typeof m.content === 'string' && m.content.includes('商业模式画布 BMC')) return false;
+      return true;
+    });
+  }
   if (taskId === 'task1') {
     const resetItem = typeof resetDigitalProblemToPreliminary === 'function' ? resetDigitalProblemToPreliminary(item.createdAt) : null;
     if (resetItem) updated = resetItem;
@@ -3244,6 +3256,13 @@ if (el.problemDetailChatMessages) {
         }
         if (idx >= 0) {
           problemDetailChatMessages[idx] = { ...problemDetailChatMessages[idx], data: bmc, confirmed: true };
+          for (let j = idx - 1; j >= 0; j--) {
+            const q = problemDetailChatMessages[j];
+            if (q?.type === 'task2LlmQueryBlock') {
+              problemDetailChatMessages[j] = { ...q, confirmed: true };
+              break;
+            }
+          }
           saveProblemDetailChat(item?.createdAt, problemDetailChatMessages);
         }
         renderProblemDetailContent();
@@ -3538,9 +3557,10 @@ if (el.problemDetailChatMessages) {
                 const value = (parsed[key] != null ? String(parsed[key]).trim() : '') || '—';
                 return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(value)}</span></div>`;
               }).join('');
-              cardBlock.innerHTML = `<div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+              const llmMetaHtml = buildLlmMetaHtml({ usage, model, durationMs });
+              cardBlock.innerHTML = `<div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
               el.problemDetailChatMessages?.appendChild(cardBlock);
-              pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
+              pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
               cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length - 1);
               cardBlock.dataset.taskId = 'task1';
               setupProblemDetailChatCardToggle(cardBlock);
@@ -3579,7 +3599,7 @@ if (el.problemDetailChatMessages) {
           problemDetailConfirmedBasicInfo = null;
           const messages = problemDetailChatMessages;
           if (idx >= 0 && idx < messages.length && messages[idx].type === 'basicInfoCard') {
-            messages[idx] = { ...messages[idx], data: parsed, confirmed: false };
+            messages[idx] = { ...messages[idx], data: parsed, confirmed: false, llmMeta: { usage, model, durationMs } };
             saveProblemDetailChat(item.createdAt, messages);
           }
           pushAndSaveProblemDetailChat({
@@ -5821,18 +5841,20 @@ function parseRequirementLogicFromMarkdown(text) {
 
 async function generateBmcFromBasicInfo(basicInfoJson) {
   const inputStr = typeof basicInfoJson === 'string' ? basicInfoJson : JSON.stringify(basicInfoJson, null, 2);
+  const fullPrompt = `【system】\n${BMC_GENERATION_PROMPT}\n\n【user】\n${inputStr}`;
   const { content, usage, model, durationMs } = await fetchDeepSeekChat([
     { role: 'system', content: BMC_GENERATION_PROMPT },
     { role: 'user', content: inputStr },
   ]);
   const jsonMatch = content.match(/\{[\s\S]*\}/);
+  const rawOutput = jsonMatch ? jsonMatch[0] : content;
   let parsed;
   if (jsonMatch) {
     try { parsed = JSON.parse(jsonMatch[0]); } catch (_) { parsed = parseBmcFromMarkdown(content); }
   } else {
     parsed = parseBmcFromMarkdown(content);
   }
-  return { parsed, usage, model, durationMs };
+  return { parsed, usage, model, durationMs, fullPrompt, rawOutput };
 }
 
 async function generateRequirementLogicFromInputs(preliminaryReqJson, basicInfoJson, bmcJson) {
@@ -6860,9 +6882,20 @@ async function runBmcGeneration() {
   container.appendChild(loading2);
   container.scrollTop = container.scrollHeight;
   try {
-    const { parsed: bmc, usage, model, durationMs } = await generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
+    const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
     loading2.remove();
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
+    pushAndSaveProblemDetailChat({
+      role: 'system',
+      type: 'task2LlmQueryBlock',
+      taskId: 'task2',
+      noteName: '商业画布提炼',
+      llmInputPrompt: fullPrompt,
+      llmOutputJson: bmc,
+      llmOutputRaw: rawOutput,
+      timestamp: getTimeStr(),
+      llmMeta: { usage, model, durationMs },
+    });
     pushAndSaveProblemDetailChat({ type: 'bmcCard', data: bmc, confirmed: false, timestamp: getTimeStr(), llmMeta: { usage, model, durationMs } });
     const msgIdx = problemDetailChatMessages.length - 1;
     const cardBlock = document.createElement('div');
@@ -6880,7 +6913,7 @@ async function runBmcGeneration() {
       <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
       <div class="problem-detail-bmc-card" role="button" tabindex="0">
         <div class="problem-detail-bmc-card-body">
-          ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
+          ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>商业模式画布 BMC 提炼</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
           <div class="problem-detail-bmc-grid">${bmcRows}</div>
           ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-bmc-content">${escapeHtml(painPoints)}</div></div>` : ''}
         </div>
@@ -8304,7 +8337,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-bmc-card" role="button" tabindex="0">
           <div class="problem-detail-bmc-card-body">
-            ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>行业背景洞察</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
+            ${industryInsight ? `<div class="problem-detail-bmc-section"><h4>商业模式画布 BMC 提炼</h4><div class="problem-detail-bmc-content">${escapeHtml(industryInsight)}</div></div>` : ''}
             <div class="problem-detail-bmc-grid">${bmcRows}</div>
             ${painPoints ? `<div class="problem-detail-bmc-section"><h4>业务痛点预判</h4><div class="problem-detail-bmc-content">${escapeHtml(painPoints)}</div></div>` : ''}
           </div>
@@ -8926,6 +8959,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
         return `<div class="problem-detail-basic-info-row"><span class="problem-detail-basic-info-label">${escapeHtml(label)}</span><span class="problem-detail-basic-info-value">${escapeHtml(value)}</span></div>`;
       }).join('');
       const confirmed = !!msg.confirmed;
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
       cardBlock.innerHTML = `
         <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
         <div class="problem-detail-basic-info-card" role="button" tabindex="0">
@@ -8937,7 +8971,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
             <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
           </div>
         </div>
-        <div class="problem-detail-chat-msg-time">${msg.timestamp || ''}</div>`;
+        <div class="problem-detail-chat-msg-time">${msg.timestamp || ''}</div>${llmMetaHtml}`;
       container.appendChild(cardBlock);
       setupProblemDetailChatCardToggle(cardBlock);
     } else if (msg.type === 'unsatisfiedBlock') {
@@ -9292,7 +9326,8 @@ async function handleProblemDetailChatSend() {
       cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
       cardBlock.dataset.taskId = 'task1';
       const jsonAttr = String(JSON.stringify(parsed)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      cardBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${jsonAttr}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      const llmMetaHtml = buildLlmMetaHtml({ usage, model, durationMs });
+      cardBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-basic-info-card" role="button" tabindex="0"><div class="problem-detail-basic-info-card-body">${rows}</div><div class="problem-detail-basic-info-card-actions"><button type="button" class="btn-confirm-basic-info btn-confirm-primary" data-json="${jsonAttr}">确认</button><button type="button" class="btn-redo-basic-info">重做</button><button type="button" class="btn-refine-modify">修正</button><button type="button" class="btn-refine-discuss">讨论</button></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
       container.appendChild(cardBlock);
       pushAndSaveProblemDetailChat({
         ...window.buildTask1LlmQueryMessage({
@@ -9306,7 +9341,7 @@ async function handleProblemDetailChatSend() {
           durationMs,
         }),
       });
-      pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false });
+      pushAndSaveProblemDetailChat({ role: 'system', type: 'basicInfoCard', data: parsed, timestamp: getTimeStr(), confirmed: false, llmMeta: { usage, model, durationMs } });
       setupProblemDetailChatCardToggle(cardBlock);
       renderProblemDetailContent();
       updateProblemDetailChatHeaderLabel();
