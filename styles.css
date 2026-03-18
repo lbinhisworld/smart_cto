@@ -1565,7 +1565,8 @@ body {
 .problem-detail-chat-it-strategy-plan-start-actions,
 .problem-detail-chat-local-itgap-card-actions,
 .problem-detail-chat-local-itgap-sessions-actions,
-.problem-detail-chat-role-permission-sessions-actions {
+.problem-detail-chat-role-permission-sessions-actions,
+.problem-detail-chat-pain-point-sessions-actions {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.5rem;
@@ -1710,6 +1711,88 @@ body {
 
 .problem-detail-chat-local-itgap-sessions-card-body .problem-detail-chat-local-itgap-sessions-list {
   margin-bottom: 0.75rem;
+}
+
+/* 痛点标注 Session 计划确认卡片（与局部 ITGap 卡片风格一致） */
+.problem-detail-chat-pain-point-sessions-card-wrap {
+  padding: 0.75rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.problem-detail-chat-pain-point-sessions-card-header {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+}
+
+.problem-detail-chat-pain-point-sessions-card-body {
+  padding: 0.25rem 0;
+}
+
+.problem-detail-chat-pain-point-sessions-card-body .problem-detail-chat-pain-point-sessions-header {
+  margin-bottom: 0.5rem;
+}
+
+.problem-detail-chat-pain-point-sessions-card-body .problem-detail-chat-pain-point-sessions-list {
+  margin-bottom: 0.75rem;
+}
+
+.problem-detail-chat-pain-point-session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8125rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.1);
+  margin-bottom: 0.25rem;
+}
+
+.problem-detail-chat-pain-point-session-item .problem-detail-chat-pain-point-session-name {
+  color: var(--text-primary);
+}
+
+.problem-detail-chat-pain-point-session-item .problem-detail-chat-pain-point-session-status.session-pending {
+  color: var(--text-muted);
+}
+
+.problem-detail-chat-pain-point-session-item .problem-detail-chat-pain-point-session-status.session-done {
+  color: var(--success, #22c55e);
+}
+
+/* 单步痛点标注结果卡片 */
+.problem-detail-chat-pain-point-step-card-wrap {
+  padding: 0.75rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.problem-detail-chat-pain-point-step-card-header {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+}
+
+.problem-detail-chat-pain-point-step-card-body {
+  padding: 0.25rem 0;
+}
+
+.problem-detail-chat-pain-point-step-card-body .problem-detail-chat-pain-point-step-content {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.problem-detail-chat-pain-point-step-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 .problem-detail-chat-local-itgap-io-block .problem-detail-chat-local-itgap-io-title {

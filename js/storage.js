@@ -477,6 +477,66 @@
   }
 
   /**
+   * 更新痛点标注 session 列表（环节列表，用于逐环节标注）。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {Array<{stepName: string, stepIndex: number, stageName?: string, painPoint?: string|null}>} sessions - session 列表。
+   * @returns {void}
+   */
+  function updateDigitalProblemPainPointSessions(createdAt, sessions) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    list[idx] = { ...item, painPointSessions: sessions };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
+  /**
+   * 更新某环节的痛点标注结果，并写回价值流。
+   * @param {string} createdAt - 问题创建时间。
+   * @param {number} stepIndex - 环节索引（全局顺序）。
+   * @param {string} painPoint - 该环节的痛点文案。
+   * @returns {void}
+   */
+  function updateDigitalProblemPainPointStep(createdAt, stepIndex, painPoint) {
+    const list = getDigitalProblems();
+    const idx = list.findIndex((it) => it.createdAt === createdAt);
+    if (idx < 0) return;
+    const item = list[idx];
+    const sessions = item.painPointSessions || [];
+    const newSessions = sessions.map((s) =>
+      s.stepIndex === stepIndex ? { ...s, painPoint: painPoint || null } : s
+    );
+    const valueStream = item.valueStream;
+    if (!valueStream || valueStream.raw || !Array.isArray(valueStream.stages)) {
+      list[idx] = { ...item, painPointSessions: newSessions };
+      localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+      return;
+    }
+    let globalStep = 0;
+    const stages = valueStream.stages.map((s) => {
+      const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+      const steps = rawSteps.map((st) => {
+        const step = typeof st === 'object' && st != null ? { ...st } : { name: String(st) };
+        if (globalStep === stepIndex) {
+          if (painPoint != null) {
+            step.painPoint = step.pain_point = painPoint;
+          } else {
+            delete step.painPoint;
+            delete step.pain_point;
+          }
+        }
+        globalStep += 1;
+        return step;
+      });
+      return { ...s, steps };
+    });
+    const mergedVs = { ...valueStream, stages };
+    list[idx] = { ...item, painPointSessions: newSessions, valueStream: mergedVs };
+    localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));
+  }
+
+  /**
    * 回滚价值流痛点标注及阶段完成标记。
    * @param {string} createdAt - 问题创建时间。
    * @returns {void}
@@ -740,6 +800,8 @@
   global.updateDigitalProblemValueStream = updateDigitalProblemValueStream;
   global.updateDigitalProblemValueStreamItStatus = updateDigitalProblemValueStreamItStatus;
   global.updateDigitalProblemValueStreamPainPoint = updateDigitalProblemValueStreamPainPoint;
+  global.updateDigitalProblemPainPointSessions = updateDigitalProblemPainPointSessions;
+  global.updateDigitalProblemPainPointStep = updateDigitalProblemPainPointStep;
   global.rollbackValueStreamPainPoint = rollbackValueStreamPainPoint;
   global.deleteDigitalProblemRequirementLogic = deleteDigitalProblemRequirementLogic;
   global.getProblemDetailChats = getProblemDetailChats;
