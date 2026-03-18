@@ -6,4 +6,6 @@ window.APP_CONFIG = {
   DEEPSEEK_API_KEY: '',
   DEEPSEEK_API_URL: 'https://api.deepseek.com/v1/chat/completions',
   DEEPSEEK_MODEL: 'deepseek-chat',
+  USE_BACKEND_STORAGE: false,
+  BACKEND_API_URL: 'http://localhost:3000/api',
 };

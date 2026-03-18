@@ -581,4 +581,179 @@
   if (typeof global.TOOL_KNOWLEDGE_ITEMS !== 'undefined') {
     loadToolKnowledgeItemsFromStorage();
   }
+
+  /** 当 USE_BACKEND_STORAGE 为 true 时，将数字化问题与聊天记录委托给 HttpAdapter */
+  const useBackend = (global.APP_CONFIG && global.APP_CONFIG.USE_BACKEND_STORAGE) && global.STORAGE_HTTP_ADAPTER;
+  if (useBackend) {
+    const adapter = global.STORAGE_HTTP_ADAPTER;
+    global.getDigitalProblems = () => adapter.getDigitalProblems();
+    global.saveDigitalProblem = (item) => adapter.saveDigitalProblem(item);
+    global.removeDigitalProblem = (index) => adapter.removeDigitalProblem(index);
+    global.getProblemDetailChats = () => adapter.getProblemDetailChats();
+    global.saveProblemDetailChat = (createdAt, messages) => adapter.saveProblemDetailChat(createdAt, messages);
+
+    const upd = (createdAt, updates) => adapter.updateDigitalProblem(createdAt, updates);
+    const getItem = (createdAt) => adapter.getDigitalProblems().find((it) => (it.createdAt || it.id) === createdAt);
+
+    global.updateDigitalProblemBasicInfo = function (createdAt, basicInfo, markTaskComplete) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const updates = { basicInfo };
+      if (markTaskComplete !== false) {
+        const completed = [...(item.completedStages || []), 0].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
+        updates.completedStages = completed;
+      }
+      upd(createdAt, updates);
+    };
+    global.updateDigitalProblemBmc = function (createdAt, bmc, markTaskComplete) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const updates = { bmc };
+      if (markTaskComplete !== false) {
+        const completed = [...(item.completedStages || []), 1].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
+        updates.completedStages = completed;
+      }
+      upd(createdAt, updates);
+    };
+    global.updateDigitalProblemRequirementLogic = function (createdAt, requirementLogic, markTaskComplete) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const updates = { requirementLogic };
+      if (markTaskComplete !== false) {
+        const completed = [...(item.completedStages || []), 2].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
+        updates.completedStages = completed;
+      }
+      upd(createdAt, updates);
+    };
+    global.updateDigitalProblemMajorStage = (createdAt, majorStage) => upd(createdAt, { currentMajorStage: majorStage });
+    global.updateDigitalProblemItGapCompletedStages = (createdAt, stages) => upd(createdAt, { itGapCompletedStages: stages });
+    global.updateDigitalProblemCompletedTaskId = function (createdAt, taskId) {
+      const item = getItem(createdAt);
+      if (!item || (item.completedTaskIds || []).includes(taskId)) return;
+      const completed = [...(item.completedTaskIds || []), taskId].sort();
+      upd(createdAt, { completedTaskIds: completed });
+    };
+    global.updateDigitalProblemGlobalItGapAnalysis = function (createdAt, analysisJson) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const itGapCompleted = [...(item.itGapCompletedStages || []), 1].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
+      upd(createdAt, { globalItGapAnalysisJson: analysisJson, itGapCompletedStages: itGapCompleted });
+    };
+    global.clearDigitalProblemGlobalItGapAnalysis = function (createdAt) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const itGapCompleted = (item.itGapCompletedStages || []).filter((x) => x !== 1 && x !== 2).sort((a, b) => a - b);
+      upd(createdAt, {
+        globalItGapAnalysisJson: undefined,
+        localItGapAnalyses: undefined,
+        localItGapSessions: undefined,
+        itGapCompletedStages: itGapCompleted,
+      });
+    };
+    global.updateDigitalProblemLocalItGapSessions = (createdAt, sessions) => upd(createdAt, { localItGapSessions: sessions });
+    global.updateDigitalProblemLocalItGapAnalysis = function (createdAt, stepName, stepIndex, analysisJson, analysisMarkdown) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const analyses = (item.localItGapAnalyses || []).filter((a) => a.stepIndex !== stepIndex);
+      analyses.push({ stepName, stepIndex, analysisJson });
+      analyses.sort((a, b) => a.stepIndex - b.stepIndex);
+      const itGapCompleted = [...(item.itGapCompletedStages || []), 2].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
+      const sessions = item.localItGapSessions || [];
+      const newSessions = sessions.length > 0
+        ? sessions.map((s) => (s.stepIndex === stepIndex ? { ...s, analysisJson, analysisMarkdown: analysisMarkdown || s.analysisMarkdown } : s))
+        : [];
+      upd(createdAt, { localItGapAnalyses: analyses, localItGapSessions: newSessions.length ? newSessions : undefined, itGapCompletedStages: itGapCompleted });
+    };
+    global.clearDigitalProblemLocalItGapStep = function (createdAt, stepIndex) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const sessions = (item.localItGapSessions || []).map((s) =>
+        s.stepIndex === stepIndex ? { ...s, analysisJson: undefined, analysisMarkdown: undefined } : s
+      );
+      const analyses = (item.localItGapAnalyses || []).filter((a) => a.stepIndex !== stepIndex);
+      upd(createdAt, { localItGapSessions: sessions, localItGapAnalyses: analyses });
+    };
+    global.updateDigitalProblemRolePermissionSessions = (createdAt, sessions) => upd(createdAt, { rolePermissionSessions: sessions });
+    global.updateDigitalProblemRolePermissionStep = function (createdAt, stepIndex, rolePermissionJson) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const sessions = (item.rolePermissionSessions || []).map((s) =>
+        s.stepIndex === stepIndex ? { ...s, rolePermissionJson } : s
+      );
+      upd(createdAt, { rolePermissionSessions: sessions });
+    };
+    global.clearDigitalProblemRolePermissionStep = function (createdAt, stepIndex) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const sessions = (item.rolePermissionSessions || []).map((s) =>
+        s.stepIndex === stepIndex ? { ...s, rolePermissionJson: undefined } : s
+      );
+      upd(createdAt, { rolePermissionSessions: sessions });
+    };
+    global.updateDigitalProblemValueStreamDataOnly = (createdAt, valueStream) => upd(createdAt, { valueStream });
+    global.updateDigitalProblemValueStream = function (createdAt, valueStream) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const wfCompleted = [...(item.workflowAlignCompletedStages || []), 0].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
+      upd(createdAt, { valueStream, workflowAlignCompletedStages: wfCompleted });
+    };
+    global.updateDigitalProblemValueStreamItStatus = function (createdAt, valueStream) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const wfCompleted = [...(item.workflowAlignCompletedStages || []), 0, 1].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
+      upd(createdAt, { valueStream, workflowAlignCompletedStages: wfCompleted });
+    };
+    global.updateDigitalProblemValueStreamPainPoint = function (createdAt, valueStream) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const wfCompleted = [...(item.workflowAlignCompletedStages || []), 0, 1, 2].filter((a, i, arr) => arr.indexOf(a) === i).sort((a, b) => a - b);
+      upd(createdAt, { valueStream, workflowAlignCompletedStages: wfCompleted });
+    };
+    global.rollbackValueStreamPainPoint = function (createdAt) {
+      const item = getItem(createdAt);
+      if (!item || !item.valueStream || item.valueStream.raw) return;
+      const vs = item.valueStream;
+      const rawStages = vs.stages ?? vs.phases ?? vs.nodes ?? [];
+      if (!Array.isArray(rawStages)) return;
+      const stages = rawStages.map((s) => {
+        if (!s || typeof s !== 'object') return s;
+        const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+        const steps = rawSteps.map((st) => (typeof st === 'object' && st != null ? (({ painPoint, pain_point, ...r }) => r)(st) : st));
+        return { ...s, steps };
+      });
+      const wfCompleted = (item.workflowAlignCompletedStages || []).filter((x) => x !== 2).sort((a, b) => a - b);
+      upd(createdAt, { valueStream: { ...vs, stages }, workflowAlignCompletedStages: wfCompleted });
+    };
+    global.deleteDigitalProblemRequirementLogic = function (createdAt) {
+      const item = getItem(createdAt);
+      if (!item) return;
+      const completedStages = (item.completedStages || []).filter((x) => x !== 2).sort((a, b) => a - b);
+      upd(createdAt, { requirementLogic: undefined, completedStages });
+    };
+    global.restoreItemFromSnapshot = (createdAt, snapshot) => upd(createdAt, { ...snapshot, createdAt });
+    global.rollbackDigitalProblemToPreviousStage = function (createdAt) {
+      const item = getItem(createdAt);
+      if (!item || (item.currentMajorStage ?? 0) <= 0) return null;
+      const targetStage = (item.currentMajorStage ?? 0) - 1;
+      let nextItem = { ...item, currentMajorStage: targetStage };
+      if (targetStage === 0) {
+        nextItem = { ...nextItem, completedStages: [], basicInfo: undefined, bmc: undefined, requirementLogic: undefined, workflowAlignCompletedStages: [], itGapCompletedStages: [], valueStream: undefined, globalItGapAnalysisJson: undefined, localItGapSessions: undefined, localItGapAnalyses: undefined, completedTaskIds: [] };
+      } else if (targetStage === 1) {
+        nextItem = { ...nextItem, workflowAlignCompletedStages: [], valueStream: undefined, itGapCompletedStages: [], globalItGapAnalysisJson: undefined, localItGapSessions: undefined, localItGapAnalyses: undefined, completedTaskIds: [] };
+      } else if (targetStage === 2) {
+        nextItem = { ...nextItem, itGapCompletedStages: [], globalItGapAnalysisJson: undefined, localItGapSessions: undefined, localItGapAnalyses: undefined, completedTaskIds: [] };
+      }
+      upd(createdAt, nextItem);
+      adapter.saveProblemDetailChat(createdAt, adapter.getProblemDetailChats()[createdAt] || []);
+      return nextItem;
+    };
+    global.resetDigitalProblemToPreliminary = function (createdAt) {
+      const item = getItem(createdAt);
+      if (!item) return false;
+      const resetItem = { createdAt, customerName: item.customerName ?? item.customer_name ?? '', customerNeedsOrChallenges: item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '', customerItStatus: item.customerItStatus ?? item.customer_it_status ?? '', projectTimeRequirement: item.projectTimeRequirement ?? item.project_time_requirement ?? '' };
+      upd(createdAt, resetItem);
+      adapter.saveProblemDetailChat(createdAt, []);
+      return resetItem;
+    };
+  }
 })(typeof window !== 'undefined' ? window : this);
