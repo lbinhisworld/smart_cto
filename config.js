@@ -7,7 +7,7 @@ window.APP_CONFIG = window.APP_CONFIG || {
   DEEPSEEK_API_URL: 'https://api.deepseek.com/v1/chat/completions',
   DEEPSEEK_MODEL: 'deepseek-chat',
   /** 是否使用 Backend API 存储（替代 localStorage） */
-  USE_BACKEND_STORAGE: false,
+  USE_BACKEND_STORAGE: true,
   /** Backend API 基础地址，如 http://localhost:3000/api */
   BACKEND_API_URL: 'http://localhost:3000/api',
 };
