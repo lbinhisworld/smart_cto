@@ -2,6 +2,11 @@
  * 价值流解析与渲染（依赖 js/config.js、js/utils.js；需在 main 中提供 el、currentValueStreamList 或由 main 在调用前设置）
  */
 (function (global) {
+  /**
+   * 从混合阶段文案中提取纯阶段名。
+   * @param {*} raw - 原始阶段字段。
+   * @returns {string} 标准化阶段名。
+   */
   function extractPureStageName(raw) {
     const s = global.formatValue(raw);
     if (!s) return s;
@@ -16,6 +21,11 @@
     return s;
   }
 
+  /**
+   * 解析环节名称与描述。
+   * @param {Object} stepObj - 环节对象。
+   * @returns {{name: string, desc: string}} 规范化后的名称与描述。
+   */
   function extractStepNameAndDesc(stepObj) {
     const nameRaw = stepObj.name ?? stepObj.title ?? stepObj.step_name ?? stepObj.phase_name ?? stepObj.label ?? stepObj.node_name ?? '';
     const descRaw = stepObj.description ?? stepObj.desc ?? stepObj.content;
@@ -27,6 +37,11 @@
     return { name, desc: '' };
   }
 
+  /**
+   * 将价值流 JSON 解析为统一图结构。
+   * @param {Object} data - 价值流原始数据。
+   * @returns {{stages: Array<{name: string, steps: Array}>}} 标准化结构。
+   */
   function parseValueStreamGraph(data) {
     if (!data || typeof data !== 'object') return { stages: [] };
     let rawStages = data.stages ?? data.phases ?? data.nodes ?? data.value_stream?.stages ?? data.data?.stages ?? [];
@@ -65,6 +80,11 @@
     };
   }
 
+  /**
+   * 渲染单条价值流的可视化 HTML。
+   * @param {Object} item - 单条价值流数据。
+   * @returns {string} 渲染 HTML。
+   */
   function renderValueStreamViewHTML(item) {
     const { stages } = parseValueStreamGraph(item);
     if (stages.length === 0) return '<p class="vs-view-placeholder">暂无阶段数据，无法渲染图形</p>';
@@ -83,6 +103,11 @@
     return `<div class="vs-graph">${stagesHtml}</div>`;
   }
 
+  /**
+   * 渲染端到端流程横向视图 HTML。
+   * @param {Object} valueStream - 价值流数据。
+   * @returns {string} 渲染 HTML。
+   */
   function renderEndToEndFlowHTML(valueStream) {
     const { stages } = parseValueStreamGraph(valueStream);
     const allSteps = stages.flatMap((s) => s.steps);
@@ -96,6 +121,11 @@
     return `<div class="vs-e2e-flow">${stepCardsHtml}</div>`;
   }
 
+  /**
+   * 从不同返回结构中提取价值流数组。
+   * @param {*} data - 原始接口返回数据。
+   * @returns {Array} 价值流列表。
+   */
   function getValueStreamList(data) {
     if (data == null) return [];
     if (Array.isArray(data)) return data;
@@ -108,6 +138,11 @@
 
   let currentValueStreamList = [];
 
+  /**
+   * 渲染价值流列表并绑定展开/切换事件。
+   * @param {Array} list - 价值流数组。
+   * @returns {void}
+   */
   function renderValueStreamList(list) {
     const el = global.el;
     if (!el || !el.valueStreamContent) return;

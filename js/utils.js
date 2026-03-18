@@ -2,12 +2,22 @@
  * 工具函数：格式化、转义、Markdown 渲染
  */
 (function (global) {
+  /**
+   * 将任意值格式化为可展示文本。
+   * @param {*} value - 原始值。
+   * @returns {string} 格式化后的字符串。
+   */
   function formatValue(value) {
     if (value == null || value === '') return '';
     if (typeof value === 'boolean') return value ? '是' : '否';
     return String(value);
   }
 
+  /**
+   * 对字符串进行 HTML 转义，防止注入。
+   * @param {string} str - 待转义文本。
+   * @returns {string} 安全的 HTML 字符串。
+   */
   function escapeHtml(str) {
     if (str == null || str === '') return '';
     const div = document.createElement('div');
@@ -15,6 +25,11 @@
     return div.innerHTML;
   }
 
+  /**
+   * 渲染 Markdown 为 HTML，并在可用时做 XSS 清洗。
+   * @param {string} str - Markdown 内容。
+   * @returns {string} 渲染后的 HTML。
+   */
   function renderMarkdown(str) {
     if (str == null || str === '') return '';
     const text = String(str);
@@ -29,6 +44,10 @@
     return html;
   }
 
+  /**
+   * 获取当前时间字符串（yyyy-MM-dd HH:mm:ss）。
+   * @returns {string} 当前时间。
+   */
   function getTimeStr() {
     const now = new Date();
     const y = now.getFullYear();
@@ -40,6 +59,11 @@
     return `${y}-${m}-${d} ${h}:${min}:${s}`;
   }
 
+  /**
+   * 将时间戳格式化为历史记录时间。
+   * @param {string|number|Date} ts - 时间输入。
+   * @returns {string} 格式化后的时间文本。
+   */
   function formatHistoryTime(ts) {
     if (!ts) return '—';
     try {
@@ -57,6 +81,11 @@
     }
   }
 
+  /**
+   * 格式化聊天时间；空值回退为当前时间。
+   * @param {string|number|Date} ts - 聊天时间。
+   * @returns {string} 格式化时间。
+   */
   function formatChatTime(ts) {
     if (!ts) return getTimeStr();
     const s = String(ts).trim();
@@ -72,6 +101,11 @@
     return `${y}-${m}-${day} ${h}:${min}:${sec}`;
   }
 
+  /**
+   * 将主题名转换为 URL 友好的 slug。
+   * @param {string} name - 主题名。
+   * @returns {string} slug 字符串。
+   */
   function slugifyTopicName(name) {
     const base = String(name || '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '').slice(0, 50);
     return base || `topic_${Date.now()}`;

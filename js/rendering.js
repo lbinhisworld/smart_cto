@@ -9,6 +9,11 @@
   const BMC_FIELDS = function () { return global.BMC_FIELDS || []; };
   const parseValueStreamGraph = function (data) { return global.parseValueStreamGraph ? global.parseValueStreamGraph(data) : { stages: [] }; };
 
+  /**
+   * 构建供 LLM 使用的页面结构文本。
+   * @param {Object} record - 详情数据记录。
+   * @returns {string} 结构化文本。
+   */
   function buildPageStructureForLLM(record) {
     if (!record) return '';
     const basicInfo = record.basicInfo || {};
@@ -52,6 +57,11 @@
     return lines.join('\n');
   }
 
+  /**
+   * 渲染基础信息列表。
+   * @param {Object} data - 基础信息数据。
+   * @returns {void}
+   */
   function renderBasicInfo(data) {
     if (!data || !el().basicInfoList) return;
     el().basicInfoList.innerHTML = BASIC_INFO_FIELDS().map(({ key, label }) => {
@@ -64,6 +74,11 @@
     }).join('');
   }
 
+  /**
+   * 渲染 BMC 九宫格和综合评述。
+   * @param {Object} data - BMC 数据。
+   * @returns {void}
+   */
   function renderBMC(data) {
     if (!data) return;
     if (!el().bmcGrid || !el().bmcReview) return;
@@ -89,6 +104,11 @@
     { key: 'updated_date', label: '更新时间' },
   ];
 
+  /**
+   * 渲染档案元数据区域。
+   * @param {Object} data - 元数据。
+   * @returns {void}
+   */
   function renderMetadata(data) {
     if (!data) return;
     if (!el().metadataList) return;
@@ -98,6 +118,11 @@
     }).join('');
   }
 
+  /**
+   * 构建详情页完整 HTML。
+   * @param {Object} record - 问题详情记录。
+   * @returns {string} 详情 HTML 字符串。
+   */
   function buildDetailHTML(record) {
     const basicInfo = record.basicInfo || {};
     const bmc = record.bmc || {};

@@ -6,6 +6,11 @@
   const escapeHtml = function (s) { return global.escapeHtml ? global.escapeHtml(s) : String(s); };
   const getSavedAnalyses = function () { return global.getSavedAnalyses ? global.getSavedAnalyses() : []; };
 
+  /**
+   * 切换应用主视图显隐状态。
+   * @param {'home'|'tools'|'detail'|'problemDetail'|'taskTracking'|string} view - 目标视图。
+   * @returns {void}
+   */
   function switchView(view) {
     const e = el();
     if (!e) return;
@@ -18,6 +23,10 @@
     if (e.topNav) e.topNav.hidden = (view === 'problemDetail' || view === 'taskTracking');
   }
 
+  /**
+   * 渲染已保存分析列表并绑定点击/键盘事件。
+   * @returns {void}
+   */
   function renderSavedList() {
     const e = el();
     if (!e?.savedListContent) return;
@@ -47,6 +56,11 @@
     });
   }
 
+  /**
+   * 打开或关闭详情页聊天面板。
+   * @param {boolean} [open] - 指定开关；不传则切换。
+   * @returns {void}
+   */
   function toggleChatPanel(open) {
     const e = el();
     const panel = e?.chatPanel;
@@ -57,6 +71,11 @@
     if (body) body.classList.toggle('chat-panel-open', isOpen);
   }
 
+  /**
+   * 打开或关闭历史面板，并在打开时触发历史渲染。
+   * @param {boolean} [open] - 指定开关；不传则切换。
+   * @returns {void}
+   */
   function toggleHistoryPanel(open) {
     const e = el();
     const panel = e?.historyPanel;
@@ -70,6 +89,11 @@
     }
   }
 
+  /**
+   * 打开或关闭问题详情沟通历史面板。
+   * @param {boolean} [open] - 指定开关；不传则切换。
+   * @returns {void}
+   */
   function toggleProblemDetailHistory(open) {
     const e = el();
     const panel = e?.problemDetailHistoryPanel;

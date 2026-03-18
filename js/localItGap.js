@@ -199,6 +199,11 @@ ${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProce
     return result;
   }
 
+  /**
+   * 构建局部 ITGap 结构化展示 HTML。
+   * @param {Object} analysis - 分析 JSON。
+   * @returns {string} HTML 片段。
+   */
   function buildLocalItGapStructuredHtml(analysis) {
     if (!analysis || typeof analysis !== 'object') return '<p>（暂无内容）</p>';
     const parts = [];
