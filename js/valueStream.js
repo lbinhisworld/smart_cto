@@ -88,6 +88,7 @@
   function renderValueStreamViewHTML(item) {
     const { stages } = parseValueStreamGraph(item);
     if (stages.length === 0) return '<p class="vs-view-placeholder">暂无阶段数据，无法渲染图形</p>';
+    let globalStepIndex = 0;
     const stagesHtml = stages.map((stage, si) => {
       const stepsHtml = stage.steps.length === 0
         ? '<div class="vs-step-node vs-step-empty">—</div>'
@@ -96,7 +97,10 @@
               ? `<div class="vs-step-meta">${step.role ? `<span class="vs-step-meta-chip vs-step-meta-role">${global.escapeHtml(step.role)}</span>` : ''}${step.duration ? `<span class="vs-step-meta-chip vs-step-meta-duration">${global.escapeHtml(step.duration)}</span>` : ''}</div>` : '';
             const itStatusHtml = step.itStatusLabel ? `<div class="vs-step-meta"><span class="vs-step-meta-chip vs-step-meta-it-status">IT现状：${global.escapeHtml(step.itStatusLabel)}</span></div>` : '';
             const painPointHtml = step.painPoint ? `<div class="vs-step-meta"><div class="vs-step-pain-point-card">${global.escapeHtml(step.painPoint)}</div></div>` : '';
-            return `<div class="vs-step-node" data-vs-step-name="${global.escapeHtml(step.name)}"><span class="vs-step-name">${global.escapeHtml(step.name)}</span>${step.desc ? `<span class="vs-step-desc">${global.escapeHtml(step.desc)}</span>` : ''}${roleDurationHtml}${itStatusHtml}${painPointHtml}</div>${ji < stage.steps.length - 1 ? '<div class="vs-arrow-inner" aria-hidden="true">↓</div>' : ''}`;
+            const hasPainPointClass = step.painPoint ? ' vs-step-node-has-pain-point' : '';
+            const stepNodeHtml = `<div class="vs-step-node${hasPainPointClass}" data-vs-step-name="${global.escapeHtml(step.name)}" data-vs-step-index="${globalStepIndex}"><span class="vs-step-name">${global.escapeHtml(step.name)}</span>${step.desc ? `<span class="vs-step-desc">${global.escapeHtml(step.desc)}</span>` : ''}${roleDurationHtml}${itStatusHtml}${painPointHtml}</div>`;
+            globalStepIndex += 1;
+            return stepNodeHtml + (ji < stage.steps.length - 1 ? '<div class="vs-arrow-inner" aria-hidden="true">↓</div>' : '');
           }).join('');
       return `<div class="vs-graph-stage" data-stage="${si}" data-vs-stage-name="${global.escapeHtml(stage.name)}"><div class="vs-stage-node" data-vs-stage-name="${global.escapeHtml(stage.name)}"><div class="vs-stage-name">${global.escapeHtml(stage.name)}</div><div class="vs-steps-chain">${stepsHtml}</div></div></div>${si < stages.length - 1 ? '<div class="vs-arrow-outer" aria-hidden="true">→</div>' : ''}`;
     }).join('');

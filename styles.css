@@ -1050,6 +1050,7 @@ body {
 .btn-redo-it-status,
 .btn-redo-e2e-json,
 .btn-redo-local-itgap,
+.btn-redo-pain-point-step,
 .btn-refine-modify,
 .btn-refine-discuss {
   padding: 0.35rem 0.75rem;
@@ -1073,6 +1074,7 @@ body {
 .btn-redo-it-status:hover:not(:disabled),
 .btn-redo-e2e-json:hover:not(:disabled),
 .btn-redo-local-itgap:hover:not(:disabled),
+.btn-redo-pain-point-step:hover:not(:disabled),
 .btn-refine-modify:hover:not(:disabled),
 .btn-refine-discuss:hover:not(:disabled) {
   opacity: 0.9;
@@ -1089,6 +1091,7 @@ body {
 .btn-redo-it-status:disabled,
 .btn-redo-e2e-json:disabled,
 .btn-redo-local-itgap:disabled,
+.btn-redo-pain-point-step:disabled,
 .btn-refine-modify:disabled,
 .btn-refine-discuss:disabled {
   opacity: 0.5;
@@ -6482,6 +6485,11 @@ body {
   box-shadow: 0 1px 4px rgba(45, 212, 191, 0.15);
 }
 
+/* 含痛点块的环节在 scrollIntoView(block:center) 时通过上边距让该块落在视口略偏下、约垂直居中 */
+.vs-step-node.vs-step-node-has-pain-point {
+  scroll-margin-top: 18vh;
+}
+
 .vs-step-name {
   display: block;
   font-weight: 500;
@@ -6541,21 +6549,21 @@ body {
   font-size: 0.78rem;
   line-height: 1.35;
   color: #fff;
-  background: rgba(220, 38, 38, 0.85);
+  background: #b91c1c;
   border: 2px solid #ef4444;
   border-radius: 6px;
   box-sizing: border-box;
-  animation: vs-pain-point-flash 1.5s ease-in-out infinite;
+  animation: vs-pain-point-flash 1.2s ease-in-out infinite;
 }
 
 @keyframes vs-pain-point-flash {
   0%, 100% {
     border-color: #ef4444;
-    box-shadow: 0 0 4px rgba(239, 68, 68, 0.6);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.8), 0 0 6px rgba(239, 68, 68, 0.5);
   }
   50% {
     border-color: #fca5a5;
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.9);
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 1), 0 0 12px rgba(239, 68, 68, 0.9);
   }
 }
 

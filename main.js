@@ -173,6 +173,9 @@ if (typeof window !== 'undefined') {
   window.getCurrentProblemDetailItem = function getCurrentProblemDetailItem() {
     return currentProblemDetailItem;
   };
+  window.setCurrentProblemDetailItem = function setCurrentProblemDetailItem(item) {
+    currentProblemDetailItem = item;
+  };
 }
 
 /** 修改意图追问状态：当用户修改意图不明确时，记录需合并的用户消息起始索引，待用户补充后合并再提炼 */
@@ -2955,6 +2958,30 @@ if (el.problemDetailChatMessages) {
           });
         }
       }
+      return;
+    }
+    const confirmAllPainPointsBtn = e.target.closest('.btn-confirm-all-pain-points');
+    if (confirmAllPainPointsBtn && !confirmAllPainPointsBtn.disabled) {
+      const item = currentProblemDetailItem;
+      if (!item?.createdAt) return;
+      problemDetailChatMessages = problemDetailChatMessages.map((m) => {
+        if (m.type === 'painPointStepCard' || m.type === 'task6LlmQueryBlock') return { ...m, confirmed: true };
+        if (m.type === 'painPointAllDoneConfirmBlock') return { ...m, confirmed: true };
+        return m;
+      });
+      saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+      confirmAllPainPointsBtn.textContent = '已确认所有';
+      confirmAllPainPointsBtn.disabled = true;
+      const container = el.problemDetailChatMessages;
+      if (container) {
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+      }
+      renderProblemDetailHistory();
+      requestAnimationFrame(() => {
+        showTaskCompletionConfirm('task6', (FOLLOW_TASKS || []).find((t) => t.id === 'task6')?.name || '痛点标注');
+      });
       return;
     }
     const redoPainPointStepBtn = e.target.closest('.btn-redo-pain-point-step');
@@ -8441,7 +8468,7 @@ function renderProblemDetailChatFromStorage(container, messages) {
           </div>
           <div class="problem-detail-chat-pain-point-sessions-actions">
             <button type="button" class="btn-auto-pain-point-sessions btn-confirm-primary" ${!hasUnfinished ? 'disabled' : ''}>${!hasUnfinished ? '全部已完成' : '自动顺序执行'}</button>
-            <button type="button" class="btn-continue-pain-point-sessions" ${!hasUnfinished ? 'disabled' : ''}>手动顺序执行</button>
+            <button type="button" class="btn-continue-pain-point-sessions btn-confirm-primary" ${!hasUnfinished ? 'disabled' : ''}>手动顺序执行</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
@@ -8471,6 +8498,21 @@ function renderProblemDetailChatFromStorage(container, messages) {
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
       container.appendChild(cardBlock);
+    } else if (msg.type === 'painPointAllDoneConfirmBlock') {
+      const confirmed = !!msg.confirmed;
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-pain-point-all-done-confirm';
+      block.dataset.msgIndex = String(idx);
+      block.dataset.taskId = 'task6';
+      block.innerHTML = `
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">${escapeHtml(msg.content || '是否确认所有痛点标注结果？')}</div>
+          <div class="problem-detail-chat-pain-point-all-done-actions">
+            <button type="button" class="btn-confirm-all-pain-points btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认所有' : '确认所有'}</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
     } else if (msg.type === 'localItGapInputBlock' || msg.type === 'localItGapOutputBlock') {
       /* 输入/输出内容块仅时间线展示，聊天区不渲染 */
     } else if (msg.type === 'rolePermissionSessionsBlock') {

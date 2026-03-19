@@ -201,7 +201,14 @@ ${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || 
       }
       container.scrollTop = container.scrollHeight;
     }
+    const wsScroll = typeof document !== 'undefined' ? document.querySelector('.problem-detail-workspace-scroll') : null;
+    const savedWorkspaceScrollTop = wsScroll ? wsScroll.scrollTop : 0;
     if (typeof global.renderProblemDetailContent === 'function') global.renderProblemDetailContent();
+    const raf = typeof global.requestAnimationFrame === 'function' ? global.requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    raf(() => {
+      const newWsScroll = typeof document !== 'undefined' ? document.querySelector('.problem-detail-workspace-scroll') : null;
+      if (newWsScroll && savedWorkspaceScrollTop > 0) newWsScroll.scrollTop = savedWorkspaceScrollTop;
+    });
     if (typeof global.renderProblemDetailHistory === 'function') global.renderProblemDetailHistory();
     return !!allDone;
   }
@@ -333,6 +340,15 @@ ${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || 
       });
       const llmMetaHtml = global.buildLlmMetaHtml?.(llmMeta) || '';
       const painPointContent = (painPointText && String(painPointText).trim()) || '';
+      if (typeof global.updateDigitalProblemPainPointStep === 'function') {
+        global.updateDigitalProblemPainPointStep(item.createdAt, nextIdx, painPointContent);
+        const list = global.getDigitalProblems ? global.getDigitalProblems() : [];
+        const updated = list.find((it) => it.createdAt === item.createdAt);
+        if (updated) {
+          global.currentProblemDetailItem = updated;
+          if (typeof global.setCurrentProblemDetailItem === 'function') global.setCurrentProblemDetailItem(updated);
+        }
+      }
       const cardBlock = document.createElement('div');
       cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-pain-point-step-card problem-detail-chat-msg-with-delete';
       cardBlock.dataset.msgIndex = String(((typeof global.getProblemDetailChatMessages === 'function' ? global.getProblemDetailChatMessages() : global.problemDetailChatMessages) || []).length);
@@ -366,6 +382,23 @@ ${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || 
       container.scrollTop = container.scrollHeight;
       global.renderProblemDetailContent?.();
       global.renderProblemDetailHistory?.();
+      const raf = typeof global.requestAnimationFrame === 'function' ? global.requestAnimationFrame : (fn) => setTimeout(fn, 0);
+      raf(() => {
+        const scrollEl = typeof document !== 'undefined' ? document.querySelector('.problem-detail-workspace-scroll') : null;
+        const stepEl = scrollEl ? scrollEl.querySelector(`[data-vs-step-index="${nextIdx}"]`) : null;
+        if (!scrollEl || !stepEl) return;
+        const scrollRect = scrollEl.getBoundingClientRect();
+        const stepRect = stepEl.getBoundingClientRect();
+        const elementOffsetTop = scrollEl.scrollTop + (stepRect.top - scrollRect.top);
+        const elementHeight = stepRect.height;
+        const win = typeof window !== 'undefined' ? window : null;
+        const viewportBottom = win ? win.innerHeight : scrollRect.height;
+        const visibleHeight = Math.min(scrollRect.height, Math.max(0, viewportBottom - scrollRect.top));
+        const targetScrollTop = elementOffsetTop - visibleHeight / 2 + elementHeight / 2;
+        const maxScroll = Math.max(0, scrollEl.scrollHeight - (visibleHeight || scrollEl.clientHeight));
+        const clamped = Math.max(0, Math.min(targetScrollTop, maxScroll));
+        scrollEl.scrollTo({ top: clamped, behavior: 'smooth' });
+      });
       return { stepIndex: nextIdx, painPointText: painPointContent };
     } catch (err) {
       parsingBlock.remove();
@@ -380,7 +413,7 @@ ${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || 
   }
 
   /**
-   * 自动顺序执行：循环执行下一未标注环节直到全部完成，每步自动确认并继续。
+   * 自动顺序执行：循环执行下一未标注环节直到全部完成；每步大模型返回后不自动确认，仅在工作区绘制痛点块；全部结束后下发「是否确认所有痛点标注结果？」。
    *
    * @param {Object} [optionalItem] - 当前问题详情项。
    * @returns {Promise<void>}
@@ -393,23 +426,29 @@ ${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || 
     let currentItem = item;
     while (true) {
       const r = await runPainPointAnnotationForNextStep(currentItem);
-      if (!r) break;
-      const allDone = applyPainPointStepConfirm(currentItem.createdAt, r.stepIndex, r.painPointText);
-      if (allDone) {
-        const FOLLOW_TASKS = global.FOLLOW_TASKS || [];
-        if (typeof global.requestAnimationFrame === 'function') {
-          global.requestAnimationFrame(() => {
-            global.showTaskCompletionConfirm?.('task6', FOLLOW_TASKS.find((t) => t.id === 'task6')?.name || '痛点标注');
-          });
-        } else {
-          global.showTaskCompletionConfirm?.('task6', FOLLOW_TASKS.find((t) => t.id === 'task6')?.name || '痛点标注');
+      if (!r) {
+        global.pushAndSaveProblemDetailChat?.({
+          type: 'painPointAllDoneConfirmBlock',
+          content: '是否确认所有痛点标注结果？',
+          taskId: 'task6',
+          timestamp: global.getTimeStr(),
+          confirmed: false,
+        });
+        const chatContainer = global.el?.problemDetailChatMessages;
+        if (chatContainer) {
+          chatContainer.innerHTML = '';
+          const msgs = (typeof global.getProblemDetailChatMessages === 'function' ? global.getProblemDetailChatMessages() : global.problemDetailChatMessages) || [];
+          global.renderProblemDetailChatFromStorage?.(chatContainer, Array.isArray(msgs) ? msgs : []);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
         }
+        global.renderProblemDetailHistory?.();
         break;
       }
       const list = global.getDigitalProblems ? global.getDigitalProblems() : [];
       const nextItem = list.find((it) => it.createdAt === item.createdAt);
       if (nextItem) {
         global.currentProblemDetailItem = nextItem;
+        if (typeof global.setCurrentProblemDetailItem === 'function') global.setCurrentProblemDetailItem(nextItem);
         currentItem = nextItem;
       }
     }

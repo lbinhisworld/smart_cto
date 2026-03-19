@@ -29,7 +29,7 @@
     if (type === 'requirementLogicBlock' || type === 'requirementLogicStartBlock') return 'task3';
     if (type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'drawValueStreamStartBlock' || type === 'valueStreamStartBlock' || (role === 'system' && (content.includes('价值流') || content.includes('绘制')))) return 'task4';
     if (type === 'itStatusStartBlock' || type === 'itStatusOutputLog' || type === 'itStatusCard' || (role === 'system' && (content === 'IT 现状标注完成' || content === 'IT 现状标注失败'))) return 'task5';
-    if (type === 'painPointStartBlock' || type === 'painPointStepCard' || type === 'painPointSessionsBlock' || (role === 'system' && (content === '痛点标注完成' || content === '痛点标注完毕' || content === '痛点标注失败' || (typeof content === 'string' && content.includes('正在标注环节') && content.includes('痛点'))))) return 'task6';
+    if (type === 'painPointStartBlock' || type === 'painPointStepCard' || type === 'painPointSessionsBlock' || type === 'painPointAllDoneConfirmBlock' || (role === 'system' && (content === '痛点标注完成' || content === '痛点标注完毕' || content === '痛点标注失败' || (typeof content === 'string' && content.includes('正在标注环节') && content.includes('痛点'))))) return 'task6';
     if (type === 'intentExtractionCard' && msg.data?.taskId) return msg.data.taskId;
     if (type === 'e2eFlowGeneratedLog') return 'task7';
     if (type === 'e2eFlowExtractStartBlock' || type === 'e2eFlowJsonBlock') return 'task7';
