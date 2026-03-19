@@ -253,12 +253,19 @@ body {
   color: var(--text);
 }
 
+.parse-preview-dd-requirement-detail {
+  max-height: 8em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* 数字化问题解决跟进列表 - 借鉴参考图：搜索栏、卡片网格、渐变顶条 */
 .problem-follow-section {
   margin-top: 2rem;
   padding: 1.25rem 0;
   width: 100%;
-  max-width: 900px;
+  max-width: 1100px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -271,17 +278,11 @@ body {
 
 .problem-follow-list {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 1.25rem;
 }
 
-@media (max-width: 1200px) {
-  .problem-follow-list {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (max-width: 900px) {
+@media (max-width: 1000px) {
   .problem-follow-list {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -296,6 +297,7 @@ body {
 .problem-follow-card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   background: var(--surface-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -335,11 +337,15 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .problem-follow-card-date {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .problem-follow-card-actions {
@@ -4983,6 +4989,69 @@ body {
   display: none;
 }
 
+/* 初步需求卡片「历史详情」时间线 */
+.preliminary-history-empty {
+  margin: 0;
+  padding: 0.75rem 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.preliminary-history-item {
+  margin-bottom: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.preliminary-history-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.preliminary-history-item-header:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.preliminary-history-item-time {
+  font-weight: 500;
+}
+
+.preliminary-history-item-arrow {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+
+.preliminary-history-item-expanded .preliminary-history-item-arrow {
+  transform: rotate(180deg);
+}
+
+.preliminary-history-item-body[hidden] {
+  display: none !important;
+}
+
+.preliminary-history-item-body {
+  display: block;
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .problem-detail-card-header:hover {
   background: rgba(88, 166, 255, 0.25);
 }
@@ -5079,6 +5148,11 @@ body {
   flex: 1;
   min-width: 0;
   text-align: left;
+}
+
+.problem-detail-row-requirement-detail .problem-detail-value {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .problem-detail-card .problem-detail-row .problem-detail-label,

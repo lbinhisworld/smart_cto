@@ -13,6 +13,7 @@
 
 非职责（仍由 `main.js` 负责）：
 
+- **初步需求提炼**：首页「解析」由 `js/preliminaryRequirement.js` 的 `parseDigitalProblemInput(text)` 完成，输出多维度结构化 JSON（customerName、customerNeedsOrChallenges、customerItStatus、projectTimeRequirement、operationModel、businessStatus、urgencyAnalysis）；**requirementDetail**（用户原始输入）由 main 在「启动跟进」时写入。解析结果在「启动跟进」后可作为 task1 时间线的「初步需求提炼」LLM-查询 复用。
 - 聊天区卡片 DOM 渲染与按钮事件；
 - 问题单状态推进、存储回写、页面切换；
 - 历史时间线聚合与 UI 展示。
@@ -94,4 +95,6 @@
 - 企业背景洞察重做提炼；
 - task1 阶段输入后直接提炼。
 
-同时，首页“解析”得到的初步需求调用结果会在“启动跟进”后转换为 `task1LlmQueryBlock`，并由沟通历史模块按 `LLM-查询` 渲染为输入/输出双子卡片。
+同时，首页「解析」得到的**初步需求多维度提炼**结果（`preliminaryRequirement.js` 的 `parseDigitalProblemInput`，含 operationModel、businessStatus、urgencyAnalysis 等）会在「启动跟进」后由 main 转换为 `task1LlmQueryBlock`（备注「初步需求提炼」），并由沟通历史模块按 `LLM-查询` 渲染为输入/输出双子卡片。
+
+**工作区「初步需求」卡片**（需求理解阶段企业背景洞察页）：卡片分为两个 Tab——**总结提炼**（展示大模型返回的各维度字段，不含「需求详情」）、**历史详情**（按时间线展示历次提交的需求详情，每条为可折叠块，点击时间戳行展开/收起对应原始需求文本）。逻辑与 HTML 生成见 `js/preliminaryRequirement.md`；展开/收起由 `main.js` 的 `setupPreliminaryHistoryItemToggle` 在卡片上事件委托实现。

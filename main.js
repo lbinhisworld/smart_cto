@@ -1577,7 +1577,7 @@ function keepPreliminaryOnlyChats(messages) {
     const out = m.llmOutputJson;
     if (out && typeof out === 'object') {
       const keys = Object.keys(out);
-      if (keys.includes('customerName') || keys.includes('customerNeedsOrChallenges') || keys.includes('customerItStatus') || keys.includes('projectTimeRequirement')) return true;
+      if (keys.includes('customerName') || keys.includes('customerNeedsOrChallenges') || keys.includes('customerItStatus') || keys.includes('projectTimeRequirement') || keys.includes('requirementDetail') || keys.includes('operationModel') || keys.includes('businessStatus') || keys.includes('urgencyAnalysis')) return true;
     }
     return false;
   };
@@ -2184,6 +2184,10 @@ if (el.problemDetailChatMessages) {
           customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
           customerItStatus: prelim.customerItStatus ?? item.customerItStatus ?? item.customer_it_status ?? '',
           projectTimeRequirement: prelim.projectTimeRequirement ?? item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+          requirementDetail: prelim.requirementDetail ?? item.requirementDetail ?? item.requirement_detail ?? '',
+          operationModel: prelim.operationModel ?? item.operationModel ?? undefined,
+          businessStatus: prelim.businessStatus ?? item.businessStatus ?? '',
+          urgencyAnalysis: prelim.urgencyAnalysis ?? item.urgencyAnalysis ?? undefined,
         };
         if (!hasPrelimCtx) {
           pushAndSaveProblemDetailChat({
@@ -4952,33 +4956,7 @@ ${pageStructure || '(无详情数据)'}`;
   }
 }
 
-/** 调用大模型解析数字化问题输入，提取客户名称、需求、IT现状、时间要求 */
-async function parseDigitalProblemInput(text) {
-  const systemPrompt = `你是一个专业的数字化需求分析助手。用户会输入一段关于企业名称及数字化问题的描述，请从中提炼出以下四个字段，以 JSON 格式返回，不要包含其他内容：
-
-{
-  "customerName": "客户名称",
-  "customerNeedsOrChallenges": "客户需求或挑战",
-  "customerItStatus": "客户IT现状",
-  "projectTimeRequirement": "项目时间要求"
-}
-
-如果某字段无法从输入中推断，该字段填 "—" 或空字符串。只返回 JSON，不要有 markdown 代码块包裹。`;
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: text },
-  ]);
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  const jsonStr = jsonMatch ? jsonMatch[0] : content;
-  const parsed = JSON.parse(jsonStr);
-  const fullPrompt = `【system】\n${systemPrompt}\n\n【user】\n${text}`;
-  return {
-    parsed,
-    fullPrompt,
-    rawOutput: jsonStr,
-    llmMeta: { usage: usage || {}, model: model || DEEPSEEK_MODEL, durationMs: durationMs || 0 },
-  };
-}
+/** 初步需求提炼与展示逻辑已移至 js/preliminaryRequirement.js（parseDigitalProblemInput、renderParsePreview、getByPath、PRELIMINARY_LABEL_TO_KEY、buildPreliminaryCardRowsHtml、buildPreliminaryPreContent 等）。 */
 
 /** 构建意图提炼的完整上下文：当前问题的沟通历史 + 页面内容结构，供大模型搜索匹配；返回 { context, currentTask } */
 function buildIntentExtractionContext(createdAt, item) {
@@ -5091,6 +5069,10 @@ function buildAskModeProblemContext(item) {
     customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
     customerItStatus: prelim.customerItStatus ?? item.customerItStatus ?? item.customer_it_status ?? '',
     projectTimeRequirement: prelim.projectTimeRequirement ?? item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+    requirementDetail: prelim.requirementDetail ?? item.requirementDetail ?? item.requirement_detail ?? '',
+    operationModel: prelim.operationModel ?? item.operationModel,
+    businessStatus: prelim.businessStatus ?? item.businessStatus ?? '',
+    urgencyAnalysis: prelim.urgencyAnalysis ?? item.urgencyAnalysis,
   };
   lines.push('【项目进度】');
   lines.push(`  当前大阶段: ${PROBLEM_DETAIL_MAJOR_STAGE_LABELS[item.currentMajorStage ?? 0] ?? '—'}`);
@@ -5103,6 +5085,17 @@ function buildAskModeProblemContext(item) {
   lines.push(`  客户需求或挑战: ${fmt(preliminaryReq.customerNeedsOrChallenges)}`);
   lines.push(`  客户IT现状: ${fmt(preliminaryReq.customerItStatus)}`);
   lines.push(`  项目时间要求: ${fmt(preliminaryReq.projectTimeRequirement)}`);
+  lines.push(`  需求详情: ${fmt(preliminaryReq.requirementDetail)}`);
+  if (preliminaryReq.operationModel && typeof preliminaryReq.operationModel === 'object') {
+    lines.push(`  核心业务流程梳理: ${fmt(preliminaryReq.operationModel.businessProcess)}`);
+    lines.push(`  人员组织模式: ${fmt(preliminaryReq.operationModel.orgStructure)}`);
+  }
+  lines.push(`  经营状态: ${fmt(preliminaryReq.businessStatus)}`);
+  if (preliminaryReq.urgencyAnalysis && typeof preliminaryReq.urgencyAnalysis === 'object') {
+    lines.push(`  最紧急/第一阶段: ${fmt(preliminaryReq.urgencyAnalysis.immediatePriorities)}`);
+    lines.push(`  可二期或后续: ${fmt(preliminaryReq.urgencyAnalysis.deferredFeatures)}`);
+    lines.push(`  整体紧急程度: ${fmt(preliminaryReq.urgencyAnalysis.urgencyLevel)}`);
+  }
   const basicInfo = problemDetailConfirmedBasicInfo || item.basicInfo || {};
   lines.push('');
   lines.push('【客户基本信息】');
@@ -5348,14 +5341,6 @@ async function executeDiscussionIntent(extracted, item, userText) {
   return { content: (content || '').trim() || '（无返回内容）', usage, model, durationMs };
 }
 
-/** 标签到初步需求字段的映射 */
-const PRELIMINARY_LABEL_TO_KEY = {
-  客户名称: 'customerName',
-  客户需求或挑战: 'customerNeedsOrChallenges',
-  客户IT现状: 'customerItStatus',
-  项目时间要求: 'projectTimeRequirement',
-};
-
 /** 标签到基本信息字段的映射 */
 const BASIC_INFO_LABEL_TO_KEY = {
   公司名称: 'company_name',
@@ -5451,16 +5436,18 @@ function getCurrentContentAtModificationTarget(extracted, item) {
   }
 
   if (taskId === 'preliminary' || modTarget.includes('初步需求')) {
+    const PRELIMINARY_LABEL_TO_KEY = typeof window.PRELIMINARY_LABEL_TO_KEY !== 'undefined' ? window.PRELIMINARY_LABEL_TO_KEY : {};
+    const getByPath = typeof window.getByPath === 'function' ? window.getByPath : () => undefined;
+    const buildPreliminaryPreContent = typeof window.buildPreliminaryPreContent === 'function' ? window.buildPreliminaryPreContent : () => ({});
     const preKey = modField ? PRELIMINARY_LABEL_TO_KEY[modField] : null;
-    if (preKey && item && item[preKey] != null) {
-      return { taskId: 'preliminary', fieldKey: preKey, currentContent: String(item[preKey]).trim(), positionDesc: `初步需求 - ${modField || preKey}` };
+    if (preKey && item) {
+      const val = preKey.indexOf('.') >= 0 ? getByPath(item, preKey) : item[preKey];
+      if (val != null) {
+        const currentContent = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val).trim();
+        return { taskId: 'preliminary', fieldKey: preKey, currentContent, positionDesc: `初步需求 - ${modField || preKey}` };
+      }
     }
-    const preContent = {
-      customerName: item?.customerName,
-      customerNeedsOrChallenges: item?.customerNeedsOrChallenges,
-      customerItStatus: item?.customerItStatus,
-      projectTimeRequirement: item?.projectTimeRequirement,
-    };
+    const preContent = buildPreliminaryPreContent(item);
     return { taskId: 'preliminary', fieldKey: null, currentContent: JSON.stringify(preContent, null, 2), positionDesc: '初步需求（整块）' };
   }
 
@@ -5987,24 +5974,6 @@ ${typeof fullProcessVsm === 'string' ? fullProcessVsm : JSON.stringify(fullProce
   return { content, usage, model, durationMs };
 }
 
-const PARSE_PREVIEW_FIELDS = [
-  { key: 'customerName', label: '客户名称' },
-  { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
-  { key: 'customerItStatus', label: '客户IT现状' },
-  { key: 'projectTimeRequirement', label: '项目时间要求' },
-];
-
-function renderParsePreview(parsed) {
-  if (!el.parsePreviewContent) return;
-  el.parsePreviewContent.innerHTML = PARSE_PREVIEW_FIELDS.map(({ key, label }) => {
-    const value = parsed[key] != null ? String(parsed[key]).trim() : '—';
-    return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value) || '—'}</dd>`;
-  }).join('');
-  if (el.parsePreview) {
-    el.parsePreview.hidden = false;
-  }
-}
-
 async function handleParseClick() {
   const input = el.digitalProblemInput;
   if (!input) return;
@@ -6022,9 +5991,9 @@ async function handleParseClick() {
     if (!hasAiConfig()) {
       throw new Error('请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用解析功能。');
     }
-    const parsedResult = await parseDigitalProblemInput(text);
+    const parsedResult = await (typeof window.parseDigitalProblemInput === 'function' ? window.parseDigitalProblemInput(text) : Promise.reject(new Error('parseDigitalProblemInput 未加载')));
     const parsed = parsedResult?.parsed || {};
-    lastParsedResult = parsed;
+    lastParsedResult = { ...parsed, requirementDetail: text };
     lastParsedLlmQuery = {
       noteName: '初步需求提炼',
       llmInputPrompt: parsedResult?.fullPrompt || '',
@@ -6032,7 +6001,7 @@ async function handleParseClick() {
       llmOutputRaw: parsedResult?.rawOutput || '',
       llmMeta: parsedResult?.llmMeta || null,
     };
-    renderParsePreview(parsed);
+    if (typeof window.renderParsePreview === 'function') window.renderParsePreview(parsed, el.parsePreviewContent, el.parsePreview, escapeHtml);
   } catch (err) {
     const msg = err.message || String(err);
     if (el.parsePreviewContent) {
@@ -6230,6 +6199,26 @@ function formatProblemDate(createdAt) {
   }
 }
 
+/** 格式化为日期+时间（用于首页客户档案列表的创建时间） */
+function formatProblemDateTime(createdAt) {
+  if (!createdAt) return '—';
+  try {
+    const d = new Date(createdAt);
+    if (Number.isNaN(d.getTime())) return String(createdAt);
+    return d.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    return String(createdAt);
+  }
+}
+
 const PROBLEM_FOLLOW_CARD_ICONS = {
   delete: '<svg class="problem-follow-icon problem-follow-icon-delete" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>',
 };
@@ -6247,13 +6236,13 @@ function renderProblemFollowList() {
   container.innerHTML = list.map((item) => {
     const index = list.indexOf(item);
     const customerName = (item.customerName ?? item.customer_name ?? '').trim() || '未命名';
-    const dateStr = formatProblemDate(item.createdAt);
+    const dateTimeStr = formatProblemDateTime(item.createdAt);
     const gradientClass = index % 2 === 0 ? 'problem-follow-card-accent-a' : 'problem-follow-card-accent-b';
     return `<div class="problem-follow-card" data-index="${index}">
       <div class="problem-follow-card-accent ${gradientClass}"></div>
       <div class="problem-follow-card-body">
         <div class="problem-follow-card-title">${escapeHtml(customerName)}</div>
-        <div class="problem-follow-card-date">📅 ${escapeHtml(dateStr)}</div>
+        <div class="problem-follow-card-date">📅 ${escapeHtml(dateTimeStr)}</div>
         <div class="problem-follow-card-actions">
           <button type="button" class="btn-problem-follow-start" data-index="${index}">详情</button>
           <button type="button" class="btn-problem-follow-delete" data-index="${index}" aria-label="删除">${PROBLEM_FOLLOW_CARD_ICONS.delete}</button>
@@ -6307,7 +6296,7 @@ function openProblemDetail(item, options) {
       const note = String(m.noteName || '').trim();
       if (note.includes('初步需求')) return true;
       const out = m.llmOutputJson;
-      return !!(out && typeof out === 'object' && ('customerName' in out || 'customerNeedsOrChallenges' in out || 'customerItStatus' in out || 'projectTimeRequirement' in out));
+      return !!(out && typeof out === 'object' && ('customerName' in out || 'customerNeedsOrChallenges' in out || 'customerItStatus' in out || 'projectTimeRequirement' in out || 'requirementDetail' in out || 'operationModel' in out || 'businessStatus' in out || 'urgencyAnalysis' in out));
     });
     if (!hasPreliminaryLlmQuery && initLlm) {
       pushAndSaveProblemDetailChat({
@@ -6598,6 +6587,10 @@ function buildTaskContextJson(taskId, item) {
     customerNeedsOrChallenges: item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
     customerItStatus: item.customerItStatus ?? item.customer_it_status ?? '',
     projectTimeRequirement: item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+    requirementDetail: item.requirementDetail ?? item.requirement_detail ?? '',
+    operationModel: item.operationModel,
+    businessStatus: item.businessStatus ?? '',
+    urgencyAnalysis: item.urgencyAnalysis,
   };
   const globalItGapAnalysisJson = item.globalItGapAnalysisJson || null;
   const localItGapSessions = item.localItGapSessions || null;
@@ -7003,6 +6996,10 @@ async function runBmcGeneration() {
       customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item?.customerNeedsOrChallenges ?? item?.customer_needs_or_challenges ?? '',
       customerItStatus: prelim.customerItStatus ?? item?.customerItStatus ?? item?.customer_it_status ?? '',
       projectTimeRequirement: prelim.projectTimeRequirement ?? item?.projectTimeRequirement ?? item?.project_time_requirement ?? '',
+      requirementDetail: prelim.requirementDetail ?? item?.requirementDetail ?? item?.requirement_detail ?? '',
+      operationModel: prelim.operationModel ?? item?.operationModel,
+      businessStatus: prelim.businessStatus ?? item?.businessStatus ?? '',
+      urgencyAnalysis: prelim.urgencyAnalysis ?? item?.urgencyAnalysis,
     };
     const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await window.generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo, preliminaryReqJson);
     loading2.remove();
@@ -7062,6 +7059,10 @@ async function runRequirementLogicConstruction() {
     customerNeedsOrChallenges: item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
     customerItStatus: item.customerItStatus ?? item.customer_it_status ?? '',
     projectTimeRequirement: item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+    requirementDetail: item.requirementDetail ?? item.requirement_detail ?? '',
+    operationModel: item.operationModel,
+    businessStatus: item.businessStatus ?? '',
+    urgencyAnalysis: item.urgencyAnalysis,
   };
   if (!basicInfo || Object.keys(basicInfo).length === 0) {
     const errBlock = document.createElement('div');
@@ -10233,16 +10234,8 @@ function renderProblemDetailContent() {
     }
     return;
   }
-  const labels = [
-    { key: 'customerName', label: '客户名称' },
-    { key: 'customerNeedsOrChallenges', label: '客户需求或挑战' },
-    { key: 'customerItStatus', label: '客户IT现状' },
-    { key: 'projectTimeRequirement', label: '项目时间要求' },
-  ];
-  const rows = labels.map(({ key, label }) => {
-    const value = (item[key] != null ? String(item[key]).trim() : '') || '—';
-    return `<div class="problem-detail-row" data-field="${escapeHtml(label)}"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${escapeHtml(value)}</span></div>`;
-  }).join('');
+  const preliminarySummaryHtml = typeof window.buildPreliminaryCardRowsHtml === 'function' ? window.buildPreliminaryCardRowsHtml(item, escapeHtml) : '';
+  const preliminaryHistoryHtml = typeof window.buildPreliminaryHistoryHtml === 'function' ? window.buildPreliminaryHistoryHtml(item, escapeHtml) : '';
   const subSteps = [
     '企业背景洞察',
     '商业画布加载',
@@ -10369,16 +10362,88 @@ function renderProblemDetailContent() {
   const cardsHtml = `<div class="problem-detail-card" data-task-id="preliminary">
     <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">
       <span class="problem-detail-card-header-title">初步需求</span>
+      <div class="problem-detail-card-header-actions">
+        <button type="button" class="problem-detail-card-tab problem-detail-card-tab-active" data-tab="detail" aria-pressed="true">总结提炼</button>
+        <button type="button" class="problem-detail-card-tab" data-tab="json" aria-pressed="false">历史详情</button>
+      </div>
       <span class="problem-detail-card-header-arrow">▾</span>
     </div>
-    <div class="problem-detail-card-body">${rows}</div>
+    <div class="problem-detail-card-body">
+      <div class="problem-detail-card-body-detail">${preliminarySummaryHtml}</div>
+      <div class="problem-detail-card-body-json" hidden>${preliminaryHistoryHtml}</div>
+    </div>
   </div>${basicInfoCardHtml}${bmcCardHtml}${requirementLogicCardHtml}`;
   container.innerHTML = `<div class="problem-detail-substeps">${subStepsHtml}</div>
   <div class="problem-detail-workspace-scroll">
     <div class="problem-detail-workspace-cards">${cardsHtml}</div>
   </div>`;
   setupProblemDetailCardToggle();
+  setupPreliminaryHistoryItemToggle(container);
   setupRequirementUnderstandingSubstepClicks(container);
+}
+
+/** 初步需求卡片「历史详情」Tab 内可折叠项：点击时间戳行展开/收起对应原始需求文本（事件委托，避免被卡片头部折叠拦截） */
+function setupPreliminaryHistoryItemToggle(container) {
+  const log = (msg, data) => { console.log('[PreliminaryHistoryToggle]', msg, data !== undefined ? data : ''); };
+  if (!container) {
+    log('setup skipped: no container');
+    return;
+  }
+  const card = container.querySelector('.problem-detail-card[data-task-id="preliminary"]');
+  if (!card) {
+    log('setup skipped: preliminary card not found in container');
+    return;
+  }
+  const headersInCard = card.querySelectorAll('.preliminary-history-item-header');
+  const historyPanel = card.querySelector('.problem-detail-card-body-json');
+  log('setup ok', {
+    cardFound: !!card,
+    headersCount: headersInCard.length,
+    historyPanelHidden: historyPanel ? historyPanel.hidden : 'no panel',
+    historyPanelInnerHTMLLength: historyPanel ? (historyPanel.innerHTML || '').length : 0,
+  });
+  card.addEventListener('click', (e) => {
+    const header = e.target.closest('.preliminary-history-item-header');
+    log('card click', { targetTag: e.target?.tagName, targetClass: e.target?.className, headerFound: !!header });
+    if (!header) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const itemEl = header.closest('.preliminary-history-item');
+    const body = itemEl?.querySelector('.preliminary-history-item-body');
+    if (!body) {
+      log('header clicked but body not found', { itemEl: !!itemEl });
+      return;
+    }
+    const wasExpanded = body.hasAttribute('hidden') === false;
+    const expanded = !wasExpanded;
+    if (expanded) {
+      body.removeAttribute('hidden');
+    } else {
+      body.setAttribute('hidden', '');
+    }
+    header.setAttribute('aria-expanded', String(expanded));
+    itemEl.classList.toggle('preliminary-history-item-expanded', expanded);
+    log('toggled', { wasExpanded, expanded });
+  });
+  card.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const header = e.target.closest('.preliminary-history-item-header');
+    if (!header) return;
+    e.preventDefault();
+    const itemEl = header.closest('.preliminary-history-item');
+    const body = itemEl?.querySelector('.preliminary-history-item-body');
+    if (!body) return;
+    const wasExpanded = body.hasAttribute('hidden') === false;
+    const expanded = !wasExpanded;
+    if (expanded) {
+      body.removeAttribute('hidden');
+    } else {
+      body.setAttribute('hidden', '');
+    }
+    header.setAttribute('aria-expanded', String(expanded));
+    itemEl.classList.toggle('preliminary-history-item-expanded', expanded);
+    log('toggled (keydown)', { wasExpanded, expanded });
+  });
 }
 
 /** 需求理解页：点击子步骤（企业背景洞察/商业画布加载/需求逻辑构建）时滚动到对应卡片并展开 */
@@ -10606,11 +10671,17 @@ function handleStartFollowClick() {
     return;
   }
   if (el.digitalProblemInput) el.digitalProblemInput.value = '';
+  const rawDetail = lastParsedResult.requirementDetail ?? '';
   const item = {
     customerName: lastParsedResult.customerName ?? '',
     customerNeedsOrChallenges: lastParsedResult.customerNeedsOrChallenges ?? '',
     customerItStatus: lastParsedResult.customerItStatus ?? '',
     projectTimeRequirement: lastParsedResult.projectTimeRequirement ?? '',
+    requirementDetail: rawDetail,
+    requirementDetailHistory: [{ timestamp: new Date().toISOString(), content: rawDetail }],
+    operationModel: lastParsedResult.operationModel,
+    businessStatus: lastParsedResult.businessStatus ?? '',
+    urgencyAnalysis: lastParsedResult.urgencyAnalysis,
     task1InitialLlmQuery: lastParsedLlmQuery ? { ...lastParsedLlmQuery } : null,
   };
   saveDigitalProblem(item);

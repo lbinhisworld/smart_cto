@@ -755,7 +755,7 @@
     return nextItem;
   }
 
-  /** 重置问题为仅保留初步需求：删除除 customerName/customerNeedsOrChallenges/customerItStatus/projectTimeRequirement 外的所有数据 */
+  /** 重置问题为仅保留初步需求：删除除 customerName/customerNeedsOrChallenges/customerItStatus/projectTimeRequirement/requirementDetail/requirementDetailHistory/operationModel/businessStatus/urgencyAnalysis 外的所有数据 */
   function resetDigitalProblemToPreliminary(createdAt) {
     const list = getDigitalProblems();
     const idx = list.findIndex((it) => it.createdAt === createdAt);
@@ -767,6 +767,11 @@
       customerNeedsOrChallenges: item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
       customerItStatus: item.customerItStatus ?? item.customer_it_status ?? '',
       projectTimeRequirement: item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+      requirementDetail: item.requirementDetail ?? item.requirement_detail ?? '',
+      requirementDetailHistory: Array.isArray(item.requirementDetailHistory) ? item.requirementDetailHistory : [],
+      operationModel: item.operationModel ?? undefined,
+      businessStatus: item.businessStatus ?? '',
+      urgencyAnalysis: item.urgencyAnalysis ?? undefined,
     };
     list[idx] = resetItem;
     localStorage.setItem(global.DIGITAL_PROBLEMS_STORAGE_KEY, JSON.stringify(list));

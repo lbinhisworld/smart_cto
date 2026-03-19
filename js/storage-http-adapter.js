@@ -33,6 +33,11 @@
       ...item,
       createdAt: item.createdAt || item.id,
       id: item.id,
+      requirementDetail: item.requirementDetail ?? item.requirement_detail ?? '',
+      requirementDetailHistory: item.requirementDetailHistory ?? item.requirement_detail_history ?? [],
+      operationModel: item.operationModel ?? item.operation_model,
+      businessStatus: item.businessStatus ?? item.business_status ?? '',
+      urgencyAnalysis: item.urgencyAnalysis ?? item.urgency_analysis,
     };
   }
 
@@ -44,6 +49,11 @@
       customerNeedsOrChallenges: String(item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? ''),
       customerItStatus: String(item.customerItStatus ?? item.customer_it_status ?? ''),
       projectTimeRequirement: String(item.projectTimeRequirement ?? item.project_time_requirement ?? ''),
+      requirementDetail: String(item.requirementDetail ?? item.requirement_detail ?? ''),
+      requirementDetailHistory: Array.isArray(item.requirementDetailHistory) ? item.requirementDetailHistory : [],
+      operationModel: item.operationModel,
+      businessStatus: String(item.businessStatus ?? ''),
+      urgencyAnalysis: item.urgencyAnalysis,
       currentMajorStage: Number(item.currentMajorStage ?? 0),
       currentItStrategySubstep: Number(item.currentItStrategySubstep ?? 0),
       completedStages: Array.isArray(item.completedStages) ? item.completedStages : [],
@@ -140,6 +150,11 @@
         customerNeedsOrChallenges: String(item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? ''),
         customerItStatus: String(item.customerItStatus ?? item.customer_it_status ?? ''),
         projectTimeRequirement: String(item.projectTimeRequirement ?? item.project_time_requirement ?? ''),
+        requirementDetail: String(item.requirementDetail ?? item.requirement_detail ?? ''),
+        requirementDetailHistory: Array.isArray(item.requirementDetailHistory) ? item.requirementDetailHistory : [],
+        operationModel: item.operationModel,
+        businessStatus: String(item.businessStatus ?? ''),
+        urgencyAnalysis: item.urgencyAnalysis,
       };
       try {
         const res = await fetch(problemCasesPath, {
@@ -160,7 +175,7 @@
 
       const updates = toBackendPayload(item);
       delete updates.id;
-      const hasExtra = Object.keys(updates).some((k) => !['customerName', 'customerNeedsOrChallenges', 'customerItStatus', 'projectTimeRequirement'].includes(k) && updates[k] != null);
+      const hasExtra = Object.keys(updates).some((k) => !['customerName', 'customerNeedsOrChallenges', 'customerItStatus', 'projectTimeRequirement', 'requirementDetail', 'requirementDetailHistory', 'operationModel', 'businessStatus', 'urgencyAnalysis'].includes(k) && updates[k] != null);
       if (hasExtra) {
         try {
           const res = await fetch(problemCasesPath + '/' + encodeURIComponent(id), {
