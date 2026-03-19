@@ -25,7 +25,7 @@
     if (type === 'task5LlmQueryBlock') return 'task5';
     if (type === 'task6LlmQueryBlock') return 'task6';
     if (type === 'basicInfoCard' || type === 'basicInfoJsonBlock' || (role === 'system' && (content === '解析完成' || content === '基本信息 json 提取完毕'))) return 'task1';
-    if (type === 'bmcCard' || type === 'bmcStartBlock' || (role === 'system' && content.includes('BMC'))) return 'task2';
+    if (type === 'bmcCard' || type === 'bmcStartBlock' || type === 'bmcDiscussionStartBlock' || type === 'bmcDiscussionReplyBlock' || type === 'bmcDiscussionLlmQueryBlock' || type === 'bmcDiscussionEndBlock' || (role === 'system' && content.includes('BMC'))) return 'task2';
     if (type === 'requirementLogicBlock' || type === 'requirementLogicStartBlock') return 'task3';
     if (type === 'valueStreamCard' || type === 'valueStreamConfirmLog' || type === 'drawValueStreamStartBlock' || type === 'valueStreamStartBlock' || (role === 'system' && (content.includes('价值流') || content.includes('绘制')))) return 'task4';
     if (type === 'itStatusStartBlock' || type === 'itStatusOutputLog' || type === 'itStatusCard' || (role === 'system' && (content === 'IT 现状标注完成' || content === 'IT 现状标注失败'))) return 'task5';
@@ -71,6 +71,9 @@
     if (type === 'task6LlmQueryBlock') return true;
     if (type === 'basicInfoCard') return false; // task1 基本信息卡片不进入时间线，仅保留 LLM-查询卡片
     if (type === 'bmcCard') return false; // task2 BMC 卡片不进入时间线，仅保留 LLM-查询卡片
+    if (type === 'bmcDiscussionStartBlock') return false; // 讨论开始标记不单独进入时间线
+    if (type === 'bmcDiscussionReplyBlock') return false; // 讨论回复仅在聊天区展示，时间线用 bmcDiscussionLlmQueryBlock
+    if (type === 'bmcDiscussionLlmQueryBlock') return true; // 讨论 LLM 查询卡片纳入时间线（输入/输出子卡片）
     if (type === 'requirementLogicBlock') return false; // task3 需求逻辑卡片不进入时间线，仅保留 LLM-查询卡片
     if (type === 'valueStreamCard') return false; // task4 价值流图 JSON 卡片不进入时间线，仅保留 LLM-查询块
     if (type === 'valueStreamConfirmLog' || type === 'itStatusOutputLog') return true;
@@ -204,6 +207,14 @@
         if (msg.llmOutputJson != null) payload.llmOutputJson = msg.llmOutputJson;
         if (msg.llmOutputRaw != null) payload.llmOutputRaw = msg.llmOutputRaw;
         if (msg.confirmed === true) payload.confirmed = true;
+        payload.taskId = msg.taskId || 'task2';
+      }
+      if (msg.type === 'bmcDiscussionLlmQueryBlock') {
+        payload.content = 'LLM-查询';
+        if (msg.noteName != null) payload.noteName = msg.noteName;
+        if (msg.llmInputPrompt != null) payload.llmInputPrompt = msg.llmInputPrompt;
+        if (msg.llmOutputRaw != null) payload.llmOutputRaw = msg.llmOutputRaw;
+        if (msg.llmMeta != null) payload.llmMeta = msg.llmMeta;
         payload.taskId = msg.taskId || 'task2';
       }
       if (msg.type === 'task3LlmQueryBlock') {
@@ -359,9 +370,11 @@
     try {
       const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
       if (parsed?._logType === 'modify') return '修正';
+      if (parsed?._logType === 'bmcDiscussionUser') return '用户讨论';
       if (parsed?.type === 'taskCompleteBlock') return '任务完成';
       if (parsed?.type === 'task1LlmQueryBlock') return 'LLM-查询';
       if (parsed?.type === 'task2LlmQueryBlock') return 'LLM-查询';
+      if (parsed?.type === 'bmcDiscussionLlmQueryBlock') return 'LLM-查询';
       if (parsed?.type === 'task3LlmQueryBlock') return 'LLM-查询';
       if (parsed?.type === 'task4LlmQueryBlock') return 'LLM-查询';
       if (parsed?.type === 'task5LlmQueryBlock') return 'LLM-查询';
@@ -406,7 +419,7 @@
     return '确认';
   }
 
-  const LOG_TYPE_CLASS = { '输入': 'input', '输出': 'output', '确认': 'confirm', '修正': 'modify', '讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied', '压缩': 'compress', 'LLM-查询': 'llm-query' };
+  const LOG_TYPE_CLASS = { '输入': 'input', '输出': 'output', '确认': 'confirm', '修正': 'modify', '讨论': 'discuss', '用户讨论': 'discuss', '上下文': 'context', '任务完成': 'complete', '不满意': 'unsatisfied', '压缩': 'compress', 'LLM-查询': 'llm-query' };
   const INTENT_LABELS = { query: '简单查询', modification: '反馈修改意见', execute: '执行操作', discussion: '讨论请教' };
 
   /** 在重新渲染前采集当前展开状态，刷新后恢复，避免沟通历史面板更新时折叠已展开的任务/时间线 */
@@ -524,9 +537,9 @@
             try {
               const parsed = typeof c.content === 'string' ? JSON.parse(c.content) : c.content;
               if (parsed?.role === 'user') {
-                titleLabel = parsed?._logType === 'modify' ? '用户修正意见' : '用户输入';
+                titleLabel = parsed?._logType === 'bmcDiscussionUser' ? '用户讨论' : (parsed?._logType === 'modify' ? '用户修正意见' : '用户输入');
                 contentStr = (parsed?.content != null ? String(parsed.content).trim() : '') || '(空)';
-              } else if (parsed?.type === 'task1LlmQueryBlock' || parsed?.type === 'task2LlmQueryBlock' || parsed?.type === 'task3LlmQueryBlock' || parsed?.type === 'task4LlmQueryBlock' || parsed?.type === 'task5LlmQueryBlock' || parsed?.type === 'task6LlmQueryBlock') {
+              } else if (parsed?.type === 'task1LlmQueryBlock' || parsed?.type === 'task2LlmQueryBlock' || parsed?.type === 'bmcDiscussionLlmQueryBlock' || parsed?.type === 'task3LlmQueryBlock' || parsed?.type === 'task4LlmQueryBlock' || parsed?.type === 'task5LlmQueryBlock' || parsed?.type === 'task6LlmQueryBlock') {
                 titleLabel = 'LLM-查询';
                 stepNameForHead = parsed?.type === 'task6LlmQueryBlock'
                   ? (parsed?.stepName ? String(parsed.stepName) : parsed?.noteName ? String(parsed.noteName) : '痛点标注')

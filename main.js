@@ -101,6 +101,7 @@ const el = {
   problemDetailChatInput: document.getElementById('problemDetailChatInput'),
   problemDetailChatSend: document.getElementById('problemDetailChatSend'),
   problemDetailChatHeaderLabel: document.getElementById('problemDetailChatHeaderLabel'),
+  problemDetailChatDiscussionIndicator: document.getElementById('problemDetailChatDiscussionIndicator'),
   problemDetailChatModeTrigger: document.getElementById('problemDetailChatModeTrigger'),
   problemDetailChatModeTriggerIcon: document.getElementById('problemDetailChatModeTriggerIcon'),
   problemDetailChatModeTriggerText: document.getElementById('problemDetailChatModeTriggerText'),
@@ -1617,9 +1618,12 @@ function applyRestartCurrentTask() {
       const t = m.type || '';
       if (t === 'task2LlmQueryBlock') return false;
       if (t === 'bmcCard' || t === 'bmcStartBlock') return false;
+      if (t === 'bmcDiscussionStartBlock' || t === 'bmcDiscussionReplyBlock' || t === 'bmcDiscussionLlmQueryBlock' || t === 'bmcDiscussionEndBlock') return false;
       if ((t === 'taskCompleteBlock' || t === 'taskCompletionConfirmBlock') && m.taskId === 'task2') return false;
       if (t === 'taskStartNotification' && m.taskId === 'task2') return false;
       if (m.role === 'system' && typeof m.content === 'string' && m.content.includes('商业模式画布 BMC')) return false;
+      if (m.role === 'system' && typeof m.content === 'string' && m.content.trim() === '请描述您想讨论的问题（输入后发送）') return false;
+      if (m.role === 'user' && m._logType === 'bmcDiscussionUser') return false;
       return true;
     });
   }
@@ -1842,7 +1846,7 @@ if (el.problemDetailChatMessages) {
           const msg = problemDetailChatMessages[idx];
           const payloadJson = JSON.stringify(msg);
           pushAndSaveProblemDetailChat({ type: 'unsatisfiedBlock', taskId, content: payloadJson, timestamp: getTimeStr() });
-          problemDetailWaitingForFeedback = { taskId, createdAt, type: 'modification' };
+          problemDetailWaitingForFeedback = { taskId, createdAt, type: 'modification', sourceMsgIndex: idx };
           const tipBlock = document.createElement('div');
           tipBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
           tipBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请描述您的修改意见（输入后发送）</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
@@ -1865,8 +1869,13 @@ if (el.problemDetailChatMessages) {
       const card = refineDiscussBtn.closest('[data-msg-index]');
       const taskId = (card && card.getAttribute('data-task-id')) || '';
       const createdAt = currentProblemDetailItem?.createdAt;
-      if (taskId && createdAt) {
-        problemDetailWaitingForFeedback = { taskId, createdAt, type: 'discussion' };
+      if (taskId && createdAt && card) {
+        const idx = parseInt(card.getAttribute('data-msg-index'), 10);
+        problemDetailWaitingForFeedback = { taskId, createdAt, type: 'discussion', sourceMsgIndex: !isNaN(idx) ? idx : undefined };
+        if (taskId === 'task2') {
+          pushAndSaveProblemDetailChat({ type: 'bmcDiscussionStartBlock', taskId: 'task2', timestamp: getTimeStr() });
+          updateProblemDetailChatDiscussionIndicator();
+        }
         const cont = el.problemDetailChatMessages;
         const tipBlock = document.createElement('div');
         tipBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
@@ -1880,6 +1889,95 @@ if (el.problemDetailChatMessages) {
           cont.scrollTop = cont.scrollHeight;
         }
       }
+      return;
+    }
+    const bmcDiscussContinueBtn = e.target.closest('.btn-bmc-discuss-continue');
+    if (bmcDiscussContinueBtn) {
+      const createdAt = currentProblemDetailItem?.createdAt;
+      if (createdAt) {
+        problemDetailWaitingForFeedback = { taskId: 'task2', createdAt, type: 'discussion' };
+        const inputEl = el.problemDetailChatInput;
+        if (inputEl) {
+          inputEl.focus();
+        }
+      }
+      return;
+    }
+    const bmcDiscussRegenerateBtn = e.target.closest('.btn-bmc-discuss-regenerate');
+    if (bmcDiscussRegenerateBtn) {
+      const createdAt = currentProblemDetailItem?.createdAt;
+      const container = el.problemDetailChatMessages;
+      if (!createdAt || !container) return;
+      const basicInfoJson = problemDetailConfirmedBasicInfo || currentProblemDetailItem?.basicInfo || {};
+      if (!basicInfoJson || Object.keys(basicInfoJson).length === 0) {
+        return;
+      }
+      const baseBmc = getBaseBmcData();
+      if (!baseBmc || Object.keys(baseBmc).length === 0) {
+        return;
+      }
+      const discussionHistory = getBmcDiscussionHistory();
+      const discussionContextStr = Array.isArray(discussionHistory) && discussionHistory.length > 0
+        ? '【讨论记录】\n' + discussionHistory.map((t) => `${t.role === 'user' ? '用户' : '助手'}: ${(t.content || '').slice(0, 2000)}${(t.content || '').length > 2000 ? '…' : ''}`).join('\n\n')
+        : '（无讨论记录）';
+      const parsingBlock = document.createElement('div');
+      parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+      parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在根据讨论上下文重新生成 BMC…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(parsingBlock);
+      container.scrollTop = container.scrollHeight;
+      const genFn = typeof window.generateBmcFromBasicInfoWithFeedback === 'function' ? window.generateBmcFromBasicInfoWithFeedback : null;
+      if (!genFn) {
+        parsingBlock.remove();
+        return;
+      }
+      genFn(basicInfoJson, baseBmc, discussionContextStr, 'discussion').then(({ parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput }) => {
+        parsingBlock.remove();
+        const bmcIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'bmcCard');
+        const qIdx = (() => {
+          if (bmcIdx < 0) return -1;
+          for (let i = bmcIdx - 1; i >= 0; i--) {
+            if (problemDetailChatMessages[i]?.type === 'task2LlmQueryBlock') return i;
+          }
+          return -1;
+        })();
+        const toRemove = [bmcIdx, qIdx].filter((i) => typeof i === 'number' && i >= 0).sort((a, b) => b - a);
+        if (toRemove.length) {
+          toRemove.forEach((i) => problemDetailChatMessages.splice(i, 1));
+          saveProblemDetailChat(createdAt, problemDetailChatMessages);
+        }
+        pushAndSaveProblemDetailChat(
+          window.buildTask2LlmQueryMessage({
+            fullPrompt,
+            parsed: bmc,
+            rawOutput,
+            timestamp: getTimeStr(),
+            usage,
+            model,
+            durationMs,
+          })
+        );
+        pushAndSaveProblemDetailChat({
+          type: 'bmcCard',
+          data: bmc,
+          confirmed: false,
+          timestamp: getTimeStr(),
+          llmMeta: { usage, model, durationMs },
+        });
+        pushAndSaveProblemDetailChat({ type: 'bmcDiscussionEndBlock', taskId: 'task2', timestamp: getTimeStr() });
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+        updateProblemDetailChatDiscussionIndicator();
+      }).catch((err) => {
+        parsingBlock.remove();
+        const errBlock = document.createElement('div');
+        errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+        errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">根据讨论重新生成 BMC 失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+        container.appendChild(errBlock);
+        pushAndSaveProblemDetailChat({ role: 'system', content: '根据讨论重新生成 BMC 失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+        container.scrollTop = container.scrollHeight;
+      });
       return;
     }
     const confirmModificationResponseBtn = e.target.closest('.btn-confirm-modification-response');
@@ -2063,6 +2161,40 @@ if (el.problemDetailChatMessages) {
         updateProblemDetailChatHeaderLabel();
         return;
       }
+      // task2：商业画布加载任务，确认开始后向时间线推送客户基本信息 json + 客户初步需求 json
+      if (taskId === 'task2' && item) {
+        const hasBasicInfoCtx = problemDetailChatMessages.some(
+          (m) => m.type === 'taskContextBlock' && m.taskId === 'task2' && m.contextLabel === '客户基本信息 json'
+        );
+        const hasPrelimCtx = problemDetailChatMessages.some(
+          (m) => m.type === 'taskContextBlock' && m.taskId === 'task2' && m.contextLabel === '客户初步需求 json'
+        );
+        if (!hasBasicInfoCtx) {
+          pushAndSaveProblemDetailChat({
+            type: 'taskContextBlock',
+            taskId: 'task2',
+            contextLabel: '客户基本信息 json',
+            contextJson: item.basicInfo || {},
+            timestamp: getTimeStr(),
+          });
+        }
+        const prelim = item.preliminaryReq || {};
+        const preliminaryReqJson = {
+          customerName: prelim.customerName ?? item.customerName ?? item.customer_name ?? '',
+          customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
+          customerItStatus: prelim.customerItStatus ?? item.customerItStatus ?? item.customer_it_status ?? '',
+          projectTimeRequirement: prelim.projectTimeRequirement ?? item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+        };
+        if (!hasPrelimCtx) {
+          pushAndSaveProblemDetailChat({
+            type: 'taskContextBlock',
+            taskId: 'task2',
+            contextLabel: '客户初步需求 json',
+            contextJson: preliminaryReqJson,
+            timestamp: getTimeStr(),
+          });
+        }
+      }
       // task4：绘制价值流任务，确认后向时间线推送三条上下文块（客户基本信息 / BMC / 需求逻辑）
       if (taskId === 'task4' && item) {
         const hasBasicInfoCtx = problemDetailChatMessages.some(
@@ -2118,8 +2250,8 @@ if (el.problemDetailChatMessages) {
         } else {
           runPainPointAnnotation(currentProblemDetailItem, false);
         }
-      } else if (taskId !== 'task9' && taskId !== 'task11' && taskId !== 'task12' && taskId !== 'task4') {
-        // 去重：若最近几条中已有同 taskId 的 taskContextBlock（如双击导致），则不再推送，避免时间线出现两条「上下文」
+      } else if (taskId !== 'task2' && taskId !== 'task9' && taskId !== 'task11' && taskId !== 'task12' && taskId !== 'task4') {
+        // 去重：若最近几条中已有同 taskId 的 taskContextBlock（如双击导致），则不再推送，避免时间线出现两条「上下文」；task2 已在上方单独推送两条上下文
         const recent = problemDetailChatMessages.slice(-4);
         const hasRecentContext = recent.some((m) => m?.type === 'taskContextBlock' && m?.taskId === taskId);
         if (!hasRecentContext) {
@@ -6222,12 +6354,38 @@ function openProblemDetail(item, options) {
   });
 }
 
+/** 是否处于 task2 讨论模式：存在 bmcDiscussionStartBlock 且最近一次 end 在最近一次 start 之前（即尚未点击重新生成结束讨论） */
+function isInBmcDiscussionMode() {
+  const arr = problemDetailChatMessages || [];
+  let lastStartIdx = -1;
+  let lastEndIdx = -1;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i]?.type === 'bmcDiscussionStartBlock') lastStartIdx = i;
+    if (arr[i]?.type === 'bmcDiscussionEndBlock') lastEndIdx = i;
+  }
+  return lastStartIdx >= 0 && lastEndIdx < lastStartIdx;
+}
+
+/** 更新对话区标题栏右上角讨论动画：讨论模式下显示，否则隐藏 */
+function updateProblemDetailChatDiscussionIndicator() {
+  const ind = el.problemDetailChatDiscussionIndicator;
+  if (!ind) return;
+  if (isInBmcDiscussionMode()) {
+    ind.hidden = false;
+    ind.removeAttribute('aria-hidden');
+  } else {
+    ind.hidden = true;
+    ind.setAttribute('aria-hidden', 'true');
+  }
+}
+
 /** 更新问题详情对话区标题栏标签：Agent 模式显示「当前任务：【当前任务名称】」（任务名蓝底白字），Ask 模式显示「询问讨论模式」 */
 function updateProblemDetailChatHeaderLabel() {
   const labelEl = el.problemDetailChatHeaderLabel;
   if (!labelEl) return;
   if (problemDetailChatMode === 'ask') {
     labelEl.textContent = '询问讨论模式';
+    updateProblemDetailChatDiscussionIndicator();
     return;
   }
   const item = currentProblemDetailItem;
@@ -6243,6 +6401,7 @@ function updateProblemDetailChatHeaderLabel() {
   badge.setAttribute('role', 'button');
   badge.setAttribute('tabindex', '0');
   labelEl.appendChild(badge);
+  updateProblemDetailChatDiscussionIndicator();
 }
 
 /** 根据 Agent/Ask 模式更新输入框样式与占位符：Ask 模式为淡绿色底色，占位符为「您想了解本项目的什么信息？」 */
@@ -6831,26 +6990,21 @@ async function runBmcGeneration() {
   await new Promise((r) => setTimeout(r, 400));
   const json = problemDetailConfirmedBasicInfo;
   loading1.remove();
-  const extractedBlock = document.createElement('div');
-  extractedBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsed';
-  extractedBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">基本信息 json 提取完毕</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(extractedBlock);
-  const jsonBlock = document.createElement('div');
-  jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible';
-  jsonBlock.innerHTML = `<div class="problem-detail-chat-json-wrap" role="button" tabindex="0"><pre class="problem-detail-chat-json-pre">${escapeHtml(JSON.stringify(json, null, 2))}</pre></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(jsonBlock);
-  setupProblemDetailJsonBlockToggle(jsonBlock);
-  pushAndSaveProblemDetailChat({ role: 'system', content: '基本信息 json 提取完毕', timestamp: getTimeStr(), hasCheck: true });
-  pushAndSaveProblemDetailChat({ type: 'basicInfoJsonBlock', json, timestamp: getTimeStr() });
-  container.scrollTop = container.scrollHeight;
-
   const loading2 = document.createElement('div');
   loading2.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
   loading2.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在生成企业商业画布 BMC</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
   container.appendChild(loading2);
   container.scrollTop = container.scrollHeight;
   try {
-    const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await window.generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo);
+    const item = currentProblemDetailItem;
+    const prelim = item?.preliminaryReq || {};
+    const preliminaryReqJson = {
+      customerName: prelim.customerName ?? item?.customerName ?? item?.customer_name ?? '',
+      customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item?.customerNeedsOrChallenges ?? item?.customer_needs_or_challenges ?? '',
+      customerItStatus: prelim.customerItStatus ?? item?.customerItStatus ?? item?.customer_it_status ?? '',
+      projectTimeRequirement: prelim.projectTimeRequirement ?? item?.projectTimeRequirement ?? item?.project_time_requirement ?? '',
+    };
+    const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await window.generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo, preliminaryReqJson);
     loading2.remove();
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
     pushAndSaveProblemDetailChat(window.buildTask2LlmQueryMessage({ fullPrompt, parsed: bmc, rawOutput, timestamp: getTimeStr(), usage, model, durationMs }));
@@ -7839,6 +7993,12 @@ function renderProblemDetailChatFromStorage(container, messages) {
     } else if (msg.type === 'taskContextBlock') {
       /* 上下文内容块仅时间线展示，聊天区不渲染 */
       return;
+    } else if (msg.type === 'bmcDiscussionEndBlock') {
+      /* 讨论结束标记仅用于状态，聊天区不渲染 */
+      return;
+    } else if (msg.role === 'system' && typeof msg.content === 'string' && msg.content.trim() === '基本信息 json 提取完毕') {
+      /* 基本信息 json 提取完毕不再在聊天区展示 */
+      return;
     } else if (msg.type === 'taskCompletionConfirmBlock') {
       const taskId = msg.taskId || '';
       const taskName = msg.taskName || (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === taskId)?.name) || taskId;
@@ -7891,6 +8051,35 @@ function renderProblemDetailChatFromStorage(container, messages) {
             <button type="button" class="btn-confirm-modification-response btn-confirm-primary" ${confirmed ? 'disabled' : ''}>${confirmed ? '已确认' : '确认'}</button>
             <button type="button" class="btn-refine-modify" ${confirmed ? 'disabled' : ''}>修正</button>
             <button type="button" class="btn-refine-discuss" ${confirmed ? 'disabled' : ''}>讨论</button>
+          </div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
+      container.appendChild(block);
+    } else if (msg.type === 'bmcDiscussionStartBlock') {
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-discussion-start problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.dataset.taskId = msg.taskId || 'task2';
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content">— 讨论 —</div>
+        </div>
+        <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
+      container.appendChild(block);
+    } else if (msg.type === 'bmcDiscussionReplyBlock') {
+      const llmMetaHtml = msg.llmMeta ? buildLlmMetaHtml(msg.llmMeta) : '';
+      const block = document.createElement('div');
+      block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-bmc-discussion-reply problem-detail-chat-msg-with-delete';
+      block.dataset.msgIndex = String(idx);
+      block.dataset.taskId = msg.taskId || 'task2';
+      block.innerHTML = `
+        <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
+        <div class="problem-detail-chat-msg-content-wrap">
+          <div class="problem-detail-chat-msg-content markdown-body">${renderMarkdown(msg.content || '')}</div>
+          <div class="problem-detail-bmc-discussion-reply-actions">
+            <button type="button" class="btn-bmc-discuss-continue">继续讨论</button>
+            <button type="button" class="btn-bmc-discuss-regenerate">重新生成</button>
           </div>
         </div>
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>${llmMetaHtml}`;
@@ -8263,12 +8452,8 @@ function renderProblemDetailChatFromStorage(container, messages) {
         <div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
       container.appendChild(block);
     } else if (msg.type === 'basicInfoJsonBlock') {
-      const jsonBlock = document.createElement('div');
-      jsonBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-json-block problem-detail-chat-json-collapsible problem-detail-chat-msg-with-delete';
-      jsonBlock.dataset.msgIndex = String(idx);
-      jsonBlock.innerHTML = `<button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button><div class="problem-detail-chat-json-wrap" role="button" tabindex="0"><pre class="problem-detail-chat-json-pre">${escapeHtml(JSON.stringify(msg.json || {}, null, 2))}</pre></div><div class="problem-detail-chat-msg-time">${escapeHtml(msg.timestamp || '')}</div>`;
-      container.appendChild(jsonBlock);
-      setupProblemDetailJsonBlockToggle(jsonBlock);
+      /* 客户基本信息提取的 JSON 卡片不再在聊天区展示，仅时间线等可保留 */
+      return;
     } else if (msg.type === 'modificationClarificationRequest') {
       const block = document.createElement('div');
       block.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-clarification';
@@ -8795,6 +8980,46 @@ function pushAndSaveProblemDetailChat(msg) {
   saveProblemDetailChat(currentProblemDetailItem?.createdAt, problemDetailChatMessages);
 }
 
+/** 获取当前用于渲染工作区 BMC 的 base bmc data：优先当前条目 bmc，否则取聊天中最后一张 bmcCard 的 data */
+function getBaseBmcData() {
+  const item = currentProblemDetailItem;
+  if (item?.bmc && typeof item.bmc === 'object' && Object.keys(item.bmc).length > 0) return item.bmc;
+  const arr = problemDetailChatMessages || [];
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i]?.type === 'bmcCard' && arr[i]?.data) return arr[i].data;
+  }
+  return {};
+}
+
+/** 讨论模式开始后的历史交互（时间线）：从最后一条 bmcDiscussionStartBlock 之后到 bmcDiscussionEndBlock 或当前用户消息之前，格式化为 { role, content }[] */
+function getBmcDiscussionHistory() {
+  const arr = problemDetailChatMessages || [];
+  let startIdx = -1;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i]?.type === 'bmcDiscussionStartBlock') {
+      startIdx = i;
+      break;
+    }
+  }
+  if (startIdx < 0) return [];
+  let endIdx = -1;
+  for (let i = startIdx + 1; i < arr.length; i++) {
+    if (arr[i]?.type === 'bmcDiscussionEndBlock') {
+      endIdx = i;
+      break;
+    }
+  }
+  const lastIdx = endIdx >= 0 ? endIdx - 1 : arr.length - 2;
+  const out = [];
+  for (let j = startIdx + 1; j <= lastIdx && j < arr.length - 1; j++) {
+    const m = arr[j];
+    if (!m) continue;
+    if (m.role === 'user' && m.content != null) out.push({ role: 'user', content: String(m.content) });
+    else if (m.type === 'bmcDiscussionReplyBlock' && m.content != null) out.push({ role: 'assistant', content: String(m.content) });
+  }
+  return out;
+}
+
 function setupProblemDetailChatTextToggle(msgBlock) {
   const wrap = msgBlock?.querySelector('.problem-detail-chat-msg-content-wrap');
   if (!wrap) return;
@@ -8937,12 +9162,19 @@ async function handleProblemDetailChatSend() {
   appendProblemDetailChatMessage(container, 'user', text);
 
   if (problemDetailWaitingForFeedback) {
-    const { taskId, createdAt, type } = problemDetailWaitingForFeedback;
+    const { taskId, createdAt, type, sourceMsgIndex } = problemDetailWaitingForFeedback;
     problemDetailWaitingForFeedback = null;
     if (type === 'modification' && problemDetailChatMessages.length > 0) {
       const lastMsg = problemDetailChatMessages[problemDetailChatMessages.length - 1];
       if (lastMsg && lastMsg.role === 'user') {
         lastMsg._logType = 'modify';
+        saveProblemDetailChat(createdAt, problemDetailChatMessages);
+      }
+    }
+    if (taskId === 'task2' && type === 'discussion' && problemDetailChatMessages.length > 0) {
+      const lastMsg = problemDetailChatMessages[problemDetailChatMessages.length - 1];
+      if (lastMsg && lastMsg.role === 'user') {
+        lastMsg._logType = 'bmcDiscussionUser';
         saveProblemDetailChat(createdAt, problemDetailChatMessages);
       }
     }
@@ -8954,6 +9186,102 @@ async function handleProblemDetailChatSend() {
     try {
       const chatsExcludingThis = problemDetailChatMessages.slice(0, -1);
       const timelineContext = buildTaskTimelineContextForLLM(createdAt, taskId, chatsExcludingThis);
+      if (taskId === 'task2') {
+        if (type === 'discussion') {
+          const runBmcDiscussionTurn = typeof window.runBmcDiscussionTurn === 'function' ? window.runBmcDiscussionTurn : null;
+          if (!runBmcDiscussionTurn) throw new Error('BMC 讨论模式函数未定义');
+          const baseBmcData = getBaseBmcData();
+          const discussionHistory = getBmcDiscussionHistory();
+          const { content: replyContent, usage, model, durationMs, fullPrompt } = await runBmcDiscussionTurn(baseBmcData, discussionHistory, text);
+          parsingBlock.remove();
+          pushAndSaveProblemDetailChat({
+            type: 'bmcDiscussionLlmQueryBlock',
+            taskId: 'task2',
+            noteName: '大模型讨论应答',
+            llmInputPrompt: fullPrompt || '',
+            llmOutputRaw: replyContent || '',
+            timestamp: getTimeStr(),
+            llmMeta: { usage, model, durationMs },
+          });
+          pushAndSaveProblemDetailChat({
+            type: 'bmcDiscussionReplyBlock',
+            taskId: 'task2',
+            content: replyContent,
+            timestamp: getTimeStr(),
+            llmMeta: { usage, model, durationMs },
+          });
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+        updateProblemDetailChatDiscussionIndicator();
+        if (sendBtn) sendBtn.disabled = false;
+        return;
+        }
+        const basicInfoJson = problemDetailConfirmedBasicInfo || currentProblemDetailItem?.basicInfo || {};
+        if (!basicInfoJson || Object.keys(basicInfoJson).length === 0) {
+          throw new Error('商业画布加载需要已确认的客户基本信息');
+        }
+        const sourceMsg = typeof sourceMsgIndex === 'number' && sourceMsgIndex >= 0 && sourceMsgIndex < problemDetailChatMessages.length ? problemDetailChatMessages[sourceMsgIndex] : null;
+        let prevBmc = sourceMsg?.data || {};
+        if (!prevBmc || Object.keys(prevBmc).length === 0) {
+          for (let i = problemDetailChatMessages.length - 1; i >= 0; i--) {
+            if (problemDetailChatMessages[i]?.type === 'bmcCard') {
+              prevBmc = problemDetailChatMessages[i]?.data || {};
+              break;
+            }
+          }
+        }
+        if (!prevBmc || Object.keys(prevBmc).length === 0) {
+          throw new Error('商业画布加载需要已生成的 BMC 作为上下文');
+        }
+        const genFn = typeof window.generateBmcFromBasicInfoWithFeedback === 'function' ? window.generateBmcFromBasicInfoWithFeedback : null;
+        if (!genFn) throw new Error('BMC 细化生成函数未定义');
+        const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await genFn(basicInfoJson, prevBmc, text, type);
+        parsingBlock.remove();
+
+        // 替换最近一次的 BMC 提炼结果：移除旧 bmcCard + 对应 task2LlmQueryBlock，避免出现多份待确认卡片
+        const bmcIdx = problemDetailChatMessages.findLastIndex((m) => m.type === 'bmcCard');
+        const qIdx = (() => {
+          if (bmcIdx < 0) return -1;
+          for (let i = bmcIdx - 1; i >= 0; i--) {
+            if (problemDetailChatMessages[i]?.type === 'task2LlmQueryBlock') return i;
+          }
+          return -1;
+        })();
+        const toRemove = [bmcIdx, qIdx].filter((i) => typeof i === 'number' && i >= 0).sort((a, b) => b - a);
+        if (toRemove.length) {
+          toRemove.forEach((i) => problemDetailChatMessages.splice(i, 1));
+          saveProblemDetailChat(createdAt, problemDetailChatMessages);
+        }
+
+        pushAndSaveProblemDetailChat(
+          window.buildTask2LlmQueryMessage({
+            fullPrompt,
+            parsed: bmc,
+            rawOutput,
+            timestamp: getTimeStr(),
+            usage,
+            model,
+            durationMs,
+          })
+        );
+        pushAndSaveProblemDetailChat({
+          type: 'bmcCard',
+          data: bmc,
+          confirmed: false,
+          timestamp: getTimeStr(),
+          llmMeta: { usage, model, durationMs },
+        });
+
+        container.innerHTML = '';
+        renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+        container.scrollTop = container.scrollHeight;
+        renderProblemDetailHistory();
+        if (sendBtn) sendBtn.disabled = false;
+        return;
+      }
+
       const { content, usage, model, durationMs } = await requestRefinementFromFeedback(taskId, createdAt, timelineContext, text, type);
       parsingBlock.remove();
       const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
@@ -9126,7 +9454,63 @@ async function handleProblemDetailChatSend() {
   }
 
   // Agent 模式：不进行查询、修改意图的提取，仅响应任务相关的内容确认、修正、讨论
+  // 若当前处于 task2 讨论延续（已有讨论开始标记且最后一条为用户消息），则按继续讨论处理，避免“继续讨论”点击后状态丢失导致误提示
   if (problemDetailChatMode === 'agent') {
+    const hasBmcDiscussionStart = Array.isArray(problemDetailChatMessages) && problemDetailChatMessages.some((m) => m?.type === 'bmcDiscussionStartBlock');
+    const lastMsg = problemDetailChatMessages.length > 0 ? problemDetailChatMessages[problemDetailChatMessages.length - 1] : null;
+    const lastIsUser = lastMsg && lastMsg.role === 'user';
+    const createdAt = currentProblemDetailItem?.createdAt;
+    if (hasBmcDiscussionStart && lastIsUser && createdAt) {
+      lastMsg._logType = 'bmcDiscussionUser';
+      saveProblemDetailChat(createdAt, problemDetailChatMessages);
+      const parsingBlock = document.createElement('div');
+      parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
+      parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在根据您的反馈讨论…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+      container.appendChild(parsingBlock);
+      container.scrollTop = container.scrollHeight;
+      const runBmcDiscussionTurn = typeof window.runBmcDiscussionTurn === 'function' ? window.runBmcDiscussionTurn : null;
+      if (runBmcDiscussionTurn) {
+        const baseBmcData = getBaseBmcData();
+        const discussionHistory = getBmcDiscussionHistory();
+        runBmcDiscussionTurn(baseBmcData, discussionHistory, text).then(({ content: replyContent, usage, model, durationMs, fullPrompt }) => {
+          parsingBlock.remove();
+          pushAndSaveProblemDetailChat({
+            type: 'bmcDiscussionLlmQueryBlock',
+            taskId: 'task2',
+            noteName: '大模型讨论应答',
+            llmInputPrompt: fullPrompt || '',
+            llmOutputRaw: replyContent || '',
+            timestamp: getTimeStr(),
+            llmMeta: { usage, model, durationMs },
+          });
+          pushAndSaveProblemDetailChat({
+            type: 'bmcDiscussionReplyBlock',
+            taskId: 'task2',
+            content: replyContent,
+            timestamp: getTimeStr(),
+            llmMeta: { usage, model, durationMs },
+          });
+          container.innerHTML = '';
+          renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
+          container.scrollTop = container.scrollHeight;
+          renderProblemDetailHistory();
+          if (sendBtn) sendBtn.disabled = false;
+        }).catch((err) => {
+          parsingBlock.remove();
+          const errBlock = document.createElement('div');
+          errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
+          errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">讨论失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
+          container.appendChild(errBlock);
+          pushAndSaveProblemDetailChat({ role: 'system', content: '讨论失败：' + (err.message || String(err)), timestamp: getTimeStr() });
+          container.scrollTop = container.scrollHeight;
+          if (sendBtn) sendBtn.disabled = false;
+        });
+      } else {
+        parsingBlock.remove();
+        if (sendBtn) sendBtn.disabled = false;
+      }
+      return;
+    }
     const tipBlock = document.createElement('div');
     tipBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
     tipBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">Agent 模式下请使用内容卡片上的确认、修正、讨论按钮推进任务；自由查询请切换至 Ask 模式。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;

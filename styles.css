@@ -835,6 +835,42 @@ body {
   color: var(--text-muted);
 }
 
+/* 标题栏右上角：讨论模式动画（三点跳动 + 「讨论」文案） */
+.problem-detail-chat-discussion-indicator {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--accent);
+  font-weight: 500;
+}
+.problem-detail-chat-discussion-indicator[hidden] {
+  display: none;
+}
+.problem-detail-chat-discussion-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.problem-detail-chat-discussion-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: problem-detail-discussion-dot 0.6s ease-in-out infinite both;
+}
+.problem-detail-chat-discussion-dots span:nth-child(1) { animation-delay: 0s; }
+.problem-detail-chat-discussion-dots span:nth-child(2) { animation-delay: 0.1s; }
+.problem-detail-chat-discussion-dots span:nth-child(3) { animation-delay: 0.2s; }
+@keyframes problem-detail-discussion-dot {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.6; }
+  40% { transform: scale(1.2); opacity: 1; }
+}
+.problem-detail-chat-discussion-label {
+  letter-spacing: 0.02em;
+}
+
 /* Agent 模式：当前任务名称蓝底白字标签，可点击定位到工作区对应卡片 */
 .problem-detail-chat-current-task-badge {
   display: inline-block;
