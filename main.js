@@ -52,6 +52,11 @@ async function analyzeToolDiscussionIntent(text) {
 
 /** 任务5 IT 现状标注入口由 js/task5ItStatus.js 提供 */
 const runItStatusAnnotation = (typeof window !== 'undefined' && window.runItStatusAnnotation) || (async function () {});
+const runPainPointAnnotation = (typeof window !== 'undefined' && window.runPainPointAnnotation) || (async function () {});
+const runPainPointAnnotationForNextStep = (typeof window !== 'undefined' && window.runPainPointAnnotationForNextStep) || (async function () { return null; });
+const applyPainPointStepConfirm = (typeof window !== 'undefined' && window.applyPainPointStepConfirm) || (function () { return false; });
+const runPainPointAnnotationAutoSequential = (typeof window !== 'undefined' && window.runPainPointAnnotationAutoSequential) || (async function () {});
+const generatePainPointSessions = (typeof window !== 'undefined' && window.generatePainPointSessions) || (function () { return []; });
 
 /** 当前详情页的公司名称，用于对话上下文 */
 let currentDetailCompanyName = '';
@@ -184,6 +189,9 @@ let problemDetailConfirmedBasicInfo = null;
 
 /** 当前问题详情页的聊天记录（用于持久化） */
 let problemDetailChatMessages = [];
+
+/** 供 task5/task6 等模块获取当前聊天消息数组（main 中为 let 未挂 window，模块重绘聊天区时需用此 getter） */
+if (typeof window !== 'undefined') window.getProblemDetailChatMessages = function getProblemDetailChatMessages() { return problemDetailChatMessages; };
 
 /** 问题详情对话模式：'agent' | 'ask'，Agent 与大模型完整联动，Ask 仅支持查询与讨论 */
 let problemDetailChatMode = 'agent';
@@ -2105,7 +2113,7 @@ if (el.problemDetailChatMessages) {
           currentProblemDetailItem = { ...item, painPointSessions: sessions };
           pushAndSaveProblemDetailChat({ type: 'painPointSessionsBlock', taskId: 'task6', sessions, timestamp: getTimeStr() });
         } else {
-          runPainPointAnnotation(false);
+          runPainPointAnnotation(currentProblemDetailItem, false);
         }
       } else if (taskId !== 'task9' && taskId !== 'task11' && taskId !== 'task12' && taskId !== 'task4') {
         // 去重：若最近几条中已有同 taskId 的 taskContextBlock（如双击导致），则不再推送，避免时间线出现两条「上下文」
@@ -2393,7 +2401,7 @@ if (el.problemDetailChatMessages) {
         }
         renderProblemDetailHistory();
       } else {
-        runPainPointAnnotation();
+        runPainPointAnnotation(currentProblemDetailItem);
       }
       return;
     }
@@ -2904,12 +2912,12 @@ if (el.problemDetailChatMessages) {
     }
     const autoPainPointSessionsBtn = e.target.closest('.btn-auto-pain-point-sessions');
     if (autoPainPointSessionsBtn && !autoPainPointSessionsBtn.disabled) {
-      requestAnimationFrame(() => { if (typeof runPainPointAnnotationAutoSequential === 'function') runPainPointAnnotationAutoSequential(); });
+      requestAnimationFrame(() => { if (typeof runPainPointAnnotationAutoSequential === 'function') runPainPointAnnotationAutoSequential(currentProblemDetailItem); });
       return;
     }
     const continuePainPointSessionsBtn = e.target.closest('.btn-continue-pain-point-sessions');
     if (continuePainPointSessionsBtn && !continuePainPointSessionsBtn.disabled) {
-      requestAnimationFrame(() => { if (typeof runPainPointAnnotationForNextStep === 'function') runPainPointAnnotationForNextStep(); });
+      requestAnimationFrame(() => { if (typeof runPainPointAnnotationForNextStep === 'function') runPainPointAnnotationForNextStep(currentProblemDetailItem); });
       return;
     }
     const confirmPainPointStepBtn = e.target.closest('.btn-confirm-pain-point-step');
@@ -2922,9 +2930,28 @@ if (el.problemDetailChatMessages) {
         const allDone = typeof applyPainPointStepConfirm === 'function' && applyPainPointStepConfirm(item.createdAt, stepIndex, painPointText);
         confirmPainPointStepBtn.textContent = '已确认';
         confirmPainPointStepBtn.disabled = true;
+        // 同步将最近一条 task6 的 LLM-查询 块标记为已确认，用于时间线显示「LLM-查询 + 确认」
+        const cardIdxForConfirm = problemDetailChatMessages.findIndex((m) => m.type === 'painPointStepCard' && m.stepIndex === stepIndex);
+        if (cardIdxForConfirm >= 0) {
+          for (let j = cardIdxForConfirm - 1; j >= 0; j--) {
+            const q = problemDetailChatMessages[j];
+            if (q?.type === 'task6LlmQueryBlock') {
+              problemDetailChatMessages[j] = { ...q, confirmed: true };
+              saveProblemDetailChat(item.createdAt, problemDetailChatMessages);
+              break;
+            }
+          }
+        }
         if (allDone) {
           requestAnimationFrame(() => {
             showTaskCompletionConfirm('task6', (FOLLOW_TASKS || []).find((t) => t.id === 'task6')?.name || '痛点标注');
+          });
+        } else {
+          // 手动顺序执行：确认当前环节后自动进行下一 session 环节的大模型调用
+          const updated = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
+          if (updated) currentProblemDetailItem = updated;
+          requestAnimationFrame(() => {
+            if (typeof runPainPointAnnotationForNextStep === 'function') runPainPointAnnotationForNextStep(currentProblemDetailItem);
           });
         }
       }
@@ -3555,7 +3582,7 @@ if (el.problemDetailChatMessages) {
             task3: runRequirementLogicConstruction,
             task4: runValueStreamGeneration,
             task5: runItStatusAnnotation,
-            task6: () => runPainPointAnnotation(true),
+            task6: () => runPainPointAnnotation(currentProblemDetailItem, true),
           };
           const run = runMap[extracted.executeTaskId];
           if (run) {
@@ -5693,37 +5720,7 @@ if (typeof window !== 'undefined') {
   window.VALUE_STREAM_PROMPT = VALUE_STREAM_PROMPT;
 }
 
-/** IT_STATUS_ANNOTATION_PROMPT 已移至 js/task5ItStatus.js */
-
-const PAIN_POINT_ANNOTATION_PROMPT = `# 角色设定
-你是一位资深的业务架构师与痛点分析专家，擅长结合需求逻辑识别各业务环节中的痛点。
-
-# 输入数据
-1. **requirement_logic**：当前需求单→需求理解页面→需求逻辑内容。
-2. **value_stream**：已绘制的价值流图 JSON，包含 stages 及每个 stage 下的 steps（环节节点）。
-
-# 任务
-请结合需求逻辑，在价值流图的每个环节节点中提炼该环节涉及到的痛点。为每个 step 增加 \`painPoint\` 字段，内容为该环节痛点的精炼概括（一句话或简短列表）。若某环节无明显痛点，可留空字符串或简短说明「无明显痛点」。
-
-# 输出格式
-请直接返回一个 JSON 代码块，结构与输入 value_stream 一致，但在每个 step 中增加 \`painPoint\` 字段：
-\`\`\`json
-{
-  "stages": [
-    {
-      "name": "阶段名称",
-      "steps": [
-        {
-          "name": "环节名称",
-          "painPoint": "该环节痛点的提炼概括"
-        }
-      ]
-    }
-  ]
-}
-\`\`\`
-- painPoint 为字符串，提炼当前环节涉及到的痛点
-- 保持原有 stages、steps 结构及 name、role、duration、itStatus 等字段不变，仅新增 painPoint`;
+/** IT_STATUS_ANNOTATION_PROMPT 已移至 js/task5ItStatus.js；PAIN_POINT_ANNOTATION_PROMPT、generatePainPointSessions 等已移至 js/task6PainPoint.js */
 
 const GLOBAL_ITGAP_PROMPT = `# 角色设定
 你是一位拥有工业数字化背景的资深业务架构师。你擅长运用 McKinsey 7-Step 方法论，从全局视角审视企业端到端流程中的"IT 断点"。
@@ -5807,70 +5804,6 @@ function buildGlobalItGapStructuredHtml(analysis) {
     parts.push(`<div class="problem-detail-global-itgap-section"><h4 class="problem-detail-global-itgap-section-title">${escapeHtml(label)}</h4><div class="problem-detail-global-itgap-section-content markdown-body">${content === '—' ? '—' : renderMarkdown(content)}</div></div>`);
   }
   return parts.join('');
-}
-
-/** 根据价值流生成痛点标注 session 列表（环节列表），用于「痛点标注 session 计划确认」卡片 */
-function generatePainPointSessions(valueStream) {
-  const { stages } = parseValueStreamGraph(valueStream || {});
-  let stepIndex = 0;
-  const sessions = [];
-  for (const stage of stages) {
-    const stageName = stage?.name || '';
-    for (const step of stage.steps || []) {
-      const stepName = step?.name || `环节${stepIndex + 1}`;
-      sessions.push({ stepName, stepIndex, stageName, painPoint: null });
-      stepIndex += 1;
-    }
-  }
-  return sessions;
-}
-
-async function generatePainPointAnnotation(valueStream, requirementLogic) {
-  const userContent = `请结合需求逻辑，在价值流图各环节标注痛点。
-
-## requirement_logic（需求逻辑 - 需求理解页面→需求逻辑内容）
-\`\`\`json
-${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic || {}, null, 2)}
-\`\`\`
-
-## value_stream（已绘制的价值流图）
-\`\`\`json
-${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || {}, null, 2)}
-\`\`\`
-
-请按提示词要求，为每个环节增加 painPoint 字段，直接返回完整 JSON 代码块。`;
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: PAIN_POINT_ANNOTATION_PROMPT },
-    { role: 'user', content: userContent },
-  ]);
-  return { content, usage, model, durationMs };
-}
-
-/** 单环节痛点标注：仅针对指定环节调用大模型，返回该环节的痛点文案。 */
-async function generatePainPointForOneStep(stepName, stageName, valueStream, requirementLogic) {
-  const userContent = `请结合需求逻辑，仅针对以下**单个环节**提炼痛点，直接返回该环节的痛点概括（一句话或简短列表）。若该环节无明显痛点，请返回「无明显痛点」或「无」。
-
-## 目标环节
-- 阶段：${stageName || '—'}
-- 环节名称：${stepName || '—'}
-
-## requirement_logic（需求逻辑）
-\`\`\`json
-${typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic || {}, null, 2)}
-\`\`\`
-
-## value_stream（价值流图，供上下文）
-\`\`\`json
-${typeof valueStream === 'string' ? valueStream : JSON.stringify(valueStream || {}, null, 2)}
-\`\`\`
-
-请只输出该环节的痛点文案，不要输出 JSON 或其它格式。`;
-  const { content, usage, model, durationMs } = await fetchDeepSeekChat([
-    { role: 'system', content: PAIN_POINT_ANNOTATION_PROMPT },
-    { role: 'user', content: userContent },
-  ]);
-  const painPointText = (content || '').trim();
-  return { content: painPointText, usage, model, durationMs };
 }
 
 async function generateGlobalItGapAnalysis(enterpriseContext, businessCanvas, fullProcessVsm) {
@@ -6357,9 +6290,27 @@ function buildItemAfterRollbackToTask(item, prevTaskId) {
       }
       break;
     }
-    case 'task6':
-      nextItem = { ...nextItem, workflowAlignCompletedStages: wfCompleted.filter((x) => x !== 2) };
+    case 'task6': {
+      nextItem = { ...nextItem, workflowAlignCompletedStages: wfCompleted.filter((x) => x !== 2), painPointSessions: undefined };
+      const vs = nextItem.valueStream;
+      if (vs && !vs.raw && (vs.stages || vs.phases || vs.nodes)) {
+        const rawStages = vs.stages ?? vs.phases ?? vs.nodes ?? [];
+        if (Array.isArray(rawStages)) {
+          const stages = rawStages.map((s) => {
+            if (!s || typeof s !== 'object') return s;
+            const rawSteps = s.steps ?? s.tasks ?? s.phases ?? s.items ?? [];
+            const steps = rawSteps.map((st) => {
+              if (typeof st !== 'object' || st == null) return st;
+              const { painPoint, pain_point, ...rest } = st;
+              return rest;
+            });
+            return { ...s, steps };
+          });
+          nextItem = { ...nextItem, valueStream: { ...vs, stages } };
+        }
+      }
       break;
+    }
     case 'task7':
       nextItem = { ...nextItem, itGapCompletedStages: itGapCompleted.filter((x) => x !== 0) };
       break;
@@ -7829,228 +7780,15 @@ async function runGlobalItGapAnalysis(isRedo) {
   }
 }
 
-/** runItStatusAnnotation、generateItStatusAnnotation 已移至 js/task5ItStatus.js，主流程通过 global.runItStatusAnnotation 调用 */
+/** runItStatusAnnotation、generateItStatusAnnotation 已移至 js/task5ItStatus.js；runPainPointAnnotation、runPainPointAnnotationForNextStep 等已移至 js/task6PainPoint.js */
 
-async function runPainPointAnnotation(isRerun) {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt) return;
-  if (!hasAiConfig()) {
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用痛点标注功能。</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '请先配置 AI（local 模式填写 DEEPSEEK_API_KEY，online 模式配置 BACKEND_API_URL）才能使用痛点标注功能。', timestamp: getTimeStr() });
-    return;
-  }
-  const valueStream = item.valueStream;
-  const requirementLogic = item.requirementLogic || {};
-  const logicForPrompt = typeof requirementLogic === 'string' ? requirementLogic : JSON.stringify(requirementLogic, null, 2);
-  let loadingBlock = isRerun ? (() => { const arr = container.querySelectorAll('.problem-detail-chat-msg-parsing'); return arr[arr.length - 1] || null; })() : null;
-  if (!loadingBlock) {
-    loadingBlock = document.createElement('div');
-    loadingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
-    loadingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在标注价值流图各环节痛点…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(loadingBlock);
-  }
-  container.scrollTop = container.scrollHeight;
-  try {
-    const { content, usage, model, durationMs } = await generatePainPointAnnotation(valueStream, logicForPrompt);
-    loadingBlock.remove();
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    let annotatedVs = null;
-    if (jsonMatch) {
-      try {
-        annotatedVs = JSON.parse(jsonMatch[1].trim());
-      } catch (_) {}
-    }
-    if (!annotatedVs) {
-      const fallbackMatch = content.match(/\{[\s\S]*\}/);
-      if (fallbackMatch) {
-        try {
-          annotatedVs = JSON.parse(fallbackMatch[0]);
-        } catch (_) {}
-      }
-    }
-    const mergedVs = annotatedVs ? mergePainPointIntoValueStream(valueStream, annotatedVs) : valueStream;
-    pushOperationToHistory(item.createdAt, 'painPoint', JSON.parse(JSON.stringify(item)), problemDetailChatMessages.length);
-    updateDigitalProblemValueStreamPainPoint(item.createdAt, mergedVs);
-    currentProblemDetailItem = { ...item, valueStream: mergedVs, workflowAlignCompletedStages: [...new Set([...(item.workflowAlignCompletedStages || []), 0, 1, 2])].sort((a, b) => a - b) };
-    renderProblemDetailContent();
-    const doneText = isRerun ? '痛点标注完毕' : '痛点标注完成';
-    const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
-    const doneBlock = document.createElement('div');
-    doneBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsed';
-    doneBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">${escapeHtml(doneText)}</div><span class="problem-detail-chat-check" aria-hidden="true">✅</span></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMeta}`;
-    container.appendChild(doneBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: doneText, timestamp: getTimeStr(), hasCheck: true, llmMeta: { usage, model, durationMs } });
-    container.scrollTop = container.scrollHeight;
-    requestAnimationFrame(() => showNextTaskStartNotification());
-  } catch (err) {
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">痛点标注失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '痛点标注失败：' + (err.message || String(err)), timestamp: getTimeStr() });
-  }
-}
-
-/** 执行下一个未标注环节的痛点标注（单步），推送痛点卡片。成功时返回 { stepIndex, painPointText }，无下一环节或失败时返回 null。 */
-async function runPainPointAnnotationForNextStep() {
-  const container = el.problemDetailChatMessages;
-  const item = currentProblemDetailItem;
-  if (!container || !item?.createdAt || !DEEPSEEK_API_KEY) return null;
-  const sessions = item.painPointSessions || [];
-  const valueStream = item.valueStream;
-  const requirementLogic = item.requirementLogic != null ? item.requirementLogic : {};
-  if (!valueStream || valueStream.raw) return null;
-  const nextIdx = sessions.findIndex((s) => s.painPoint == null || (typeof s.painPoint === 'string' && !s.painPoint.trim()));
-  if (nextIdx < 0) return null;
-  const session = sessions[nextIdx];
-  const stepName = session.stepName || `环节${nextIdx + 1}`;
-  const stageName = session.stageName || '';
-  pushAndSaveProblemDetailChat({ role: 'system', content: '正在标注环节【' + stepName + '】的痛点…', timestamp: getTimeStr() });
-  container.innerHTML = '';
-  renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
-  container.scrollTop = container.scrollHeight;
-  const parsingBlock = document.createElement('div');
-  parsingBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-msg-parsing';
-  parsingBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-parsing-inner"><span class="problem-detail-chat-spinner"></span><span class="problem-detail-chat-msg-content">正在标注环节【${escapeHtml(stepName)}】的痛点…</span></div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-  container.appendChild(parsingBlock);
-  container.scrollTop = container.scrollHeight;
-  try {
-    const { content: painPointText, usage, model, durationMs } = await generatePainPointForOneStep(stepName, stageName, valueStream, requirementLogic);
-    parsingBlock.remove();
-    const llmMeta = { usage, model, durationMs };
-    const llmMetaHtml = buildLlmMetaHtml(llmMeta);
-    const painPointContent = (painPointText && String(painPointText).trim()) || '';
-    const cardBlock = document.createElement('div');
-    cardBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system problem-detail-chat-pain-point-step-card problem-detail-chat-msg-with-delete';
-    cardBlock.dataset.msgIndex = String(problemDetailChatMessages.length);
-    cardBlock.dataset.taskId = 'task6';
-    cardBlock.dataset.stepName = stepName;
-    cardBlock.dataset.stepIndex = String(nextIdx);
-    cardBlock.innerHTML = `
-      <button type="button" class="btn-delete-chat-msg" aria-label="删除">${DELETE_CHAT_MSG_ICON}</button>
-      <div class="problem-detail-chat-pain-point-step-card-wrap">
-        <div class="problem-detail-chat-pain-point-step-card-header">痛点标注：${escapeHtml(stepName)}</div>
-        <div class="problem-detail-chat-pain-point-step-card-body"><div class="problem-detail-chat-pain-point-step-content">${escapeHtml(painPointContent || '—')}</div></div>
-        <div class="problem-detail-chat-pain-point-step-card-actions">
-          <button type="button" class="btn-confirm-pain-point-step btn-confirm-primary" data-step-index="${nextIdx}">确认</button>
-          <button type="button" class="btn-redo-pain-point-step" data-step-index="${nextIdx}">重做</button>
-          <button type="button" class="btn-refine-modify" data-task-id="task6">修正</button>
-          <button type="button" class="btn-refine-discuss" data-task-id="task6">讨论</button>
-        </div>
-      </div>
-      <div class="problem-detail-chat-msg-time">${getTimeStr()}</div>${llmMetaHtml}`;
-    container.appendChild(cardBlock);
-    pushAndSaveProblemDetailChat({
-      type: 'painPointStepCard',
-      taskId: 'task6',
-      stepName,
-      stepIndex: nextIdx,
-      content: painPointContent,
-      timestamp: getTimeStr(),
-      confirmed: false,
-      llmMeta,
-    });
-    container.scrollTop = container.scrollHeight;
-    renderProblemDetailContent();
-    renderProblemDetailHistory();
-    return { stepIndex: nextIdx, painPointText: painPointContent };
-  } catch (err) {
-    parsingBlock.remove();
-    const errBlock = document.createElement('div');
-    errBlock.className = 'problem-detail-chat-msg problem-detail-chat-msg-system';
-    errBlock.innerHTML = `<div class="problem-detail-chat-msg-content-wrap"><div class="problem-detail-chat-msg-content">痛点标注失败：${escapeHtml(err.message || String(err))}</div></div><div class="problem-detail-chat-msg-time">${getTimeStr()}</div>`;
-    container.appendChild(errBlock);
-    pushAndSaveProblemDetailChat({ role: 'system', content: '痛点标注失败：' + (err.message || String(err)), timestamp: getTimeStr() });
-    container.scrollTop = container.scrollHeight;
-    return null;
-  }
-}
-
-/** 确认单步痛点并写回存储；刷新会话与 UI。若全部环节已标注则返回 true。 */
-function applyPainPointStepConfirm(createdAt, stepIndex, painPointText) {
-  if (typeof updateDigitalProblemPainPointStep !== 'function') return false;
-  updateDigitalProblemPainPointStep(createdAt, stepIndex, painPointText);
-  const cardIdx = problemDetailChatMessages.findIndex((m) => m.type === 'painPointStepCard' && m.stepIndex === stepIndex);
-  if (cardIdx >= 0) {
-    problemDetailChatMessages[cardIdx] = { ...problemDetailChatMessages[cardIdx], content: painPointText, confirmed: true };
-    saveProblemDetailChat(createdAt, problemDetailChatMessages);
-  }
-  const list = getDigitalProblems();
-  const updated = list.find((it) => it.createdAt === createdAt);
-  if (updated) currentProblemDetailItem = updated;
-  const sessions = updated?.painPointSessions || [];
-  const allDone = sessions.length > 0 && sessions.every((s) => s.painPoint != null && String(s.painPoint).trim());
-  const container = el.problemDetailChatMessages;
-  if (container) {
-    container.innerHTML = '';
-    renderProblemDetailChatFromStorage(container, problemDetailChatMessages);
-    container.scrollTop = container.scrollHeight;
-  }
-  renderProblemDetailContent();
-  renderProblemDetailHistory();
-  return !!allDone;
-}
-
-/** 自动顺序执行：循环执行下一未标注环节直到全部完成，每步自动确认并继续。 */
-async function runPainPointAnnotationAutoSequential() {
-  const item = currentProblemDetailItem;
-  if (!item?.createdAt) return;
-  const btn = document.querySelector('.btn-auto-pain-point-sessions');
-  if (btn && !btn.disabled) btn.disabled = true;
-  while (true) {
-    const r = await runPainPointAnnotationForNextStep();
-    if (!r) break;
-    const allDone = applyPainPointStepConfirm(item.createdAt, r.stepIndex, r.painPointText);
-    if (allDone) {
-      requestAnimationFrame(() => {
-        showTaskCompletionConfirm('task6', (FOLLOW_TASKS || []).find((t) => t.id === 'task6')?.name || '痛点标注');
-      });
-      break;
-    }
-    const nextItem = getDigitalProblems().find((it) => it.createdAt === item.createdAt);
-    if (nextItem) currentProblemDetailItem = nextItem;
-  }
-  if (btn) {
-    const sessions = currentProblemDetailItem?.painPointSessions || [];
-    const hasUnfinished = sessions.some((s) => s.painPoint == null || (typeof s.painPoint === 'string' && !s.painPoint.trim()));
-    btn.disabled = !hasUnfinished;
-  }
-}
-
-/** mergeItStatusIntoValueStream 已移至 js/task5ItStatus.js */
-
-function mergePainPointIntoValueStream(baseVs, annotatedVs) {
-  const baseStages = baseVs.stages ?? baseVs.phases ?? baseVs.nodes ?? [];
-  const annStages = annotatedVs.stages ?? annotatedVs.phases ?? annotatedVs.nodes ?? [];
-  if (!Array.isArray(baseStages) || !Array.isArray(annStages)) return baseVs;
-  const stages = baseStages.map((baseStage, si) => {
-    const annStage = annStages[si];
-    if (!annStage) return baseStage;
-    const baseSteps = baseStage.steps ?? baseStage.tasks ?? baseStage.phases ?? baseStage.items ?? [];
-    const annSteps = annStage.steps ?? annStage.tasks ?? annStage.phases ?? annStage.items ?? [];
-    const steps = baseSteps.map((baseStep, ji) => {
-      const annStep = annSteps[ji];
-      const painPoint = annStep?.painPoint ?? annStep?.pain_point;
-      if (painPoint == null || (typeof painPoint === 'string' && !painPoint.trim())) return baseStep;
-      const trimmed = typeof painPoint === 'string' ? painPoint.trim() : String(painPoint);
-      if (/^(无明显痛点|无痛点|暂无|无)$/i.test(trimmed) || /^无明显痛点/i.test(trimmed)) return baseStep;
-      const step = typeof baseStep === 'object' && baseStep !== null ? { ...baseStep } : { name: String(baseStep) };
-      step.painPoint = trimmed;
-      return step;
-    });
-    return { ...baseStage, steps };
-  });
-  return { ...baseVs, stages };
-}
+/** mergeItStatusIntoValueStream 已移至 js/task5ItStatus.js；mergePainPointIntoValueStream、runPainPointAnnotation 等已移至 js/task6PainPoint.js */
 
 function renderProblemDetailChatFromStorage(container, messages) {
   const item = currentProblemDetailItem;
   const inferTaskId = typeof window.inferTaskIdFromMessage === 'function' ? window.inferTaskIdFromMessage : () => null;
-  messages.forEach((msg, idx) => {
+  const list = Array.isArray(messages) ? messages : [];
+  list.forEach((msg, idx) => {
     const _taskId = inferTaskId(msg) || '';
     if (msg.type === 'taskStartNotification') {
       const taskName = msg.taskName || (FOLLOW_TASKS.concat(ITGAP_HISTORY_TASKS).concat(IT_STRATEGY_TASKS).find((t) => t.id === msg.taskId)?.name) || msg.taskId;
