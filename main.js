@@ -1723,6 +1723,13 @@ if (el.problemDetailHistoryPanel) {
 }
 if (el.problemDetailBody) {
   el.problemDetailBody.addEventListener('click', (e) => {
+    /* 沟通历史展开时，点击背后区域（对话区或工作区，非面板、非「沟通历史」按钮）则自动折叠 */
+    if (el.problemDetailHistoryPanel?.classList.contains('problem-detail-history-panel-open')) {
+      if (!el.problemDetailHistoryPanel.contains(e.target) && !(el.btnProblemDetailHistory && el.btnProblemDetailHistory.contains(e.target))) {
+        toggleProblemDetailHistory(false);
+        return;
+      }
+    }
     const triggerBtn = e.target.closest('.btn-trigger-local-itgap-session');
     if (triggerBtn && !triggerBtn.disabled) {
       e.preventDefault();
@@ -2178,17 +2185,9 @@ if (el.problemDetailChatMessages) {
             timestamp: getTimeStr(),
           });
         }
-        const prelim = item.preliminaryReq || {};
-        const preliminaryReqJson = {
-          customerName: prelim.customerName ?? item.customerName ?? item.customer_name ?? '',
-          customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
-          customerItStatus: prelim.customerItStatus ?? item.customerItStatus ?? item.customer_it_status ?? '',
-          projectTimeRequirement: prelim.projectTimeRequirement ?? item.projectTimeRequirement ?? item.project_time_requirement ?? '',
-          requirementDetail: prelim.requirementDetail ?? item.requirementDetail ?? item.requirement_detail ?? '',
-          operationModel: prelim.operationModel ?? item.operationModel ?? undefined,
-          businessStatus: prelim.businessStatus ?? item.businessStatus ?? '',
-          urgencyAnalysis: prelim.urgencyAnalysis ?? item.urgencyAnalysis ?? undefined,
-        };
+        const preliminaryReqJson = typeof window.buildPreliminarySummaryJson === 'function'
+          ? window.buildPreliminarySummaryJson(item)
+          : {};
         if (!hasPrelimCtx) {
           pushAndSaveProblemDetailChat({
             type: 'taskContextBlock',
@@ -6990,17 +6989,9 @@ async function runBmcGeneration() {
   container.scrollTop = container.scrollHeight;
   try {
     const item = currentProblemDetailItem;
-    const prelim = item?.preliminaryReq || {};
-    const preliminaryReqJson = {
-      customerName: prelim.customerName ?? item?.customerName ?? item?.customer_name ?? '',
-      customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item?.customerNeedsOrChallenges ?? item?.customer_needs_or_challenges ?? '',
-      customerItStatus: prelim.customerItStatus ?? item?.customerItStatus ?? item?.customer_it_status ?? '',
-      projectTimeRequirement: prelim.projectTimeRequirement ?? item?.projectTimeRequirement ?? item?.project_time_requirement ?? '',
-      requirementDetail: prelim.requirementDetail ?? item?.requirementDetail ?? item?.requirement_detail ?? '',
-      operationModel: prelim.operationModel ?? item?.operationModel,
-      businessStatus: prelim.businessStatus ?? item?.businessStatus ?? '',
-      urgencyAnalysis: prelim.urgencyAnalysis ?? item?.urgencyAnalysis,
-    };
+    const preliminaryReqJson = typeof window.buildPreliminarySummaryJson === 'function'
+      ? window.buildPreliminarySummaryJson(item)
+      : {};
     const { parsed: bmc, usage, model, durationMs, fullPrompt, rawOutput } = await window.generateBmcFromBasicInfo(problemDetailConfirmedBasicInfo, preliminaryReqJson);
     loading2.remove();
     const llmMeta = buildLlmMetaHtml({ usage, model, durationMs });
@@ -10269,9 +10260,11 @@ function renderProblemDetailContent() {
   ];
   let basicInfoCardHtml = '';
   if (problemDetailConfirmedBasicInfo) {
+    const renderBold = typeof window.renderMarkdownBold === 'function' ? window.renderMarkdownBold : (s) => s;
     const basicInfoRows = basicInfoLabels.map(({ key, label }) => {
       const value = (problemDetailConfirmedBasicInfo[key] != null ? String(problemDetailConfirmedBasicInfo[key]).trim() : '') || '—';
-      return `<div class="problem-detail-row" data-field="${escapeHtml(label)}"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${escapeHtml(value)}</span></div>`;
+      const valueHtml = renderBold(escapeHtml(value));
+      return `<div class="problem-detail-row" data-field="${escapeHtml(label)}"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${valueHtml}</span></div>`;
     }).join('');
     const basicInfoJsonStr = escapeHtml(JSON.stringify(problemDetailConfirmedBasicInfo, null, 2));
     basicInfoCardHtml = `
@@ -10293,17 +10286,21 @@ function renderProblemDetailContent() {
   let bmcCardHtml = '';
   if (item.bmc) {
     const bmc = item.bmc;
+    const renderBold = typeof window.renderMarkdownBold === 'function' ? window.renderMarkdownBold : (s) => s;
     const bmcRows = BMC_FIELDS.map(({ key, label }) => {
       const value = (bmc[key] != null ? String(bmc[key]).trim() : '') || '—';
-      return `<div class="problem-detail-row" data-field="${escapeHtml(label)}"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${escapeHtml(value)}</span></div>`;
+      const valueHtml = renderBold(escapeHtml(value));
+      return `<div class="problem-detail-row" data-field="${escapeHtml(label)}"><span class="problem-detail-label">${escapeHtml(label)}</span><span class="problem-detail-value">${valueHtml}</span></div>`;
     }).join('');
     const industryInsight = (bmc.industry_insight || '').trim();
     const painPoints = (bmc.pain_points || '').trim();
     const bmcJsonStr = escapeHtml(JSON.stringify(bmc, null, 2));
+    const industryInsightHtml = industryInsight ? renderBold(escapeHtml(industryInsight)).replace(/\n/g, '<br>') : '';
+    const painPointsHtml = painPoints ? renderBold(escapeHtml(painPoints)).replace(/\n/g, '<br>') : '';
     const bmcDetailContent = `
-      ${industryInsight ? `<div class="problem-detail-bmc-section" data-field="行业背景洞察"><span class="problem-detail-label">行业背景洞察</span><span class="problem-detail-value">${escapeHtml(industryInsight).replace(/\n/g, '<br>')}</span></div>` : ''}
+      ${industryInsight ? `<div class="problem-detail-bmc-section" data-field="行业背景洞察"><span class="problem-detail-label">行业背景洞察</span><span class="problem-detail-value">${industryInsightHtml}</span></div>` : ''}
       <div class="problem-detail-bmc-grid">${bmcRows}</div>
-      ${painPoints ? `<div class="problem-detail-bmc-section" data-field="业务痛点预判"><span class="problem-detail-label">业务痛点预判</span><span class="problem-detail-value">${escapeHtml(painPoints).replace(/\n/g, '<br>')}</span></div>` : ''}`;
+      ${painPoints ? `<div class="problem-detail-bmc-section" data-field="业务痛点预判"><span class="problem-detail-label">业务痛点预判</span><span class="problem-detail-value">${painPointsHtml}</span></div>` : ''}`;
     bmcCardHtml = `
   <div class="problem-detail-card problem-detail-card-bmc" data-task-id="task2">
     <div class="problem-detail-card-header" role="button" tabindex="0" aria-expanded="true">

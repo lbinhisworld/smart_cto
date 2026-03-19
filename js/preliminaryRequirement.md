@@ -154,7 +154,19 @@
 
 ---
 
-### 3.11 `buildPreliminaryPreContent(item)`
+### 3.11 `buildPreliminarySummaryJson(item)`
+
+**作用**：构建「总结提炼」专用 JSON（不含需求详情），供时间线「客户初步需求 json」内容块与 BMC 生成入参使用。开启商业画布加载任务时，推送到时间线的「客户初步需求 json」及调用 `generateBmcFromBasicInfo` 时传入的初步需求均使用本方法，与工作区初步需求卡片的「总结提炼」Tab 内容一致。
+
+**入参**：
+
+- `item: Object` — 当前问题项，可含 `preliminaryReq` 或顶层字段（含蛇形键兼容）。
+
+**返回**：仅含 `customerName`、`customerNeedsOrChallenges`、`customerItStatus`、`projectTimeRequirement`、`operationModel`、`businessStatus`、`urgencyAnalysis` 的对象。
+
+---
+
+### 3.12 `buildPreliminaryPreContent(item)`
 
 **作用**：构建「初步需求（整块）」的 preContent 对象，供意图修改时整块替换或上下文使用。
 
@@ -180,6 +192,7 @@
 
 - **首页解析**：`main.js` 的 `handleParseClick` 调用 `parseDigitalProblemInput(text)`，将结果与 `requirementDetail: text` 合并为 `lastParsedResult`，并调用 `renderParsePreview(parsed, el.parsePreviewContent, el.parsePreview, escapeHtml)` 更新预览。
 - **问题详情**：`renderProblemDetailContent` 中「初步需求」卡片使用双 Tab；总结提炼面板用 `buildPreliminaryCardRowsHtml(item, escapeHtml)` 生成行 HTML，历史详情面板用 `buildPreliminaryHistoryHtml(item, escapeHtml)` 生成时间线 HTML；渲染后调用 `setupPreliminaryHistoryItemToggle(container)` 绑定历史条目的展开/收起。
+- **商业画布加载（task2）**：开启任务时向时间线推送的「客户初步需求 json」及调用 `generateBmcFromBasicInfo` 时的初步需求入参，均使用 `buildPreliminarySummaryJson(item)`，与工作区「总结提炼」内容一致（不含需求详情）。
 - **意图修改**：`getCurrentContentAtModificationTarget` 中针对「初步需求」的字段定位使用 `PRELIMINARY_LABEL_TO_KEY` 与 `getByPath(item, preKey)`；整块 preContent 使用 `buildPreliminaryPreContent(item)` 序列化。
 
 提示词全文与约束见 `PROMPTS.md` §1（解析数字化问题输入 / 初步需求多维度提炼）。

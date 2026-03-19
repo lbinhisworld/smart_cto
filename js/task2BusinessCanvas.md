@@ -50,7 +50,7 @@
 **入参**：
 
 - `basicInfoJson: Object | string`：客户基本信息对象或已序列化的 JSON 字符串。
-- `preliminaryReqJson: Object`（可选）：客户初步需求汇总（customerName、customerNeedsOrChallenges、customerItStatus、projectTimeRequirement）。若提供且非空，user 内容为「【客户基础信息】+ 【初步需求】」两段 JSON；否则仅发送客户基础信息。
+- `preliminaryReqJson: Object`（可选）：客户初步需求汇总（含 customerName、customerNeedsOrChallenges、customerItStatus、projectTimeRequirement、operationModel、businessStatus、urgencyAnalysis、requirementDetail 等，见首页解析多维度提炼）。若提供且非空，user 内容为「【客户基础信息】+ 【初步需求】」两段 JSON；否则仅发送客户基础信息。
 
 **返回**（`Promise<Task2BmcLlmResult>`）：
 

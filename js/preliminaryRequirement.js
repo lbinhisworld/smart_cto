@@ -170,6 +170,12 @@
     return getPreliminaryCardLabels().filter(({ key }) => key !== 'requirementDetail');
   }
 
+  /** 将已转义文本中的 **...** 转为绿色加粗 HTML（供三卡片详情/总结 Tab 使用） */
+  function renderMarkdownBold(escapedText) {
+    if (typeof escapedText !== 'string') return '';
+    return escapedText.replace(/\*\*(.+?)\*\*/g, '<strong class="problem-detail-value-bold">$1</strong>');
+  }
+
   function buildPreliminaryCardRowsHtml(item, escapeHtml) {
     const esc = escapeHtml || ((s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
     const labels = getPreliminarySummaryCardLabels();
@@ -179,9 +185,29 @@
         const value =
           (raw != null && typeof raw !== 'object' ? String(raw).trim() : raw != null && typeof raw === 'object' ? JSON.stringify(raw, null, 2) : '') || '—';
         const rowClass = key === 'requirementDetail' ? ' problem-detail-row-requirement-detail' : '';
-        return `<div class="problem-detail-row${rowClass}" data-field="${esc(label)}"><span class="problem-detail-label">${esc(label)}</span><span class="problem-detail-value">${esc(value).replace(/\n/g, '<br>')}</span></div>`;
+        const valueHtml = renderMarkdownBold(esc(value)).replace(/\n/g, '<br>');
+        return `<div class="problem-detail-row${rowClass}" data-field="${esc(label)}"><span class="problem-detail-label">${esc(label)}</span><span class="problem-detail-value">${valueHtml}</span></div>`;
       })
       .join('');
+  }
+
+  /**
+   * 构建「总结提炼」专用 JSON，供时间线「客户初步需求 json」与 BMC 生成入参使用（不含需求详情）。
+   * @param {Object} item - 当前问题项，可含 preliminaryReq 或顶层字段（含 customer_name 等蛇形键）。
+   * @returns {Object} 仅含 customerName、customerNeedsOrChallenges、customerItStatus、projectTimeRequirement、operationModel、businessStatus、urgencyAnalysis。
+   */
+  function buildPreliminarySummaryJson(item) {
+    if (!item) return {};
+    const prelim = item.preliminaryReq || {};
+    return {
+      customerName: prelim.customerName ?? item.customerName ?? item.customer_name ?? '',
+      customerNeedsOrChallenges: prelim.customerNeedsOrChallenges ?? item.customerNeedsOrChallenges ?? item.customer_needs_or_challenges ?? '',
+      customerItStatus: prelim.customerItStatus ?? item.customerItStatus ?? item.customer_it_status ?? '',
+      projectTimeRequirement: prelim.projectTimeRequirement ?? item.projectTimeRequirement ?? item.project_time_requirement ?? '',
+      operationModel: prelim.operationModel ?? item.operationModel ?? undefined,
+      businessStatus: prelim.businessStatus ?? item.businessStatus ?? item.business_status ?? '',
+      urgencyAnalysis: prelim.urgencyAnalysis ?? item.urgencyAnalysis ?? item.urgency_analysis ?? undefined,
+    };
   }
 
   /**
@@ -243,7 +269,7 @@
         const ts = entry.timestamp || '';
         const content = (entry.content != null ? String(entry.content).trim() : '') || '—';
         const timeLabel = formatPreliminaryHistoryTime(ts);
-        const bodyContent = esc(content).replace(/\n/g, '<br>');
+        const bodyContent = renderMarkdownBold(esc(content)).replace(/\n/g, '<br>');
         const id = `prelim-history-${index}`;
         return `<div class="preliminary-history-item" data-index="${index}">
           <div class="preliminary-history-item-header" role="button" tabindex="0" aria-expanded="false" aria-controls="${id}" data-index="${index}">
@@ -264,5 +290,7 @@
   global.renderParsePreview = renderParsePreview;
   global.buildPreliminaryCardRowsHtml = buildPreliminaryCardRowsHtml;
   global.buildPreliminaryHistoryHtml = buildPreliminaryHistoryHtml;
+  global.buildPreliminarySummaryJson = buildPreliminarySummaryJson;
   global.buildPreliminaryPreContent = buildPreliminaryPreContent;
+  global.renderMarkdownBold = renderMarkdownBold;
 })(typeof window !== 'undefined' ? window : this);
